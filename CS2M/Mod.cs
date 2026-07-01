@@ -143,6 +143,11 @@ namespace CS2M
             // Pause the sim for everyone while a player is joining (+ chat notice).
             updateSystem.UpdateAt<JoinPauseSystem>(SystemUpdatePhase.Rendering);
 
+            // Continuous sim-speed sync (host-authoritative) so both PCs tick in lockstep count.
+            // Rendering phase so it runs (and can un-pause) even while the sim is paused.
+            updateSystem.UpdateAt<SpeedSyncSenderSystem>(SystemUpdatePhase.Rendering);
+            updateSystem.UpdateAt<SpeedSyncApplySystem>(SystemUpdatePhase.Rendering);
+
             // Headless self-test driver. Completely inert unless CS2M_AUTOPILOT is set, so the
             // normal build is unaffected. Runs at UIUpdate (same group as UISystem) so the client
             // half can auto-connect from the main menu; the host half auto-hosts + runs a scripted

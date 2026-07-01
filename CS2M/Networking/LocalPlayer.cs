@@ -276,6 +276,24 @@ namespace CS2M.Networking
             return true;
         }
 
+        /// <summary>
+        ///     On-demand resync: put an already-PLAYING client back into DOWNLOADING_MAP so it accepts a
+        ///     fresh world from the host (reuses the exact join download→load→playing flow). This is the
+        ///     safety net that reconciles any accumulated simulation drift (population, traffic, terrain).
+        /// </summary>
+        public void PrepareResync()
+        {
+            if (PlayerStatus != PlayerStatus.PLAYING)
+            {
+                return;
+            }
+
+            _packetStream = null;
+            PlayerStatus = PlayerStatus.DOWNLOADING_MAP;
+            _uiSystem.SetLoadProgress(0, 0);
+            Log.Info("[Resync] client ready to receive a fresh world from host");
+        }
+
         // INACTIVE -> PLAYING (Server)
         public bool Playing(ConnectionConfig connectionConfig)
         {

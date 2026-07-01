@@ -6,6 +6,7 @@ using CS2M.API.Commands;
 using CS2M.API.Networking;
 using CS2M.Commands;
 using CS2M.Commands.ApiServer;
+using CS2M.Commands.Data.Game;
 using CS2M.Commands.Data.Internal;
 using CS2M.Helpers;
 using LiteNetLib;
@@ -151,12 +152,16 @@ namespace CS2M.Networking
             Log.Debug($"RemotePlayer '{player.Username}' connected.");
             PlayerListConnected.Add(player);
             PlayerConnectedEvent?.Invoke(player);
+            SendWorldTo(player);
+        }
 
+        /// <summary>Serializes the current world and streams it to one client as WorldTransferCommand slices.</summary>
+        public void SendWorldTo(RemotePlayer player)
+        {
             // Get max packet size from MTU discovery
             int maxPacketSize = player.NetPeer.GetMaxSinglePacketSize(DeliveryMethod.ReliableOrdered);
             maxPacketSize -= 25; // Maximum packet overhead as computed and tested in `PacketSizeOverhead` unit test
 
-            // Send world
             TaskManager.instance.EnqueueTask("LoadMap", async () =>
             {
                 SaveLoadHelper saveLoadHelper =
@@ -186,6 +191,32 @@ namespace CS2M.Networking
 
                 Log.Debug($"[SaveGame] Save game packaging took {watch.ElapsedMilliseconds}ms");
             });
+        }
+
+        /// <summary>
+        ///     Host-only on-demand full resync: tell every client to prepare (back to DOWNLOADING_MAP)
+        ///     and re-stream the current world to each. Reuses the exact, tested join transfer path — the
+        ///     ResyncCommand is sent first (reliable-ordered), and the world slices arrive after the async
+        ///     SaveGame, so each client is ready when they land. Reconciles accumulated drift; costs a
+        ///     hitch proportional to city size, so it's a manual/occasional action ("/resync" in chat).
+        /// </summary>
+        public void ResyncAll()
+        {
+            if (Command.CurrentRole != MultiplayerRole.Server)
+            {
+                Log.Info("[Resync] ignored — only the host can trigger a resync");
+                return;
+            }
+
+            Log.Info($"[Resync] host re-syncing {PlayerListConnected.Count - 1} client(s)");
+            CommandInternal.Instance.SendToClients(new ResyncCommand());
+            foreach (Player p in PlayerListConnected)
+            {
+                if (p is RemotePlayer rp)
+                {
+                    SendWorldTo(rp);
+                }
+            }
         }
     }
 }

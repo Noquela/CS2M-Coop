@@ -84,6 +84,15 @@ namespace CS2M.UI
                 username = "Local";
             }
 
+            // Chat command: "/resync" makes the host re-stream the world to everyone (drift safety net).
+            if (LocalChatMessage.value != null && LocalChatMessage.value.Trim() == "/resync")
+            {
+                Networking.NetworkInterface.Instance.ResyncAll();
+                PrintChatMessage("CS2M", "Resync requested (host re-sending the world).");
+                LocalChatMessage.Update(string.Empty);
+                return;
+            }
+
             PrintChatMessage(username, LocalChatMessage.value);
 
             ChatMessageCommand message = new ChatMessageCommand()
