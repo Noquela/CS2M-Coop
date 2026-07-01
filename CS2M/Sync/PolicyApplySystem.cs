@@ -11,14 +11,11 @@ using Unity.Entities;
 namespace CS2M.Sync
 {
     /// <summary>
-    ///     Applies a remote city-policy toggle by raising a Modify event: a new entity with
+    ///     Applies a remote city-policy change by raising a Modify event: a new entity with
     ///     <c>Event</c> + <c>Modify(City, policyPrefab, active, adjustment)</c> — the same components the
-    ///     game's UI writes. Marks the echo first so our detector doesn't send it back.
-    ///
-    ///     STATUS (in-game selftest): the event is created but the game's policy consumer does not act on
-    ///     a mod-created event (the resulting Policy buffer flag doesn't change). Toggling likely needs
-    ///     the consumer system / additional component identified — tracked as a known gap. (Also, the
-    ///     empty test city only had an adjustable "fee" policy, which is a poor on/off test subject.)
+    ///     game's UI writes (the UI's own SetCityPolicy can't be reused here: it creates the event in the
+    ///     EndFrameBarrier's command buffer, which isn't allowed from the Modification5 phase). The
+    ///     game's <c>PolicyModifiedSystem</c> consumes the event and updates the Policy buffer + effects.
     /// </summary>
     public partial class PolicyApplySystem : GameSystemBase
     {
@@ -73,7 +70,7 @@ namespace CS2M.Sync
             EntityManager.AddComponent<Event>(e);
             EntityManager.AddComponentData(e, new Modify(city, policyEntity, cmd.Active, cmd.Adjustment));
 
-            CS2M.Log.Info($"[Policy] APPLIED name={cmd.PolicyName} active={cmd.Active}");
+            CS2M.Log.Info($"[Policy] APPLIED name={cmd.PolicyName} active={cmd.Active} adj={cmd.Adjustment}");
         }
     }
 }

@@ -89,7 +89,7 @@ namespace CS2M.Sync
         private Entity _upgradeEdge;
         private uint _upgradeExpectedLeft;
         private Entity _policyEntity;
-        private bool _policyExpectedActive;
+        private float _policyExpectedAdj = float.NaN;
         private float _speedBeforePause;
         private bool _forceRun = true; // keep the sim ticking (game auto-pauses when unfocused)
         private readonly List<string> _results = new List<string>();
@@ -664,7 +664,7 @@ namespace CS2M.Sync
         private void ActPolicy()
         {
             _policyEntity = Entity.Null;
-            _policyExpectedActive = false;
+            _policyExpectedAdj = float.NaN;
             if (!TryCity(out Entity city) || !EntityManager.HasBuffer<Game.Policies.Policy>(city))
             {
                 Result("policy", false, "no Policy buffer on City");
@@ -674,51 +674,43 @@ namespace CS2M.Sync
             DynamicBuffer<Game.Policies.Policy> buf = EntityManager.GetBuffer<Game.Policies.Policy>(city, true);
             if (buf.Length == 0) { Result("policy", false, "no unlocked policies in this (empty) city"); return; }
 
-            Entity target = Entity.Null;
-            bool newActive = true;
-            string name = null;
-            for (int i = 0; i < buf.Length; i++)
+            // Change the FIRST policy's adjustment to a distinct value (keeping it active). This proves
+            // whether the Modify event is actually consumed, regardless of on/off-vs-fee policy type.
+            if (!_prefabSystem.TryGetPrefab(buf[0].m_Policy, out PrefabBase pb) || pb == null)
             {
-                bool active = (buf[i].m_Flags & Game.Policies.PolicyFlags.Active) != 0;
-                if (!active && _prefabSystem.TryGetPrefab(buf[i].m_Policy, out PrefabBase pb) && pb != null)
-                {
-                    target = buf[i].m_Policy; newActive = true; name = pb.name; break;
-                }
+                Result("policy", false, "first policy prefab unresolved");
+                return;
             }
 
-            if (target == Entity.Null && _prefabSystem.TryGetPrefab(buf[0].m_Policy, out PrefabBase pb0) && pb0 != null)
+            _policyEntity = buf[0].m_Policy;
+            bool active = (buf[0].m_Flags & Game.Policies.PolicyFlags.Active) != 0;
+            float cur = buf[0].m_Adjustment;
+            _policyExpectedAdj = cur + 17f;
+            L($"[Auto] TEST policy INJECT name={pb.name} active={active} adj {cur}->{_policyExpectedAdj}");
+            RemotePolicyQueue.Enqueue(new PolicyCommand
             {
-                target = buf[0].m_Policy;
-                newActive = (buf[0].m_Flags & Game.Policies.PolicyFlags.Active) == 0;
-                name = pb0.name;
-            }
-
-            if (target == Entity.Null) { Result("policy", false, "no resolvable policy"); return; }
-
-            _policyEntity = target;
-            _policyExpectedActive = newActive;
-            string type = _prefabSystem.TryGetPrefab(target, out PrefabBase pbt) && pbt != null ? pbt.GetType().Name : "PolicyPrefab";
-            L($"[Auto] TEST policy INJECT name={name} active={newActive}");
-            RemotePolicyQueue.Enqueue(new PolicyCommand { PolicyType = type, PolicyName = name, Active = newActive, Adjustment = 0f });
+                PolicyType = pb.GetType().Name, PolicyName = pb.name, Active = active, Adjustment = _policyExpectedAdj,
+            });
         }
 
         private void VerifyPolicy()
         {
-            if (_policyEntity == Entity.Null) { return; }
+            if (_policyEntity == Entity.Null || float.IsNaN(_policyExpectedAdj)) { return; }
             if (!TryCity(out Entity city) || !EntityManager.HasBuffer<Game.Policies.Policy>(city)) { Result("policy", false, "no Policy buffer"); return; }
             DynamicBuffer<Game.Policies.Policy> buf = EntityManager.GetBuffer<Game.Policies.Policy>(city, true);
-            bool found = false, active = false;
+            bool found = false;
+            float adj = 0f;
             for (int i = 0; i < buf.Length; i++)
             {
                 if (buf[i].m_Policy == _policyEntity)
                 {
                     found = true;
-                    active = (buf[i].m_Flags & Game.Policies.PolicyFlags.Active) != 0;
+                    adj = buf[i].m_Adjustment;
                     break;
                 }
             }
 
-            Result("policy", found && active == _policyExpectedActive, $"found={found} active={active} expected={_policyExpectedActive}");
+            Result("policy", found && math.abs(adj - _policyExpectedAdj) < 0.5f, $"found={found} adj={adj} expected={_policyExpectedAdj}");
         }
 
         private void ActNetDelete()

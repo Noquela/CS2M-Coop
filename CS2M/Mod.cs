@@ -97,8 +97,10 @@ namespace CS2M
             updateSystem.UpdateAt<TaxApplySystem>(SystemUpdatePhase.Modification5);
 
             // City-policy sync (toggle a policy -> raise the same Modify event on the other PCs).
+            // Apply runs at Modification3 — BEFORE Game.Policies.ModifiedSystem (Modification4) which
+            // consumes the Event+Modify entity — so the toggle is processed the same frame.
             updateSystem.UpdateBefore<PolicyDetectorSystem>(SystemUpdatePhase.ModificationEnd);
-            updateSystem.UpdateAt<PolicyApplySystem>(SystemUpdatePhase.Modification5);
+            updateSystem.UpdateAt<PolicyApplySystem>(SystemUpdatePhase.Modification3);
 
             // Service-budget sync (funding sliders — SetServiceBudget by service prefab name).
             updateSystem.UpdateBefore<BudgetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
