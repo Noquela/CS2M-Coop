@@ -31,6 +31,7 @@ unfocused). Results from the last run (`simSpeed=3`, real city):
 | Net delete (bulldoze, by endpoint pos) | ✅ PASS | edges 483→482; `[NetEdit] APPLIED delete` |
 | Net upgrade (sidewalks/trees, by pos) | ✅ PASS | `Upgraded.m_Flags.m_Left` 0→0x1000 (trees) applied+verified |
 | Tax rates | ✅ PASS | main tax 10→13 applied+verified |
+| Service budgets (funding sliders) | ✅ PASS | Roads funding 100→90 via `SetServiceBudget`, verified |
 | City policies | 🔶 partial | apply raises the Modify event but the game's consumer doesn't act on a mod-created event (buffer flag unchanged) — needs the consumer system identified; detector (buffer diff) is ready |
 | Pause‑on‑join | ✅ PASS | `selectedSpeed`→0 + `[Join] PAUSED` |
 | Resume‑on‑join | 🟡 works | `[Join] RESUMED speed=1`; read‑back shows 0 only because the game auto‑pauses while unfocused (headless artifact) |

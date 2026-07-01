@@ -100,6 +100,10 @@ namespace CS2M
             updateSystem.UpdateBefore<PolicyDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<PolicyApplySystem>(SystemUpdatePhase.Modification5);
 
+            // Service-budget sync (funding sliders — SetServiceBudget by service prefab name).
+            updateSystem.UpdateBefore<BudgetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<BudgetApplySystem>(SystemUpdatePhase.Modification5);
+
             // Delete/move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);

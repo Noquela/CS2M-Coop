@@ -54,6 +54,7 @@ namespace CS2M.Sync
         private SimulationSystem _sim;
         private CS2M_SyncIdSystem _idSystem;
         private TaxSystem _taxSystem;
+        private CityServiceBudgetSystem _budgetSystem;
 
         private EntityQuery _treeQuery;
         private EntityQuery _buildingQuery;
@@ -76,6 +77,8 @@ namespace CS2M.Sync
         private bool _moneyUnlimited;
         private int _xpExpected;
         private int _taxExpectedMain = int.MinValue;
+        private Entity _budgetService;
+        private int _budgetExpected = int.MinValue;
         private float3 _movePosExpected;
         private Entity _zoneBlock;
         private ushort _zoneExpectedIndex;
@@ -138,6 +141,7 @@ namespace CS2M.Sync
             _sim = World.GetOrCreateSystemManaged<SimulationSystem>();
             _idSystem = World.GetOrCreateSystemManaged<CS2M_SyncIdSystem>();
             _taxSystem = World.GetOrCreateSystemManaged<TaxSystem>();
+            _budgetSystem = World.GetOrCreateSystemManaged<CityServiceBudgetSystem>();
 
             _treeQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -298,7 +302,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 14) { return; }
+            if (_testStep > 15) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -315,10 +319,11 @@ namespace CS2M.Sync
                 case 8: VerifyNetDelete(); ActNetUpgrade(); break;
                 case 9: VerifyNetUpgrade(); ActDelete(); break;
                 case 10: VerifyDelete(); ActTax(); break;
-                case 11: VerifyTax(); ActPolicy(); break;
-                case 12: VerifyPolicy(); ActPause(); break;
-                case 13: VerifyPause(); ActResume(); break;
-                case 14: VerifyResume(); Summary(); break;
+                case 11: VerifyTax(); ActBudget(); break;
+                case 12: VerifyBudget(); ActPolicy(); break;
+                case 13: VerifyPolicy(); ActPause(); break;
+                case 14: VerifyPause(); ActResume(); break;
+                case 15: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -576,6 +581,40 @@ namespace CS2M.Sync
             bool gone = !_idSystem.TryResolve(_treeSyncId, out Entity e) || !EntityManager.Exists(e)
                         || EntityManager.HasComponent<Deleted>(e);
             Result("delete", gone, gone ? "tree removed" : "tree still present");
+        }
+
+        private void ActBudget()
+        {
+            _budgetService = Entity.Null;
+            _budgetExpected = int.MinValue;
+            EntityQuery q = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.ServiceData>());
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    Game.Prefabs.ServiceData sd = EntityManager.GetComponentData<Game.Prefabs.ServiceData>(e);
+                    if (!sd.m_BudgetAdjustable) { continue; }
+                    if (!_prefabSystem.TryGetPrefab(e, out PrefabBase pb) || pb == null) { continue; }
+                    int cur = _budgetSystem.GetServiceBudget(e);
+                    int target = cur >= 100 ? cur - 10 : cur + 10; // nudge the funding %
+                    _budgetService = e;
+                    _budgetExpected = target;
+                    L($"[Auto] TEST budget INJECT name={pb.name} {cur}->{target}");
+                    RemoteBudgetQueue.Enqueue(new BudgetCommand { ServiceType = pb.GetType().Name, ServiceName = pb.name, Percentage = target });
+                    return;
+                }
+
+                Result("budget", false, "no adjustable service found");
+            }
+            finally { ents.Dispose(); }
+        }
+
+        private void VerifyBudget()
+        {
+            if (_budgetExpected == int.MinValue) { return; }
+            int got = _budgetSystem.GetServiceBudget(_budgetService);
+            Result("budget", got == _budgetExpected, $"pct={got} expected={_budgetExpected}");
         }
 
         private void ActNetUpgrade()
