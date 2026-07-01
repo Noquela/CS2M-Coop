@@ -94,6 +94,14 @@ namespace CS2M
             // Net sync (roads/rails/pipes/power/fences — one pipeline).
             updateSystem.UpdateBefore<NetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<NetPlaceApplySystem>(SystemUpdatePhase.Modification5);
+
+            // Progression sync (host broadcasts XP; clients advance milestones from it).
+            updateSystem.UpdateBefore<ProgressionSenderSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<ProgressionApplySystem>(SystemUpdatePhase.Modification5);
+
+            // Zoning sync (paint/dezone by ZonePrefab id over a world rect).
+            updateSystem.UpdateBefore<ZoneDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<ZonePaintApplySystem>(SystemUpdatePhase.Modification5);
             Log.Info("Loading complete");
         }
 
