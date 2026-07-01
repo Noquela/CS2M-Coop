@@ -1,0 +1,9 @@
+<Project>
+  <!--
+    Presence of this file disables ILRepack.Lib.MSBuild.Task's automatic "ILRepack"
+    target (it runs only when this file does NOT exist). We drive the merge
+    ourselves via the "ILRepacker" target so we can control exactly which
+    assemblies are merged (the auto target merges every *.dll in the output and
+    hits duplicate-type conflicts, e.g. AsyncMethodBuilderAttribute).
+  -->
+</Project>

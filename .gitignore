@@ -1,0 +1,14 @@
+bin/
+obj/
+/packages/
+riderModule.iml
+/_ReSharper.Caches/
+**/node_modules/
+.envrc
+.vs/
+assemblies/*.dll
+
+CS2M/Library
+*.sln.DotSettings.user
+*csproj.user
+*.drawio.bkp

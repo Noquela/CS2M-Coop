@@ -1,0 +1,29 @@
+<Project>
+  <!--
+    Local build overrides (NOT part of upstream CS2M).
+    Skips steps that require a fully Unity-restored modding toolchain, which is
+    not present on this machine. CS2M defines no new ECS components and uses no
+    Burst, so the Entities/Burst IL post-processing is effectively a no-op.
+    Deploy is done manually so we never clobber a known-good install by accident.
+  -->
+  <Target Name="RunModPostProcessor" />
+  <Target Name="ModPostProcessorConfig" />
+  <Target Name="BuildUI" />
+  <Target Name="DeployWIP" />
+
+  <!--
+    Override ILRepack to only merge assemblies that actually exist in the output.
+    The upstream PackAssemblies list includes .NET Framework facades
+    (System.Reflection.Emit.*, etc.) that are provided by the game's runtime on
+    net48 and are not emitted to the output folder, which makes the stock target
+    fail with "Unable to resolve assembly".
+  -->
+  <Target Name="ILRepacker" AfterTargets="Build" Condition="'$(MSBuildProjectName)' == 'CS2M'">
+    <ItemGroup>
+      <InputAssemblies Include="$(OutputPath)\CS2M.dll" />
+      <InputAssemblies Include="@(PackAssemblies)" Condition="Exists('%(Identity)')" />
+    </ItemGroup>
+    <Message Text="ILRepack merging: @(InputAssemblies)" Importance="normal" />
+    <ILRepack Parallel="true" Internalize="true" Union="true" InputAssemblies="@(InputAssemblies)" LibraryPath="$(AssemblySearchPaths)" TargetKind="Dll" OutputFile="$(OutputPath)\$(AssemblyName).dll" />
+  </Target>
+</Project>

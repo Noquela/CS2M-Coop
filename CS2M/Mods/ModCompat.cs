@@ -1,0 +1,115 @@
+using System.Collections.Generic;
+using System.Linq;
+using Colossal.UI.Binding;
+using Colossal.PSI.Common;
+using Game.Modding;
+using Game.SceneFlow;
+
+namespace CS2M.Mods
+{
+    public enum ModSupportType
+    {
+        Unknown,
+        Unsupported,
+        Supported,
+        KnownWorking,
+    }
+
+    public readonly struct ModSupportStatus : IJsonWritable
+    {
+        public ModSupportStatus(string name, ModSupportType type, bool clientSide)
+        {
+            Name = name;
+            DlcId = DlcId.Invalid;
+            Type = type;
+            ClientSide = clientSide;
+        }
+
+        public ModSupportStatus(string name, DlcId dlcId, ModSupportType type, bool clientSide)
+        {
+            Name = name;
+            DlcId = dlcId;
+            Type = type;
+            ClientSide = clientSide;
+        }
+
+        public string Name { get; }
+        public DlcId DlcId { get; }
+        public ModSupportType Type { get; }
+        public bool ClientSide { get; }
+
+        public void Write(IJsonWriter writer)
+        {
+            writer.TypeBegin(this.GetType().FullName);
+            writer.PropertyName("name");
+            writer.Write(this.Name);
+            writer.PropertyName("support");
+            writer.Write(this.Type.ToString());
+            writer.PropertyName("client_side");
+            writer.Write(this.ClientSide);
+            writer.TypeEnd();
+        }
+    }
+
+    public static class ModCompat
+    {
+        private static readonly string[] ClientSideMods = { "I18NEverywhere.I18NEverywhere" };
+        private static readonly string[] IgnoredMods = { };
+
+        private static readonly string[] KnownToWork = { };
+        private static readonly string[] UnsupportedMods = { };
+
+        public static IEnumerable<ModSupportStatus> GetModSupport()
+        {
+            foreach (ModManager.ModInfo info in GameManager.instance.modManager)
+            {
+                // Skip disabled mods
+                if (!info.isLoaded)
+                    continue;
+
+                foreach (IMod modInstance in info.instances)
+                {
+                    // Skip CSM itself
+                    if (modInstance?.GetType() == typeof(Mod))
+                        continue;
+
+                    string modInstanceName = modInstance?.GetType().ToString();
+
+                    // Skip ignored mods
+                    if (IgnoredMods.Contains(modInstanceName))
+                        continue;
+
+                    bool isClientSide = ClientSideMods.Contains(modInstanceName);
+
+                    // Mods known to work
+                    if (KnownToWork.Contains(modInstanceName))
+                    {
+                        yield return new ModSupportStatus(info.asset.name, ModSupportType.KnownWorking,
+                            isClientSide);
+                        continue;
+                    }
+
+                    // Mods with loaded multiplayer support
+                    if (ModSupport.Instance.ConnectedMods.Select(mod => mod.ModClass)
+                        .Contains(modInstance?.GetType()))
+                    {
+                        yield return new ModSupportStatus(info.asset.name, ModSupportType.Supported,
+                            isClientSide);
+                        continue;
+                    }
+
+                    // Decide between unsupported and unknown
+                    if (UnsupportedMods.Contains(modInstanceName))
+                    {
+                        yield return new ModSupportStatus(info.asset.name, ModSupportType.Unsupported,
+                            isClientSide);
+                        continue;
+                    }
+
+                    yield return new ModSupportStatus(info.asset.name, ModSupportType.Unknown,
+                        isClientSide);
+                }
+            }
+        }
+    }
+}
