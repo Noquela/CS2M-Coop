@@ -30,19 +30,15 @@ unfocused). Results from the last run (`simSpeed=3`, real city):
 | Delete (by SyncId) | ✅ PASS | tree removed, count 2→1 |
 | Pause‑on‑join | ✅ PASS | `selectedSpeed`→0 + `[Join] PAUSED` |
 | Resume‑on‑join | 🟡 works | `[Join] RESUMED speed=1`; read‑back shows 0 only because the game auto‑pauses while unfocused (headless artifact) |
-| **Nets (roads/rails/pipes)** | ❌ **BROKEN** | see below |
+| **Nets (roads/rails/pipes/power/fences)** | ✅ **PASS** | `totalEdges` 482→483; `[Net] APPLIED edge=… startNode=… endNode=…` |
 
-**Net bug (diagnosed, not yet fixed).** The apply now runs without the earlier `CreateCommandBuffer`
-crash (switched to a direct `EntityManager` structural change) and logs `[Net] INJECT … len=… ` with the
-correct `CreationFlags.Permanent|SubElevation` (=65537) and the sim running — but **no `Edge` is ever
-generated** (`totalEdges` unchanged). Root cause: the game builds nets from `CreationDefinition`+
-`NetCourse` **definition** entities that the net tool creates in the **`ToolOutputBarrier`** as transient
-`Temp` previews and destroys/recreates every frame (`NetToolSystem.DestroyDefinitions`); the
-definition→edge consumer lives in that tool/definition flow, not the plain modification phases, so a
-mod‑injected def at Modification5 is never consumed. **Next step (v2):** reproduce the tool flow —
-create the def in `ToolOutputBarrier`'s command buffer from a system scheduled in the tool update group,
-matching the tool's exact component/flag set (`CoursePosFlags.IsFirst/IsLast`, no stray `IsLeft|IsRight`),
-or drive `NetToolSystem` directly.
+**Net fix (v22).** The definition path (`CreationDefinition`+`NetCourse`) never generated an edge when
+injected outside the net tool's `ToolOutputBarrier`/`Temp` flow. Switched to **direct archetype
+instantiation** — the same "Option B" that works for objects: read the net prefab's `NetData`
+(`m_NodeArchetype`, `m_EdgeArchetype`), create two `Node` endpoints + one `Edge` with `Curve`+`PrefabRef`+
+`PseudoRandomSeed`+`Created`/`Updated`, and the game's own net geometry/lane systems build the real
+segment. Validated in‑game: the edge count increases and `[Net] APPLIED` logs the created edge/nodes.
+(Cross‑PC snapping onto existing nodes and net delete/move remain v2.)
 
 **Confirmed gaps (by design — not synced today).** Live **population, citizens, vehicles, traffic and the
 economy tick** are emergent simulation state and are NOT synchronized; the mod syncs *player actions*

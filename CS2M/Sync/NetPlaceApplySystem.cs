@@ -6,31 +6,33 @@ using Game;
 using Game.Common;
 using Game.Net;
 using Game.Prefabs;
-using Game.Tools;
 using Unity.Entities;
 using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
     /// <summary>
-    ///     Materializes nets placed by remote players. Rebuilds the exact <c>Bezier4x3</c> from the
-    ///     command, wraps it in a <c>NetCourse</c> + <c>CreationDefinition(Permanent|SubElevation)</c>,
-    ///     and injects it into <c>ModificationBarrier1</c>'s command buffer — the standing
-    ///     <c>GenerateNodesSystem</c>/<c>GenerateEdgesSystem</c> build the real nodes/edges/lanes from
-    ///     it (works for roads, rails, pipes, power, fences — one pipeline). Coincident endpoints
-    ///     auto-merge, so simple connected networks stitch up without cross-PC node references (v1).
+    ///     Materializes nets placed by remote players.
+    ///
+    ///     v2 approach ("Option B" — direct archetype instantiation, same as the object apply): the
+    ///     definition path (CreationDefinition + NetCourse) never generated an edge when injected outside
+    ///     the net tool's ToolOutputBarrier/Temp flow. So instead we build the real entities ourselves
+    ///     from the net prefab's baked archetypes: <c>NetData.m_NodeArchetype</c> for the two endpoints
+    ///     and <c>NetData.m_EdgeArchetype</c> for the segment. We set the same components a placed net
+    ///     carries — <c>Node</c>(pos/rot), <c>Edge</c>(start/end), <c>Curve</c>(bezier), <c>PrefabRef</c>,
+    ///     <c>PseudoRandomSeed</c> — plus <c>Created</c>/<c>Updated</c>, and the game's own net geometry/
+    ///     lane/aggregate systems build the road/rail/pipe/power/fence from there. Fully synchronous, no
+    ///     barrier timing, no Temp. Coincident endpoints still auto-merge via the game's node systems.
     /// </summary>
     public partial class NetPlaceApplySystem : GameSystemBase
     {
-        private ModificationBarrier1 _barrier;
         private PrefabSystem _prefabSystem;
 
         protected override void OnCreate()
         {
             base.OnCreate();
-            _barrier = World.GetOrCreateSystemManaged<ModificationBarrier1>();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
-            CS2M.Log.Info("[Net] NetPlaceApplySystem created");
+            CS2M.Log.Info("[Net] NetPlaceApplySystem created (direct-archetype mode)");
         }
 
         protected override void OnUpdate()
@@ -63,63 +65,101 @@ namespace CS2M.Sync
                 return;
             }
 
+            if (!EntityManager.HasComponent<NetData>(netPrefab))
+            {
+                CS2M.Log.Info($"[Net] APPLY-FAIL prefab {cmd.PrefabName} has no NetData (not a net?)");
+                return;
+            }
+
+            NetData netData = EntityManager.GetComponentData<NetData>(netPrefab);
+            if (!netData.m_NodeArchetype.Valid || !netData.m_EdgeArchetype.Valid)
+            {
+                CS2M.Log.Info($"[Net] APPLY-FAIL prefab {cmd.PrefabName} node/edge archetype invalid");
+                return;
+            }
+
             var bezier = new Bezier4x3(
                 new float3(cmd.Ax, cmd.Ay, cmd.Az),
                 new float3(cmd.Bx, cmd.By, cmd.Bz),
                 new float3(cmd.Cx, cmd.Cy, cmd.Cz),
                 new float3(cmd.Dx, cmd.Dy, cmd.Dz));
+            float length = MathUtils.Length(bezier);
 
             // Mark the echo hash BEFORE the edge exists so our detector skips it when it appears.
             int segHash = RemoteNetEcho.SegHash(bezier.a, bezier.d, cmd.PrefabName);
             RemoteNetEcho.Mark(segHash);
 
-            var startElev = new float2(cmd.StartElevX, cmd.StartElevY);
-            var endElev = new float2(cmd.EndElevX, cmd.EndElevY);
+            // Two endpoint nodes from the prefab's node archetype.
+            Entity startNode = CreateNode(netData.m_NodeArchetype, netPrefab, bezier.a,
+                MathUtils.Tangent(bezier, 0f), cmd.RandomSeed);
+            Entity endNode = CreateNode(netData.m_NodeArchetype, netPrefab, bezier.d,
+                MathUtils.Tangent(bezier, 1f), cmd.RandomSeed);
 
-            NetCourse course = default;
-            course.m_Curve = bezier;
-            course.m_StartPosition = MakeCoursePos(bezier.a, MathUtils.Tangent(bezier, 0f), startElev, 0f,
-                CoursePosFlags.IsFirst);
-            course.m_EndPosition = MakeCoursePos(bezier.d, MathUtils.Tangent(bezier, 1f), endElev, 1f,
-                CoursePosFlags.IsLast);
-            course.m_Elevation = (startElev + endElev) * 0.5f;
-            course.m_Length = MathUtils.Length(bezier);
-            course.m_FixedIndex = -1;
-
-            CreationDefinition cd = default;
-            cd.m_Prefab = netPrefab;
-            cd.m_RandomSeed = cmd.RandomSeed;
-            cd.m_Flags = CreationFlags.Permanent | CreationFlags.SubElevation;
-
-            // Create the definition entity directly on the main thread (same approach as the object
-            // apply). We're at Modification5, PAST ModificationBarrier1, so its command buffer is
-            // closed ("Trying to create EntityCommandBuffer when it's not allowed!"); a structural
-            // change via EntityManager is fine here. The game's net-generation systems pick up the
-            // Updated CreationDefinition+NetCourse next modification pass and build the real edges.
-            Entity def = EntityManager.CreateEntity();
-            EntityManager.AddComponentData(def, cd);
-            EntityManager.AddComponentData(def, course);
-            EntityManager.AddComponent<Updated>(def);
-            EntityManager.AddComponent<CS2M_RemotePlaced>(def);
+            // The edge itself from the prefab's edge archetype.
+            Entity edge = EntityManager.CreateEntity();
+            EntityManager.SetArchetype(edge, netData.m_EdgeArchetype);
+            SetOrAdd(edge, new Edge { m_Start = startNode, m_End = endNode });
+            SetOrAdd(edge, new Curve { m_Bezier = bezier, m_Length = length });
+            SetOrAdd(edge, new PrefabRef(netPrefab));
+            SetSeed(edge, cmd.RandomSeed);
+            EntityManager.AddComponent<CS2M_RemotePlaced>(edge);
+            EnsureCreatedUpdated(edge);
 
             CS2M.Log.Info(
-                $"[Net] INJECT name={cmd.PrefabName} prefabEntity={netPrefab.Index} len={course.m_Length:F1} " +
-                $"segHash={segHash} seed={cmd.RandomSeed} start=({bezier.a.x:F1},{bezier.a.y:F1},{bezier.a.z:F1}) " +
+                $"[Net] APPLIED name={cmd.PrefabName} edge={edge.Index} startNode={startNode.Index} " +
+                $"endNode={endNode.Index} len={length:F1} segHash={segHash} " +
+                $"start=({bezier.a.x:F1},{bezier.a.y:F1},{bezier.a.z:F1}) " +
                 $"end=({bezier.d.x:F1},{bezier.d.y:F1},{bezier.d.z:F1})");
         }
 
-        private static CoursePos MakeCoursePos(float3 pos, float3 tangent, float2 elevation, float delta,
-            CoursePosFlags endFlag)
+        private Entity CreateNode(EntityArchetype archetype, Entity netPrefab, float3 pos, float3 tangent,
+            int seed)
         {
-            CoursePos p = default;
-            p.m_Entity = Entity.Null;      // v1: no cross-PC snapping; coincident ends auto-merge
-            p.m_Position = pos;
-            p.m_Rotation = NetUtils.GetNodeRotation(tangent);
-            p.m_Elevation = elevation;
-            p.m_CourseDelta = delta;
-            p.m_ParentMesh = -1;
-            p.m_Flags = endFlag | CoursePosFlags.IsLeft | CoursePosFlags.IsRight;
-            return p;
+            Entity node = EntityManager.CreateEntity();
+            EntityManager.SetArchetype(node, archetype);
+            SetOrAdd(node, new Node { m_Position = pos, m_Rotation = NetUtils.GetNodeRotation(tangent) });
+            SetOrAdd(node, new PrefabRef(netPrefab));
+            SetSeed(node, seed);
+            EntityManager.AddComponent<CS2M_RemotePlaced>(node);
+            EnsureCreatedUpdated(node);
+            return node;
+        }
+
+        private void SetSeed(Entity e, int seed)
+        {
+            if (EntityManager.HasComponent<PseudoRandomSeed>(e))
+            {
+                EntityManager.SetComponentData(e, new PseudoRandomSeed((ushort) seed));
+            }
+            else
+            {
+                EntityManager.AddComponentData(e, new PseudoRandomSeed((ushort) seed));
+            }
+        }
+
+        private void EnsureCreatedUpdated(Entity e)
+        {
+            if (!EntityManager.HasComponent<Created>(e))
+            {
+                EntityManager.AddComponent<Created>(e);
+            }
+
+            if (!EntityManager.HasComponent<Updated>(e))
+            {
+                EntityManager.AddComponent<Updated>(e);
+            }
+        }
+
+        private void SetOrAdd<T>(Entity e, T data) where T : unmanaged, IComponentData
+        {
+            if (EntityManager.HasComponent<T>(e))
+            {
+                EntityManager.SetComponentData(e, data);
+            }
+            else
+            {
+                EntityManager.AddComponentData(e, data);
+            }
         }
     }
 }
