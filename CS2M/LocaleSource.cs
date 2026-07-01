@@ -1,0 +1,78 @@
+using System.Collections.Generic;
+using Colossal;
+
+namespace CS2M
+{
+    /// <summary>
+    ///     Provides CS2M's UI strings from C# so they don't depend on being bundled into the built
+    ///     .mjs. The original mod embedded the dictionary in its UI bundle; our rebuilt bundle doesn't,
+    ///     which left the connect menus with blank labels. Registering this source for every supported
+    ///     locale (in <c>Mod.OnLoad</c>) makes the labels resolve regardless of game language and lets
+    ///     us rebuild the UI freely (e.g. to add the cursor name labels).
+    /// </summary>
+    public class LocaleSource : IDictionarySource
+    {
+        private static readonly Dictionary<string, string> Entries = new Dictionary<string, string>
+        {
+            { "Options.SECTION[CS2M.CS2M.Mod]", "CS2M" },
+            { "Options.TAB[CS2M.CS2M.Mod.CS2M]", "CS2M" },
+            { "Options.GROUP[CS2M.CS2M.Mod.GeneralSettings]", "General Settings" },
+            { "Options.GROUP[CS2M.CS2M.Mod.AdvancedSettings]", "Advanced Settings" },
+            { "Options.OPTION[CS2M.CS2M.Mod.ModSettings.LoggingLevel]", "Logging Level" },
+            { "Options.OPTION[CS2M.CS2M.Mod.ModSettings.ApiServer]", "API Server" },
+            { "Options.OPTION[CS2M.CS2M.Mod.ModSettings.ApiServerPort]", "API Server Port" },
+            { "Options.OPTION_DESCRIPTION[CS2M.CS2M.Mod.ModSettings.LoggingLevel]", "Set the logging level of the CS2M mod. Note that levels Trace or Debug may impair performance." },
+            { "Options.OPTION_DESCRIPTION[CS2M.CS2M.Mod.ModSettings.ApiServer]", "" },
+            { "Options.OPTION_DESCRIPTION[CS2M.CS2M.Mod.ModSettings.ApiServerPort]", "" },
+            { "CS2M.UI.Multiplayer", "Multiplayer" },
+            { "CS2M.UI.IPAddress", "IP Address" },
+            { "CS2M.UI.Port", "Port" },
+            { "CS2M.UI.Username", "Username" },
+            { "CS2M.UI.Compatibility", "Compatibility Info" },
+            { "CS2M.UI.ClientSide", "Client Side" },
+            { "CS2M.UI.Compatibility[Unknown]", "Unknown" },
+            { "CS2M.UI.Compatibility[Unsupported]", "Unsupported" },
+            { "CS2M.UI.Compatibility[Supported]", "Supported" },
+            { "CS2M.UI.Compatibility[KnownWorking]", "Should work" },
+            { "CS2M.UI.JoinStatus[GET_SERVER_INFO]", "Finding server..." },
+            { "CS2M.UI.JoinStatus[NAT_CONNECT]", "Connecting..." },
+            { "CS2M.UI.JoinStatus[DIRECT_CONNECT]", "Connecting..." },
+            { "CS2M.UI.JoinStatus[DOWNLOADING_MAP]", "Downloading map..." },
+            { "CS2M.UI.JoinStatus[LOADING_MAP]", "Loading map..." },
+            { "CS2M.UI.StartingServer", "Starting server..." },
+            { "CS2M.UI.JoinGame", "Join game" },
+            { "CS2M.UI.StartServer", "Start server" },
+            { "CS2M.UI.StopServer", "Stop server" },
+            { "CS2M.UI.HostGame", "Host game" },
+            { "CS2M.UI.ChatPanel.Header", "Chat" },
+            { "CS2M.UI.ChatPanel.ChatMessageInput", "Enter message..." },
+            { "CS2M.UI.ChatPanel.SendMessage", "Send" },
+            { "CS2M.UI.JoinError.Intro", "The following errors occured while trying to connect to the server:" },
+            { "CS2M.UI.JoinError.ClientFailed", "The client failed to start" },
+            { "CS2M.UI.JoinError.InvalidIP", "Invalid server IP" },
+            { "CS2M.UI.JoinError.FailedToConnect", "Failed to connect" },
+            { "CS2M.UI.JoinError.DownloadFailed", "Failed to download the save game" },
+            { "CS2M.UI.JoinError.GAME_VERSION_MISMATCH", "Game versions do not match! Server has {SERVER}, you have {CLIENT}" },
+            { "CS2M.UI.JoinError.MOD_VERSION_MISMATCH", "CS2M mod versions do not match! Server has {SERVER}, you have {CLIENT}" },
+            { "CS2M.UI.JoinError.USERNAME_NOT_AVAILABLE", "Your username is already in use!" },
+            { "CS2M.UI.JoinError.PASSWORD_INCORRECT", "The password is not correct!" },
+            { "CS2M.UI.JoinError.DLCS_MISMATCH", "Your DLCs don't match!" },
+            { "CS2M.UI.JoinError.DLCS_MISMATCH.server", "You are missing the following DLCs: {SERVER}." },
+            { "CS2M.UI.JoinError.DLCS_MISMATCH.client", "The server is missing the following DLCs: {CLIENT}." },
+            { "CS2M.UI.JoinError.MODS_MISMATCH", "Your mods don't match!" },
+            { "CS2M.UI.JoinError.MODS_MISMATCH.server", "You are missing the following mods: {SERVER}." },
+            { "CS2M.UI.JoinError.MODS_MISMATCH.client", "The server is missing the following mods: {CLIENT}." },
+            { "CS2M.NetworkManager.ServerStarted", "Server started" },
+        };
+
+        public IEnumerable<KeyValuePair<string, string>> ReadEntries(IList<IDictionaryEntryError> errors,
+            Dictionary<string, int> indexCounts)
+        {
+            return Entries;
+        }
+
+        public void Unload()
+        {
+        }
+    }
+}

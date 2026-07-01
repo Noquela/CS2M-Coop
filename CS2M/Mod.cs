@@ -56,6 +56,12 @@ namespace CS2M
             Settings.OnSetLoggingLevel(Settings.LoggingLevel);
             Log.Info("Configured and initialised mod settings");
 
+            // Register CS2M UI strings from C# for every supported locale, so the connect menus
+            // keep their labels regardless of game language or how the .mjs was built. (The original
+            // mod embedded these in its UI bundle; rebuilding the bundle dropped them.) Re-registers
+            // if the locale list grows after load, and dedups so a source is only added once/locale.
+            RegisterLocalization();
+
             CommandInternal.Instance = new CommandInternal();
             ApiCommand.Instance = new ApiCommand();
 
@@ -103,6 +109,48 @@ namespace CS2M
             updateSystem.UpdateBefore<ZoneDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<ZonePaintApplySystem>(SystemUpdatePhase.Modification5);
             Log.Info("Loading complete");
+        }
+
+        private static readonly LocaleSource LocaleSourceInstance = new LocaleSource();
+        private static readonly System.Collections.Generic.HashSet<string> AddedLocales =
+            new System.Collections.Generic.HashSet<string>();
+        private bool _localeHooked;
+
+        private void RegisterLocalization()
+        {
+            try
+            {
+                Colossal.Localization.LocalizationManager loc =
+                    Game.SceneFlow.GameManager.instance.localizationManager;
+                AddLocaleSources(loc);
+                if (!_localeHooked)
+                {
+                    _localeHooked = true;
+                    loc.onSupportedLocalesChanged += () => AddLocaleSources(loc);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Info($"[Loc] failed to register localization: {e.Message}");
+            }
+        }
+
+        private static void AddLocaleSources(Colossal.Localization.LocalizationManager loc)
+        {
+            int added = 0;
+            foreach (string locale in loc.GetSupportedLocales())
+            {
+                if (AddedLocales.Add(locale))
+                {
+                    loc.AddSource(locale, LocaleSourceInstance);
+                    added++;
+                }
+            }
+
+            if (added > 0)
+            {
+                Log.Info($"[Loc] registered CS2M UI localization for {added} new locale(s)");
+            }
         }
 
         public void OnDispose()
