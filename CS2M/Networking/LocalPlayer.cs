@@ -338,6 +338,7 @@ namespace CS2M.Networking
             Sync.RemoteProgressionQueue.Clear();
             Sync.RemoteZoneQueue.Clear();
             Sync.ZoneSync.Clear();
+            Sync.RemoteJoinState.Clear();
 
             PlayerStatus = PlayerStatus.INACTIVE;
             PlayerType = PlayerType.NONE;
@@ -423,6 +424,20 @@ namespace CS2M.Networking
         public void PlayerStatusChanged(PlayerStatus oldPlayerStatus, PlayerStatus newPlayerStatus)
         {
             Log.Debug($"LocalPlayer: changed player status from {oldPlayerStatus} to {newPlayerStatus}");
+
+            // While WE join, ask everyone already in-game to pause + show a notice; resume when done.
+            if (newPlayerStatus == PlayerStatus.WAITING_TO_JOIN)
+            {
+                API.Commands.Command.SendToAll?.Invoke(
+                    new Commands.Data.Game.JoinNoticeCommand { Username = Username, Joining = true });
+                Log.Info($"[Join] SEND joining=true user={Username}");
+            }
+            else if (newPlayerStatus == PlayerStatus.PLAYING && oldPlayerStatus == PlayerStatus.LOADING_MAP)
+            {
+                API.Commands.Command.SendToAll?.Invoke(
+                    new Commands.Data.Game.JoinNoticeCommand { Username = Username, Joining = false });
+                Log.Info($"[Join] SEND joining=false user={Username}");
+            }
         }
 
         public void PlayerTypeChanged(PlayerType oldPlayerType, PlayerType newPlayerType)

@@ -108,6 +108,9 @@ namespace CS2M
             // Zoning sync (paint/dezone by ZonePrefab id over a world rect).
             updateSystem.UpdateBefore<ZoneDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<ZonePaintApplySystem>(SystemUpdatePhase.Modification5);
+
+            // Pause the sim for everyone while a player is joining (+ chat notice).
+            updateSystem.UpdateAt<JoinPauseSystem>(SystemUpdatePhase.Rendering);
             Log.Info("Loading complete");
         }
 
