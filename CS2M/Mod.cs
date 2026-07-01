@@ -114,6 +114,10 @@ namespace CS2M
             updateSystem.UpdateBefore<WaterDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<WaterApplySystem>(SystemUpdatePhase.Modification5);
 
+            // Terraforming sync (best-effort brush replay via TerrainSystem.ApplyBrush).
+            updateSystem.UpdateBefore<TerrainDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<TerrainApplySystem>(SystemUpdatePhase.Modification5);
+
             // Delete/move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);

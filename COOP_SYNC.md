@@ -34,6 +34,7 @@ unfocused). Results from the last run (`simSpeed=3`, real city):
 | Service budgets (funding sliders) | ✅ PASS | Roads funding 100→90 via `SetServiceBudget`, verified |
 | Districts (paint area geometry) | ✅ PASS | District entity created from `AreaData.m_Archetype` + `Node` polygon (name is v2 — UI-managed) |
 | Water sources (springs/drains) | ✅ PASS | `WaterSourceData`+`Transform` entity created (count 1→2); game's WaterSystem simulates it |
+| Terraforming (raise/lower/level) | 🔶 best-effort | `TerrainSystem.ApplyBrush` runs (no error), but the height change isn't confirmed in the headless selftest — GPU heightmap write vs async CPU readback don't align without focus. Per-frame delta is also frame-time dependent → approximate. The on-demand resync reconciles terrain. Needs a real visual/2-PC check. |
 | City policies | ✅ PASS | apply raises Event+Modify at Modification3 (before `Game.Policies.ModifiedSystem` at Mod4); policy adjustment 10→27 consumed+verified |
 | Pause‑on‑join | ✅ PASS | `selectedSpeed`→0 + `[Join] PAUSED` |
 | Resume‑on‑join | 🟡 works | `[Join] RESUMED speed=1`; read‑back shows 0 only because the game auto‑pauses while unfocused (headless artifact) |

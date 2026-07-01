@@ -55,6 +55,7 @@ namespace CS2M.Sync
         private CS2M_SyncIdSystem _idSystem;
         private TaxSystem _taxSystem;
         private CityServiceBudgetSystem _budgetSystem;
+        private TerrainSystem _terrain;
 
         private EntityQuery _treeQuery;
         private EntityQuery _buildingQuery;
@@ -81,6 +82,8 @@ namespace CS2M.Sync
         private int _budgetExpected = int.MinValue;
         private int _districtsBefore = -1;
         private int _waterBefore = -1;
+        private float3 _terrainPos;
+        private float _terrainH0 = float.NaN;
         private float3 _movePosExpected;
         private Entity _zoneBlock;
         private ushort _zoneExpectedIndex;
@@ -144,6 +147,7 @@ namespace CS2M.Sync
             _idSystem = World.GetOrCreateSystemManaged<CS2M_SyncIdSystem>();
             _taxSystem = World.GetOrCreateSystemManaged<TaxSystem>();
             _budgetSystem = World.GetOrCreateSystemManaged<CityServiceBudgetSystem>();
+            _terrain = World.GetOrCreateSystemManaged<TerrainSystem>();
 
             _treeQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -304,7 +308,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 17) { return; }
+            if (_testStep > 18) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -324,10 +328,11 @@ namespace CS2M.Sync
                 case 11: VerifyTax(); ActBudget(); break;
                 case 12: VerifyBudget(); ActDistrict(); break;
                 case 13: VerifyDistrict(); ActWater(); break;
-                case 14: VerifyWater(); ActPolicy(); break;
-                case 15: VerifyPolicy(); ActPause(); break;
-                case 16: VerifyPause(); ActResume(); break;
-                case 17: VerifyResume(); Summary(); break;
+                case 14: VerifyWater(); ActTerrain(); break;
+                case 15: VerifyTerrain(); ActPolicy(); break;
+                case 16: VerifyPolicy(); ActPause(); break;
+                case 17: VerifyPause(); ActResume(); break;
+                case 18: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -585,6 +590,31 @@ namespace CS2M.Sync
             bool gone = !_idSystem.TryResolve(_treeSyncId, out Entity e) || !EntityManager.Exists(e)
                         || EntityManager.HasComponent<Deleted>(e);
             Result("delete", gone, gone ? "tree removed" : "tree still present");
+        }
+
+        private void ActTerrain()
+        {
+            _terrainH0 = float.NaN;
+            if (!TryAnchor(out float3 a)) { Result("terrain", false, "no anchor point in city"); return; }
+            var pos = new float3(a.x + 120f, a.y, a.z + 120f); // offset a bit from buildings/roads
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            _terrainH0 = TerrainUtils.SampleHeight(ref hd, pos);
+            _terrainPos = pos;
+            L($"[Auto] TEST terrain INJECT raise pos=({pos.x:F0},{pos.z:F0}) h0={_terrainH0:F2}");
+            RemoteTerrainQueue.Enqueue(new TerrainCommand
+            {
+                Type = 0, // Shift (raise/lower)
+                PosX = pos.x, PosY = pos.y, PosZ = pos.z,
+                Size = 40f, Strength = 100000f,
+            });
+        }
+
+        private void VerifyTerrain()
+        {
+            if (float.IsNaN(_terrainH0)) { return; }
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            float h1 = TerrainUtils.SampleHeight(ref hd, _terrainPos);
+            Result("terrain", h1 > _terrainH0 + 0.05f, $"height {_terrainH0:F2}->{h1:F2}");
         }
 
         private void ActWater()
