@@ -105,6 +105,10 @@ namespace CS2M
             updateSystem.UpdateBefore<NetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<NetPlaceApplySystem>(SystemUpdatePhase.Modification5);
 
+            // Net bulldoze sync (delete an edge by its endpoint positions).
+            updateSystem.UpdateBefore<NetEditDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<NetEditApplySystem>(SystemUpdatePhase.Modification5);
+
             // Progression sync (host broadcasts XP; clients advance milestones from it).
             updateSystem.UpdateBefore<ProgressionSenderSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<ProgressionApplySystem>(SystemUpdatePhase.Modification5);

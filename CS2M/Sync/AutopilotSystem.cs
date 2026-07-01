@@ -80,6 +80,9 @@ namespace CS2M.Sync
         private Entity _zoneBlock;
         private ushort _zoneExpectedIndex;
         private int _edgesBeforeNet;
+        private float3 _netStart;
+        private float3 _netEnd;
+        private int _edgesBeforeNetDelete;
         private float _speedBeforePause;
         private bool _forceRun = true; // keep the sim ticking (game auto-pauses when unfocused)
         private readonly List<string> _results = new List<string>();
@@ -291,7 +294,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 11) { return; }
+            if (_testStep > 12) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -304,11 +307,12 @@ namespace CS2M.Sync
                 case 4: VerifyCount("object:building", 2); ActMove(); break;
                 case 5: VerifyMove(); ActZone(); break;
                 case 6: VerifyZone(); ActNet(); break;
-                case 7: VerifyNet(); ActDelete(); break;
-                case 8: VerifyDelete(); ActTax(); break;
-                case 9: VerifyTax(); ActPause(); break;
-                case 10: VerifyPause(); ActResume(); break;
-                case 11: VerifyResume(); Summary(); break;
+                case 7: VerifyNet(); ActNetDelete(); break;
+                case 8: VerifyNetDelete(); ActDelete(); break;
+                case 9: VerifyDelete(); ActTax(); break;
+                case 10: VerifyTax(); ActPause(); break;
+                case 11: VerifyPause(); ActResume(); break;
+                case 12: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -530,6 +534,8 @@ namespace CS2M.Sync
 
                 Colossal.Mathematics.Bezier4x3 b = EntityManager.GetComponentData<Game.Net.Curve>(src).m_Bezier;
                 var off = new float3(0f, 0f, 40f);
+                _netStart = new float3(b.a.x + off.x, b.a.y, b.a.z + off.z);
+                _netEnd = new float3(b.d.x + off.x, b.d.y, b.d.z + off.z);
                 L($"[Auto] TEST net INJECT name={prefab.name} edgesBefore={_edgesBeforeNet}");
                 RemoteNetQueue.Enqueue(new NetPlaceCommand
                 {
@@ -564,6 +570,25 @@ namespace CS2M.Sync
             bool gone = !_idSystem.TryResolve(_treeSyncId, out Entity e) || !EntityManager.Exists(e)
                         || EntityManager.HasComponent<Deleted>(e);
             Result("delete", gone, gone ? "tree removed" : "tree still present");
+        }
+
+        private void ActNetDelete()
+        {
+            if (math.lengthsq(_netStart) < 1f) { Result("net-delete", false, "no net was created to delete"); _edgesBeforeNetDelete = -1; return; }
+            _edgesBeforeNetDelete = _allEdgesQuery.CalculateEntityCount();
+            L($"[Auto] TEST net-delete INJECT start=({_netStart.x:F0},{_netStart.z:F0}) end=({_netEnd.x:F0},{_netEnd.z:F0}) edgesBefore={_edgesBeforeNetDelete}");
+            RemoteNetDeleteQueue.Enqueue(new NetDeleteCommand
+            {
+                StartX = _netStart.x, StartY = _netStart.y, StartZ = _netStart.z,
+                EndX = _netEnd.x, EndY = _netEnd.y, EndZ = _netEnd.z,
+            });
+        }
+
+        private void VerifyNetDelete()
+        {
+            if (_edgesBeforeNetDelete < 0) { return; }
+            int edges = _allEdgesQuery.CalculateEntityCount();
+            Result("net-delete", edges < _edgesBeforeNetDelete, $"edges {_edgesBeforeNetDelete}->{edges}");
         }
 
         private void ActTax()
