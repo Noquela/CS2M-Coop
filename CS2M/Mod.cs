@@ -85,6 +85,11 @@ namespace CS2M
             // Money sync (host broadcasts authoritative cash; clients snap to it).
             updateSystem.UpdateBefore<MoneySyncSenderSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<MoneySyncApplySystem>(SystemUpdatePhase.Modification5);
+
+            // Delete/move sync of synced objects (by CS2M_SyncId).
+            updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<RemoteEditApplySystem>(SystemUpdatePhase.Modification5);
             Log.Info("Loading complete");
         }
 
