@@ -1,0 +1,4 @@
+09:18:20.457 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\AppData\Local\Temp\claude\c--Users-Bruno-AppData-LocalLow-Colossal-Order-Cities-Skylines-II-Mods-CS2M\a731c6d8-b299-45c2-ac13-fe784bcf6fff\scratchpad\CS2M\tools\autotest\out\host.log
+09:18:35.501 [Auto] loadingComplete purpose=LoadGame mode=Game
+09:18:35.501 [Auto] HOST city loaded -> arming StartServer
+09:18:36.713 [Auto] HOST StartServer on :1111 status=PLAYING

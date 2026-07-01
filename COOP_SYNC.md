@@ -5,9 +5,50 @@ Fork of [CitiesSkylinesMultiplayer/CS2M](https://github.com/CitiesSkylinesMultip
 Upstream connects two worlds, transfers the save and has chat — but syncs no gameplay. This fork syncs
 placements, edits, nets, zoning, economy and progression, plus a pause-on-join flow.
 
-> Built overnight, feature by feature, compiling clean at each step with heavy logging. **Not yet
-> 2‑PC tested** beyond cursor + the first object round (which reached the apply stage). The point of the
-> heavy logs below is to make the debug session with your friends fast.
+> Built feature by feature, compiling clean at each step with heavy logging.
+
+---
+
+## Validation results (in-game, automated — `tools/autotest`)
+
+Because the RUNE crack enforces a single game instance (a 2nd launch becomes a 21 MB stub), a
+2‑instance localhost test is impossible on that build. Instead the mod has an **`AutopilotSystem`**
+(env‑var gated, so the normal build is byte‑identical) with a **`selftest`** role: it hosts locally
+(`StartServer` → PLAYING with no client) and injects the SAME commands the network handler would, then
+reads the real game world back to verify each feature. Run: `tools/autotest/run_selftest` idea, or set
+`CS2M_AUTOPILOT=selftest` + launch with `-continuelastsave`. Sim is force‑run (the game auto‑pauses when
+unfocused). Results from the last run (`simSpeed=3`, real city):
+
+| Feature | Result | Evidence |
+|---|---|---|
+| Money (city cash) | ✅ PASS | 954 840 → 1 954 840 after inject |
+| Progression (XP/milestone) | ✅ PASS | XP 182 → 200 182 |
+| Object — tree | ✅ PASS | `CS2M_RemotePlaced` count 0→1, entity in world |
+| Object — building | ✅ PASS | count 1→2, `hasBuilding=True` |
+| Move (by SyncId) | ✅ PASS | building Transform moved to exact target |
+| Zoning (paint by ZonePrefab name) | ✅ PASS | cell index → 39 (real zone), verified |
+| Delete (by SyncId) | ✅ PASS | tree removed, count 2→1 |
+| Pause‑on‑join | ✅ PASS | `selectedSpeed`→0 + `[Join] PAUSED` |
+| Resume‑on‑join | 🟡 works | `[Join] RESUMED speed=1`; read‑back shows 0 only because the game auto‑pauses while unfocused (headless artifact) |
+| **Nets (roads/rails/pipes)** | ❌ **BROKEN** | see below |
+
+**Net bug (diagnosed, not yet fixed).** The apply now runs without the earlier `CreateCommandBuffer`
+crash (switched to a direct `EntityManager` structural change) and logs `[Net] INJECT … len=… ` with the
+correct `CreationFlags.Permanent|SubElevation` (=65537) and the sim running — but **no `Edge` is ever
+generated** (`totalEdges` unchanged). Root cause: the game builds nets from `CreationDefinition`+
+`NetCourse` **definition** entities that the net tool creates in the **`ToolOutputBarrier`** as transient
+`Temp` previews and destroys/recreates every frame (`NetToolSystem.DestroyDefinitions`); the
+definition→edge consumer lives in that tool/definition flow, not the plain modification phases, so a
+mod‑injected def at Modification5 is never consumed. **Next step (v2):** reproduce the tool flow —
+create the def in `ToolOutputBarrier`'s command buffer from a system scheduled in the tool update group,
+matching the tool's exact component/flag set (`CoursePosFlags.IsFirst/IsLast`, no stray `IsLeft|IsRight`),
+or drive `NetToolSystem` directly.
+
+**Confirmed gaps (by design — not synced today).** Live **population, citizens, vehicles, traffic and the
+economy tick** are emergent simulation state and are NOT synchronized; the mod syncs *player actions*
+(placements/edits), money and XP/milestones, so cities stay aligned only as far as those inputs +
+determinism carry them. Also deferred to v2: cross‑PC net snapping/splitting, net delete/move, growable
+(native) object edits, zoning flood‑fill parity.
 
 ---
 

@@ -1,24 +1,21 @@
 # =============================================================================
-# CS2M — teste autônomo de sincronização em UMA máquina, com DUAS instâncias
+# CS2M - teste autonomo de sincronizacao em UMA maquina, com DUAS instancias
 # do jogo falando por 127.0.0.1. Sem segundo humano, sem mouse.
 #
-# Como funciona:
-#   1. Sobe a instância HOST com -continuelastsave (auto-carrega o último save).
-#      O mod, com CS2M_AUTOPILOT=host, auto-hospeda assim que a cidade carrega.
-#   2. Espera o host publicar o servidor (lendo host.log do autopilot).
-#   3. Sobe a instância CLIENTE. Com CS2M_AUTOPILOT=client ela auto-conecta no
-#      127.0.0.1 e baixa o mapa do host.
-#   4. Quando o cliente entra (PLAYING), o host roda um roteiro: planta uma
-#      árvore, um prédio, uma estrada e depois deleta a árvore — pelos MESMOS
-#      comandos que os detectores reais emitem.
-#   5. O cliente registra em client.log quantos objetos/edges remotos materializou.
-#   6. No fim, este script imprime as duas transcrições [Auto] e um veredito.
+# 1. Sobe a instancia HOST com -continuelastsave (auto-carrega o ultimo save).
+#    O mod, com CS2M_AUTOPILOT=host, auto-hospeda quando a cidade carrega.
+# 2. Espera o host publicar o servidor (lendo host.log do autopilot).
+# 3. Sobe a instancia CLIENTE. Com CS2M_AUTOPILOT=client ela auto-conecta no
+#    127.0.0.1 e baixa o mapa do host.
+# 4. Quando o cliente entra (PLAYING), o host roda um roteiro: arvore, predio,
+#    estrada, delete-arvore - pelos MESMOS comandos dos detectores reais.
+# 5. O cliente registra quantos objetos/edges remotos materializou.
+# 6. No fim, imprime as duas transcricoes [Auto] e um veredito.
 #
-# Cada instância escreve seu PRÓPRIO log (CS2M_AP_LOG) porque as duas
-# compartilham o CS2M.log do jogo — assim o sinal de cada lado fica limpo.
+# Cada instancia escreve seu PROPRIO log (CS2M_AP_LOG) porque as duas
+# compartilham o CS2M.log do jogo - assim o sinal de cada lado fica limpo.
 #
-# Uso:   powershell -ExecutionPolicy Bypass -File run_localhost_test.ps1
-#        (opcional)  -Port 1111  -HostLoadTimeoutSec 300  -TestTimeoutSec 240
+# Uso: powershell -ExecutionPolicy Bypass -File run_localhost_test.ps1
 # =============================================================================
 param(
     [int]$Port = 1111,
@@ -43,9 +40,8 @@ if (-not (Test-Path $Exe)) { Say "NAO achei o jogo em $Exe" 'Red'; exit 1 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Remove-Item $HostLog, $ClientLog -ErrorAction SilentlyContinue
 
-# --- Espera uma string aparecer num arquivo, com timeout ---------------------
 function Wait-ForLine($file, $pattern, $timeoutSec, $what) {
-    Say "Esperando: $what  (padrao '$pattern', ate ${timeoutSec}s)"
+    Say "Esperando: $what (padrao '$pattern', ate ${timeoutSec}s)"
     $deadline = (Get-Date).AddSeconds($timeoutSec)
     while ((Get-Date) -lt $deadline) {
         if (Test-Path $file) {
@@ -69,13 +65,13 @@ $hostProc = Start-Process -FilePath $Exe -WorkingDirectory $GameDir -ArgumentLis
 Say "HOST pid=$($hostProc.Id). Carregando cidade... (isso demora)"
 
 if (-not (Wait-ForLine $HostLog 'HOST StartServer' $HostLoadTimeoutSec 'host publicar o servidor')) {
-    Say "O host nao chegou a hospedar. Veja se a cidade carregou e se o mod ativou (host.log / $GameLog)." 'Red'
-    Say "PID host=$($hostProc.Id) — feche manualmente quando quiser." 'Yellow'
+    Say "O host nao chegou a hospedar. Veja se a cidade carregou e se o mod ativou (host.log)." 'Red'
+    Say "PID host=$($hostProc.Id). Feche manualmente quando quiser." 'Yellow'
     exit 2
 }
 
 # --- 2) CLIENTE --------------------------------------------------------------
-Say "===> Subindo CLIENTE (Cities2.exe -> conecta em 127.0.0.1:$Port)"
+Say "===> Subindo CLIENTE (Cities2.exe conecta em 127.0.0.1:$Port)"
 $env:CS2M_AUTOPILOT = 'client'
 $env:CS2M_AP_IP     = '127.0.0.1'
 $env:CS2M_AP_PORT   = "$Port"
@@ -92,7 +88,8 @@ if (-not (Wait-ForLine $ClientLog 'CLIENT PLAYING' $HostLoadTimeoutSec 'cliente 
 
 # --- 3) Roteiro de teste -----------------------------------------------------
 Wait-ForLine $HostLog 'scripted test DONE' $TestTimeoutSec 'host terminar o roteiro' | Out-Null
-Say "Aguardando o cliente processar as ultimas aplicacoes..." ; Start-Sleep -Seconds 8
+Say "Aguardando o cliente processar as ultimas aplicacoes..."
+Start-Sleep -Seconds 8
 
 # --- 4) Relatorio ------------------------------------------------------------
 Write-Host ""
@@ -104,31 +101,42 @@ if (Test-Path $ClientLog) { Get-Content $ClientLog | ForEach-Object { Write-Host
 
 Write-Host ""
 Say "===================== VEREDITO =====================" 'Magenta'
-function Has($file, $pat) { (Test-Path $file) -and (Select-String -Path $file -Pattern $pat -SimpleMatch -Quiet) }
 
-$vObj  = (Has $ClientLog 'remoteObjects=1') -or (Has $ClientLog 'remoteObjects=2')
+function Has($file, $pat) {
+    if (-not (Test-Path $file)) { return $false }
+    return [bool](Select-String -Path $file -Pattern $pat -SimpleMatch -Quiet)
+}
+
+function Report($label, $ok) {
+    $mark = '???'
+    $color = 'Yellow'
+    if ($ok) { $mark = 'PASS'; $color = 'Green' }
+    Say ("{0,-46}: {1}" -f $label, $mark) $color
+}
+
+$vObj = (Has $ClientLog 'remoteObjects=1') -or (Has $ClientLog 'remoteObjects=2')
+
 $vEdge = $false
 if (Test-Path $ClientLog) {
-    # aumento em totalEdges => a estrada remota materializou
-    $edgeVals = Select-String -Path $ClientLog -Pattern 'totalEdges=(\d+)' | ForEach-Object { [int]$_.Matches[0].Groups[1].Value }
-    if ($edgeVals.Count -ge 2) { $vEdge = ($edgeVals[-1] -gt $edgeVals[0]) }
+    $edgeVals = @(Select-String -Path $ClientLog -Pattern 'totalEdges=(\d+)' | ForEach-Object { [int]$_.Matches[0].Groups[1].Value })
+    if ($edgeVals.Count -ge 2 -and $edgeVals[-1] -gt $edgeVals[0]) { $vEdge = $true }
 }
-$vApplied = Has $GameLog '[Place] APPLIED'
-$vNet     = Has $GameLog '[Net] INJECT'
 
-function Mark($ok) { if ($ok) { 'PASS' } else { '???' } }
-Say ("Objetos remotos no cliente (remoteObjects>=1) : {0}" -f (Mark ([bool]$vObj)))     ($(if($vObj){'Green'}else{'Yellow'}))
-Say ("Estrada remota (totalEdges aumentou)          : {0}" -f (Mark ([bool]$vEdge)))    ($(if($vEdge){'Green'}else{'Yellow'}))
-Say ("[Place] APPLIED no CS2M.log do jogo           : {0}" -f (Mark ([bool]$vApplied))) ($(if($vApplied){'Green'}else{'Yellow'}))
-Say ("[Net] INJECT no CS2M.log do jogo              : {0}" -f (Mark ([bool]$vNet)))     ($(if($vNet){'Green'}else{'Yellow'}))
+$vApplied = Has $GameLog 'APPLIED'
+$vNet     = Has $GameLog 'INJECT'
+
+Report 'Objetos remotos no cliente (remoteObjects>=1)' $vObj
+Report 'Estrada remota (totalEdges aumentou)' $vEdge
+Report 'Place APPLIED no CS2M.log do jogo' $vApplied
+Report 'Net INJECT no CS2M.log do jogo' $vNet
 
 Write-Host ""
 Say "Logs salvos em: $OutDir" 'Cyan'
-Say "PIDs: host=$($hostProc.Id)  client=$($clientProc.Id)" 'Cyan'
+Say "PIDs: host=$($hostProc.Id) client=$($clientProc.Id)" 'Cyan'
 
 if ($KillWhenDone) {
     Say "Fechando as duas instancias (-KillWhenDone)..."
     Stop-Process -Id $hostProc.Id, $clientProc.Id -Force -ErrorAction SilentlyContinue
 } else {
-    Say "As duas instancias continuam abertas pra voce inspecionar. Feche quando quiser." 'Cyan'
+    Say "As duas instancias continuam abertas pra inspecao. Feche quando quiser." 'Cyan'
 }

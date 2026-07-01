@@ -91,12 +91,16 @@ namespace CS2M.Sync
             cd.m_RandomSeed = cmd.RandomSeed;
             cd.m_Flags = CreationFlags.Permanent | CreationFlags.SubElevation;
 
-            EntityCommandBuffer ecb = _barrier.CreateCommandBuffer();
-            Entity def = ecb.CreateEntity();
-            ecb.AddComponent(def, cd);
-            ecb.AddComponent(def, course);
-            ecb.AddComponent<Updated>(def);
-            ecb.AddComponent<CS2M_RemotePlaced>(def);
+            // Create the definition entity directly on the main thread (same approach as the object
+            // apply). We're at Modification5, PAST ModificationBarrier1, so its command buffer is
+            // closed ("Trying to create EntityCommandBuffer when it's not allowed!"); a structural
+            // change via EntityManager is fine here. The game's net-generation systems pick up the
+            // Updated CreationDefinition+NetCourse next modification pass and build the real edges.
+            Entity def = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(def, cd);
+            EntityManager.AddComponentData(def, course);
+            EntityManager.AddComponent<Updated>(def);
+            EntityManager.AddComponent<CS2M_RemotePlaced>(def);
 
             CS2M.Log.Info(
                 $"[Net] INJECT name={cmd.PrefabName} prefabEntity={netPrefab.Index} len={course.m_Length:F1} " +
