@@ -111,6 +111,12 @@ namespace CS2M
 
             // Pause the sim for everyone while a player is joining (+ chat notice).
             updateSystem.UpdateAt<JoinPauseSystem>(SystemUpdatePhase.Rendering);
+
+            // Headless self-test driver. Completely inert unless CS2M_AUTOPILOT is set, so the
+            // normal build is unaffected. Runs at UIUpdate (same group as UISystem) so the client
+            // half can auto-connect from the main menu; the host half auto-hosts + runs a scripted
+            // placement test once a client joins. See AutopilotSystem + tools/autotest.
+            updateSystem.UpdateAt<AutopilotSystem>(SystemUpdatePhase.UIUpdate);
             Log.Info("Loading complete");
         }
 
