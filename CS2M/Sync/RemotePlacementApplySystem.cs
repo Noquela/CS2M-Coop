@@ -54,6 +54,15 @@ namespace CS2M.Sync
 
         private void ApplyOne(ObjectPlaceCommand cmd)
         {
+            // Idempotency guard: if this SyncId already maps to a live object (duplicate/reordered
+            // packet, or a resync re-send), don't place it twice. Safe — SyncIds are globally unique.
+            if (cmd.SyncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(cmd.SyncId, out Entity existing)
+                && EntityManager.Exists(existing) && !EntityManager.HasComponent<Deleted>(existing))
+            {
+                CS2M.Log.Info($"[Place] SKIP duplicate syncId={cmd.SyncId} (already placed)");
+                return;
+            }
+
             // 1. Resolve the prefab (machine-independent id → local prefab entity).
             var hash = new Colossal.Hash128(new uint4(cmd.Hash0, cmd.Hash1, cmd.Hash2, cmd.Hash3));
             var prefabId = new PrefabID(cmd.PrefabType, cmd.PrefabName, hash);

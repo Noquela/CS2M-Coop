@@ -54,10 +54,17 @@ namespace CS2M.Sync
                 return;
             }
 
-            _budgetSystem.SetServiceBudget(serviceEntity, cmd.Percentage);
-            BudgetSync.Snapshot[cmd.ServiceName] = cmd.Percentage;
-
-            CS2M.Log.Info($"[Budget] APPLIED name={cmd.ServiceName} pct={cmd.Percentage}");
+            try
+            {
+                _budgetSystem.SetServiceBudget(serviceEntity, cmd.Percentage);
+                BudgetSync.Snapshot[cmd.ServiceName] = cmd.Percentage;
+                CS2M.Log.Info($"[Budget] APPLIED name={cmd.ServiceName} pct={cmd.Percentage}");
+            }
+            catch (System.Exception ex)
+            {
+                // Don't let an occasional SetServiceBudget failure disable the whole apply system.
+                CS2M.Log.Info($"[Budget] SetServiceBudget failed name={cmd.ServiceName}: {ex.Message}");
+            }
         }
     }
 }

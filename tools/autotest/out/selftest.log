@@ -1,0 +1,122 @@
+14:30:35.723 [Auto] ENABLED role=SELFTEST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\AppData\Local\Temp\claude\c--Users-Bruno-AppData-LocalLow-Colossal-Order-Cities-Skylines-II-Mods-CS2M\a731c6d8-b299-45c2-ac13-fe784bcf6fff\scratchpad\CS2M\tools\autotest\out\selftest.log
+14:30:54.172 [Auto] loadingComplete purpose=LoadGame mode=Game
+14:30:54.172 [Auto] city loaded -> arming StartServer
+14:30:55.974 [Auto] StartServer on :1111 status=PLAYING
+14:30:55.986 [Auto] SELFTEST beginning — validating every feature against real game state
+14:30:55.987 [Auto] PLAYING — watching for placements in the world.
+14:30:55.987 [Auto] VERIFY CHANGED remoteObjects=0 (was -1) totalEdges=482 (was -1) simSpeed=1 status=PLAYING
+14:30:57.963 [Auto] TEST money INJECT before=6354783 unlimited=False -> set=7354783
+14:30:58.340 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=482 (was 482) simSpeed=1 status=PLAYING
+14:31:00.697 [Auto] RESULT money: PASS (after=7354780 expected~7354783)
+14:31:00.698 [Auto] TEST progression INJECT beforeXp=400187 milestone=16 maxPop=0 -> setXp=600187
+14:31:00.857 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:03.301 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:03.477 [Auto] RESULT progression: PASS (afterXp=600187 expected~600187)
+14:31:03.478 [Auto] TEST object INJECT kind=tree name=NA_LondonPlaneTree01 pos=(1997,481,1936) syncId=2090355222844014593
+14:31:03.493 [Auto] VERIFY CHANGED remoteObjects=1 (was 0) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:05.952 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:06.224 [Auto] RESULT object:tree: PASS (remoteObjects=1 (>= 1))
+14:31:06.224 [Auto] TEST object INJECT kind=building name=RuinsStoneCairns01 pos=(-5093,595,5893) syncId=2090355222844014594
+14:31:06.239 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:08.689 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:08.961 [Auto] RESULT object:building: PASS (remoteObjects=2 (>= 2))
+14:31:08.962 [Auto] TEST move INJECT syncId=2090355222844014594 from=(-5093,5893) to=(-5078,5908)
+14:31:11.174 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:11.731 [Auto] RESULT move: PASS (pos=(-5078,5908) expected=(-5078,5908))
+14:31:11.733 [Auto] TEST zoning INJECT block=(-146,-2) cell0 0->39 name='Office Low'
+14:31:13.622 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:14.491 [Auto] RESULT zoning: PASS (cell0=39 expected=39)
+14:31:14.493 [Auto] TEST net INJECT name=ExtradosedBridge01 Train Track edgesBefore=482
+14:31:14.508 [Auto] VERIFY CHANGED remoteObjects=5 (was 2) totalEdges=483 (was 482) simSpeed=3 status=PLAYING
+14:31:16.955 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=483 (was 483) simSpeed=3 status=PLAYING
+14:31:17.227 [Auto] RESULT net: PASS (edges 482->483)
+14:31:17.229 [Auto] TEST net-delete INJECT start=(994,4640) end=(997,4501) edgesBefore=483
+14:31:17.243 [Auto] VERIFY CHANGED remoteObjects=5 (was 5) totalEdges=482 (was 483) simSpeed=3 status=PLAYING
+14:31:17.253 [Auto] VERIFY CHANGED remoteObjects=4 (was 5) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:19.748 [Auto] VERIFY heartbeat remoteObjects=4 (was 4) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:20.005 [Auto] RESULT net-delete: PASS (edges 483->482)
+14:31:20.006 [Auto] TEST net-upgrade INJECT edge=49546 left=0x1000
+14:31:22.204 [Auto] VERIFY heartbeat remoteObjects=4 (was 4) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:22.746 [Auto] RESULT net-upgrade: PASS (left=0x1000 expectedBit=0x1000)
+14:31:22.747 [Auto] TEST delete INJECT syncId=2090355222844014593
+14:31:22.772 [Auto] VERIFY CHANGED remoteObjects=3 (was 4) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:25.244 [Auto] VERIFY heartbeat remoteObjects=3 (was 3) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:25.504 [Auto] RESULT delete: PASS (tree removed)
+14:31:25.505 [Auto] TEST tax INJECT main 13->16
+14:31:27.702 [Auto] VERIFY heartbeat remoteObjects=3 (was 3) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:28.250 [Auto] RESULT tax: PASS (main=16 expected=16)
+14:31:28.251 [Auto] TEST budget INJECT name=Roads 90->100
+14:31:30.245 [Auto] VERIFY heartbeat remoteObjects=3 (was 3) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:31.080 [Auto] RESULT budget: PASS (pct=100 expected=100)
+14:31:31.082 [Auto] TEST district INJECT name=District Area center=(-5153,5833) before=1
+14:31:31.094 [Auto] VERIFY CHANGED remoteObjects=4 (was 3) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:33.558 [Auto] VERIFY heartbeat remoteObjects=4 (was 4) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:33.843 [Auto] RESULT district: PASS (districts 1->2)
+14:31:33.844 [Auto] TEST water INJECT pos=(-5153,5833) before=2
+14:31:33.858 [Auto] VERIFY CHANGED remoteObjects=5 (was 4) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:36.344 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:36.617 [Auto] RESULT water: PASS (waterSources 2->3)
+14:31:36.618 [Auto] TEST terrain INJECT raise pos=(-5033,5953) h0=543,38
+14:31:38.846 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:39.878 [Auto] RESULT terrain: PASS (height 543,38->4096,00)
+14:31:39.879 [Auto] TEST policy INJECT name=Taxi Starting Fee active=True adj 27->44
+14:31:41.768 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=3 status=PLAYING
+14:31:42.615 [Auto] RESULT policy: PASS (found=True adj=44 expected=44)
+14:31:42.615 [Auto] TEST pause INJECT joining=true (speedBefore=0)
+14:31:44.177 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:31:45.300 [Auto] RESULT pause: PASS (selectedSpeed=0 (expected 0 while joining))
+14:31:45.300 [Auto] TEST pause INJECT joining=false (resume)
+14:31:46.583 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:31:47.961 [Auto] RESULT resume: FAIL (selectedSpeed=0 (expected >0 after resume))
+14:31:47.962 [Auto] ================ SELFTEST RESULTS ================
+14:31:47.962 [Auto] RESULT money: PASS (after=7354780 expected~7354783)
+14:31:47.962 [Auto] RESULT progression: PASS (afterXp=600187 expected~600187)
+14:31:47.963 [Auto] RESULT object:tree: PASS (remoteObjects=1 (>= 1))
+14:31:47.964 [Auto] RESULT object:building: PASS (remoteObjects=2 (>= 2))
+14:31:47.964 [Auto] RESULT move: PASS (pos=(-5078,5908) expected=(-5078,5908))
+14:31:47.965 [Auto] RESULT zoning: PASS (cell0=39 expected=39)
+14:31:47.965 [Auto] RESULT net: PASS (edges 482->483)
+14:31:47.966 [Auto] RESULT net-delete: PASS (edges 483->482)
+14:31:47.966 [Auto] RESULT net-upgrade: PASS (left=0x1000 expectedBit=0x1000)
+14:31:47.966 [Auto] RESULT delete: PASS (tree removed)
+14:31:47.967 [Auto] RESULT tax: PASS (main=16 expected=16)
+14:31:47.967 [Auto] RESULT budget: PASS (pct=100 expected=100)
+14:31:47.967 [Auto] RESULT district: PASS (districts 1->2)
+14:31:47.968 [Auto] RESULT water: PASS (waterSources 2->3)
+14:31:47.968 [Auto] RESULT terrain: PASS (height 543,38->4096,00)
+14:31:47.969 [Auto] RESULT policy: PASS (found=True adj=44 expected=44)
+14:31:47.969 [Auto] RESULT pause: PASS (selectedSpeed=0 (expected 0 while joining))
+14:31:47.969 [Auto] RESULT resume: FAIL (selectedSpeed=0 (expected >0 after resume))
+14:31:47.970 [Auto] INFO population=0 maxPopulation(xp)=0 (population is emergent sim state — NOT directly synced; see gaps)
+14:31:47.971 [Auto] GAPS not-validated-here: live population/citizens/vehicles/traffic/economy tick are not synced (emergent simulation); net snapping/split, growable edits, zone flood-fill are v2.
+14:31:47.971 [Auto] scripted test DONE
+14:31:48.970 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:31:51.392 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:31:53.776 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:31:56.180 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:31:58.565 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:00.987 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:03.371 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:05.779 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:08.165 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:10.583 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:12.968 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:15.372 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:17.761 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:20.183 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:22.566 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:24.970 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:27.358 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:29.774 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:32.158 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:34.544 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:36.951 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:39.338 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:41.756 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:44.146 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:46.557 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:48.947 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:51.369 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:53.753 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:56.161 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING
+14:32:58.543 [Auto] VERIFY heartbeat remoteObjects=5 (was 5) totalEdges=482 (was 482) simSpeed=0 status=PLAYING

@@ -117,6 +117,83 @@ namespace CS2MTests
         public string Username { get; set; }
     }
 
+    // ---- New sync commands added by the fork (byte-for-byte copies of the mod's POCOs) ----
+    public class TaxSyncCommand : CommandBase { public int[] Rates { get; set; } }
+
+    public class BudgetCommand : CommandBase
+    {
+        public string ServiceType { get; set; }
+        public string ServiceName { get; set; }
+        public int Percentage { get; set; }
+    }
+
+    public class PolicyCommand : CommandBase
+    {
+        public string PolicyType { get; set; }
+        public string PolicyName { get; set; }
+        public bool Active { get; set; }
+        public float Adjustment { get; set; }
+    }
+
+    public class DistrictCommand : CommandBase
+    {
+        public string PrefabType { get; set; }
+        public string PrefabName { get; set; }
+        public uint OptionMask { get; set; }
+        public float[] Xs { get; set; }
+        public float[] Ys { get; set; }
+        public float[] Zs { get; set; }
+    }
+
+    public class WaterCommand : CommandBase
+    {
+        public float PosX { get; set; }
+        public float PosY { get; set; }
+        public float PosZ { get; set; }
+        public float Radius { get; set; }
+        public float Height { get; set; }
+        public float Multiplier { get; set; }
+        public float Polluted { get; set; }
+        public int ConstantDepth { get; set; }
+    }
+
+    public class TerrainCommand : CommandBase
+    {
+        public int Type { get; set; }
+        public float PosX { get; set; }
+        public float PosY { get; set; }
+        public float PosZ { get; set; }
+        public float Size { get; set; }
+        public float Strength { get; set; }
+    }
+
+    public class SpeedCommand : CommandBase { public float Speed { get; set; } }
+
+    public class ResyncCommand : CommandBase { }
+
+    public class NetDeleteCommand : CommandBase
+    {
+        public float StartX { get; set; }
+        public float StartY { get; set; }
+        public float StartZ { get; set; }
+        public float EndX { get; set; }
+        public float EndY { get; set; }
+        public float EndZ { get; set; }
+    }
+
+    public class NetUpgradeCommand : CommandBase
+    {
+        public float StartX { get; set; }
+        public float StartY { get; set; }
+        public float StartZ { get; set; }
+        public float EndX { get; set; }
+        public float EndY { get; set; }
+        public float EndZ { get; set; }
+        public uint General { get; set; }
+        public uint Left { get; set; }
+        public uint Right { get; set; }
+    }
+
     public static class Program
     {
         // Copy of the mod's MessagePackExtensions.BetterGraphOf (same walker → same wire format).
@@ -166,6 +243,18 @@ namespace CS2MTests
             RoundTrip(opts, new ZonePaintCommand { BlockX = 100f, BlockZ = 200f, SizeX = 6, SizeY = 4, CellIndices = new[] { 0, 5, 11, 23 }, ZoneNames = new[] { "EU Residential Low", "", "EU Commercial", "EU Residential Low" } }, c => c.CellIndices.Length == 4 && c.CellIndices[2] == 11 && c.ZoneNames[1] == "" && c.ZoneNames[2] == "EU Commercial");
             RoundTrip(opts, new JoinNoticeCommand { Username = "Bruno", Joining = true }, c => c.Username == "Bruno" && c.Joining);
             RoundTrip(opts, new PlayerCursorCommand { X = 1.5f, Z = 2.5f, Valid = true, Username = "amigo" }, c => c.Username == "amigo" && c.Valid && c.X == 1.5f);
+
+            // --- New fork commands ---
+            RoundTrip(opts, new TaxSyncCommand { Rates = new[] { 10, 3, -2, 5, 0, 7 } }, c => c.Rates.Length == 6 && c.Rates[1] == 3 && c.Rates[2] == -2);
+            RoundTrip(opts, new BudgetCommand { ServiceType = "ServicePrefab", ServiceName = "Roads", Percentage = 90 }, c => c.ServiceName == "Roads" && c.Percentage == 90);
+            RoundTrip(opts, new PolicyCommand { PolicyType = "PolicyPrefab", PolicyName = "Taxi Starting Fee", Active = true, Adjustment = 27.5f }, c => c.PolicyName == "Taxi Starting Fee" && c.Active && Math.Abs(c.Adjustment - 27.5f) < 0.01f);
+            RoundTrip(opts, new DistrictCommand { PrefabType = "DistrictPrefab", PrefabName = "District Area", OptionMask = 5u, Xs = new[] { -60f, 60f, 60f, -60f, -60f }, Ys = new[] { 477f, 477f, 477f, 477f, 477f }, Zs = new[] { -60f, -60f, 60f, 60f, -60f } }, c => c.PrefabName == "District Area" && c.OptionMask == 5u && c.Xs.Length == 5 && c.Zs[2] == 60f);
+            RoundTrip(opts, new WaterCommand { PosX = -307f, PosY = 5f, PosZ = -3124f, Radius = 20f, Height = 5f, Multiplier = 1f, Polluted = 0f, ConstantDepth = 0 }, c => Math.Abs(c.PosX - (-307f)) < 0.01f && c.Radius == 20f);
+            RoundTrip(opts, new TerrainCommand { Type = 0, PosX = -187f, PosY = 477f, PosZ = -3004f, Size = 40f, Strength = 100000f }, c => c.Type == 0 && c.Size == 40f && c.Strength == 100000f);
+            RoundTrip(opts, new SpeedCommand { Speed = 3f }, c => c.Speed == 3f);
+            RoundTrip(opts, new ResyncCommand(), c => true);
+            RoundTrip(opts, new NetDeleteCommand { StartX = 3644f, StartZ = 7096f, EndX = 3835f, EndZ = 7100f }, c => Math.Abs(c.StartX - 3644f) < 0.01f && Math.Abs(c.EndZ - 7100f) < 0.01f);
+            RoundTrip(opts, new NetUpgradeCommand { StartX = 1f, EndX = 2f, General = 0u, Left = 0x1000u, Right = 0u }, c => c.Left == 0x1000u && c.General == 0u);
 
             Console.WriteLine($"\n=== {_pass} passed, {_fail} failed ===");
             return _fail == 0 ? 0 : 1;

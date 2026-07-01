@@ -358,6 +358,20 @@ namespace CS2M.Networking
             Sync.ZoneSync.Clear();
             Sync.RemoteJoinState.Clear();
 
+            // Fork features: drop their queues + shared snapshots so a reconnect starts clean.
+            Sync.RemoteTaxQueue.Clear();
+            Sync.TaxSync.Clear();
+            Sync.RemoteBudgetQueue.Clear();
+            Sync.BudgetSync.Clear();
+            Sync.RemotePolicyQueue.Clear();
+            Sync.PolicySync.Clear();
+            Sync.RemoteNetDeleteQueue.Clear();
+            Sync.RemoteNetUpgradeQueue.Clear();
+            Sync.RemoteDistrictQueue.Clear();
+            Sync.RemoteWaterQueue.Clear();
+            Sync.RemoteTerrainQueue.Clear();
+            Sync.RemoteSpeedQueue.Clear();
+
             PlayerStatus = PlayerStatus.INACTIVE;
             PlayerType = PlayerType.NONE;
             return true;
