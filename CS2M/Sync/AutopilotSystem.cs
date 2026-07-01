@@ -53,6 +53,7 @@ namespace CS2M.Sync
         private CitySystem _citySystem;
         private SimulationSystem _sim;
         private CS2M_SyncIdSystem _idSystem;
+        private TaxSystem _taxSystem;
 
         private EntityQuery _treeQuery;
         private EntityQuery _buildingQuery;
@@ -74,6 +75,7 @@ namespace CS2M.Sync
         private int _moneyExpected;
         private bool _moneyUnlimited;
         private int _xpExpected;
+        private int _taxExpectedMain = int.MinValue;
         private float3 _movePosExpected;
         private Entity _zoneBlock;
         private ushort _zoneExpectedIndex;
@@ -128,6 +130,7 @@ namespace CS2M.Sync
             _citySystem = World.GetOrCreateSystemManaged<CitySystem>();
             _sim = World.GetOrCreateSystemManaged<SimulationSystem>();
             _idSystem = World.GetOrCreateSystemManaged<CS2M_SyncIdSystem>();
+            _taxSystem = World.GetOrCreateSystemManaged<TaxSystem>();
 
             _treeQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -288,7 +291,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 10) { return; }
+            if (_testStep > 11) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -302,9 +305,10 @@ namespace CS2M.Sync
                 case 5: VerifyMove(); ActZone(); break;
                 case 6: VerifyZone(); ActNet(); break;
                 case 7: VerifyNet(); ActDelete(); break;
-                case 8: VerifyDelete(); ActPause(); break;
-                case 9: VerifyPause(); ActResume(); break;
-                case 10: VerifyResume(); Summary(); break;
+                case 8: VerifyDelete(); ActTax(); break;
+                case 9: VerifyTax(); ActPause(); break;
+                case 10: VerifyPause(); ActResume(); break;
+                case 11: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -560,6 +564,26 @@ namespace CS2M.Sync
             bool gone = !_idSystem.TryResolve(_treeSyncId, out Entity e) || !EntityManager.Exists(e)
                         || EntityManager.HasComponent<Deleted>(e);
             Result("delete", gone, gone ? "tree removed" : "tree still present");
+        }
+
+        private void ActTax()
+        {
+            NativeArray<int> rates = _taxSystem.GetTaxRates();
+            if (!rates.IsCreated || rates.Length == 0) { Result("tax", false, "no tax rates"); _taxExpectedMain = int.MinValue; return; }
+            var copy = new int[rates.Length];
+            for (int i = 0; i < rates.Length; i++) { copy[i] = rates[i]; }
+            copy[0] = copy[0] + 3; // bump the main tax rate
+            _taxExpectedMain = copy[0];
+            L($"[Auto] TEST tax INJECT main {rates[0]}->{copy[0]}");
+            RemoteTaxQueue.Set(copy);
+        }
+
+        private void VerifyTax()
+        {
+            if (_taxExpectedMain == int.MinValue) { return; }
+            NativeArray<int> rates = _taxSystem.GetTaxRates();
+            int got = (rates.IsCreated && rates.Length > 0) ? rates[0] : int.MinValue;
+            Result("tax", got == _taxExpectedMain, $"main={got} expected={_taxExpectedMain}");
         }
 
         private void ActPause()

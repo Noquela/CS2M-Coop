@@ -92,6 +92,10 @@ namespace CS2M
             updateSystem.UpdateBefore<MoneySyncSenderSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<MoneySyncApplySystem>(SystemUpdatePhase.Modification5);
 
+            // Tax-rate sync (any player changes taxes -> diff-broadcast the whole array).
+            updateSystem.UpdateBefore<TaxDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<TaxApplySystem>(SystemUpdatePhase.Modification5);
+
             // Delete/move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);
