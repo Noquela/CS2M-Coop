@@ -90,6 +90,10 @@ namespace CS2M
             updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<RemoteEditApplySystem>(SystemUpdatePhase.Modification5);
+
+            // Net sync (roads/rails/pipes/power/fences — one pipeline).
+            updateSystem.UpdateBefore<NetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<NetPlaceApplySystem>(SystemUpdatePhase.Modification5);
             Log.Info("Loading complete");
         }
 

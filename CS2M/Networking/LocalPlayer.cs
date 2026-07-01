@@ -329,10 +329,12 @@ namespace CS2M.Networking
             // Drop any queued remote object placements.
             Sync.RemotePlacementQueue.Clear();
 
-            // Drop synced-entity id map + queued money + queued edits.
+            // Drop synced-entity id map + queued money + queued edits + queued nets.
             Sync.CS2M_SyncIdSystem.Clear();
             Sync.RemoteMoneyQueue.Clear();
             Sync.RemoteEditQueue.Clear();
+            Sync.RemoteNetQueue.Clear();
+            Sync.RemoteNetEcho.Clear();
 
             PlayerStatus = PlayerStatus.INACTIVE;
             PlayerType = PlayerType.NONE;
