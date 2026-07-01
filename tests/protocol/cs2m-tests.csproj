@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>cs2m-tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same versions the mod ships, so the wire format is validated faithfully. -->
+    <PackageReference Include="MessagePack" Version="3.1.3" />
+    <PackageReference Include="MessagePack.Attributeless" Version="1.0.1" />
+  </ItemGroup>
+
+</Project>
