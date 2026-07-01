@@ -83,6 +83,8 @@ namespace CS2M.Sync
         private float3 _netStart;
         private float3 _netEnd;
         private int _edgesBeforeNetDelete;
+        private Entity _upgradeEdge;
+        private uint _upgradeExpectedLeft;
         private Entity _policyEntity;
         private bool _policyExpectedActive;
         private float _speedBeforePause;
@@ -296,7 +298,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 13) { return; }
+            if (_testStep > 14) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -310,12 +312,13 @@ namespace CS2M.Sync
                 case 5: VerifyMove(); ActZone(); break;
                 case 6: VerifyZone(); ActNet(); break;
                 case 7: VerifyNet(); ActNetDelete(); break;
-                case 8: VerifyNetDelete(); ActDelete(); break;
-                case 9: VerifyDelete(); ActTax(); break;
-                case 10: VerifyTax(); ActPolicy(); break;
-                case 11: VerifyPolicy(); ActPause(); break;
-                case 12: VerifyPause(); ActResume(); break;
-                case 13: VerifyResume(); Summary(); break;
+                case 8: VerifyNetDelete(); ActNetUpgrade(); break;
+                case 9: VerifyNetUpgrade(); ActDelete(); break;
+                case 10: VerifyDelete(); ActTax(); break;
+                case 11: VerifyTax(); ActPolicy(); break;
+                case 12: VerifyPolicy(); ActPause(); break;
+                case 13: VerifyPause(); ActResume(); break;
+                case 14: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -573,6 +576,50 @@ namespace CS2M.Sync
             bool gone = !_idSystem.TryResolve(_treeSyncId, out Entity e) || !EntityManager.Exists(e)
                         || EntityManager.HasComponent<Deleted>(e);
             Result("delete", gone, gone ? "tree removed" : "tree still present");
+        }
+
+        private void ActNetUpgrade()
+        {
+            _upgradeEdge = Entity.Null;
+            if (_edgeQuery.IsEmptyIgnoreFilter) { Result("net-upgrade", false, "no edges to upgrade"); return; }
+            NativeArray<Entity> ents = _edgeQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                Entity e = ents[0];
+                Game.Net.Edge ed = EntityManager.GetComponentData<Game.Net.Edge>(e);
+                if (!EntityManager.HasComponent<Game.Net.Node>(ed.m_Start) || !EntityManager.HasComponent<Game.Net.Node>(ed.m_End))
+                {
+                    Result("net-upgrade", false, "edge has no nodes");
+                    return;
+                }
+
+                float3 s = EntityManager.GetComponentData<Game.Net.Node>(ed.m_Start).m_Position;
+                float3 en = EntityManager.GetComponentData<Game.Net.Node>(ed.m_End).m_Position;
+                _upgradeEdge = e;
+                _upgradeExpectedLeft = 0x1000u; // CompositionFlags.Side.PrimaryBeautification (trees, left)
+                L($"[Auto] TEST net-upgrade INJECT edge={e.Index} left=0x{_upgradeExpectedLeft:X}");
+                RemoteNetUpgradeQueue.Enqueue(new NetUpgradeCommand
+                {
+                    StartX = s.x, StartY = s.y, StartZ = s.z,
+                    EndX = en.x, EndY = en.y, EndZ = en.z,
+                    General = 0, Left = _upgradeExpectedLeft, Right = 0,
+                });
+            }
+            finally { ents.Dispose(); }
+        }
+
+        private void VerifyNetUpgrade()
+        {
+            if (_upgradeEdge == Entity.Null) { return; }
+            if (!EntityManager.Exists(_upgradeEdge) || !EntityManager.HasComponent<Game.Net.Upgraded>(_upgradeEdge))
+            {
+                Result("net-upgrade", false, "no Upgraded on edge (game may have cleared an invalid flag for this road)");
+                return;
+            }
+
+            Game.Net.Upgraded u = EntityManager.GetComponentData<Game.Net.Upgraded>(_upgradeEdge);
+            uint left = (uint) u.m_Flags.m_Left;
+            Result("net-upgrade", (left & _upgradeExpectedLeft) == _upgradeExpectedLeft, $"left=0x{left:X} expectedBit=0x{_upgradeExpectedLeft:X}");
         }
 
         private void ActPolicy()

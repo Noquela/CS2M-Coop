@@ -4,6 +4,7 @@ using CS2M.Networking;
 using Game;
 using Game.Common;
 using Game.Net;
+using Game.Prefabs;
 using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
@@ -43,6 +44,59 @@ namespace CS2M.Sync
             {
                 ApplyDelete(cmd);
             }
+
+            while (RemoteNetUpgradeQueue.TryDequeue(out NetUpgradeCommand up))
+            {
+                ApplyUpgrade(up);
+            }
+        }
+
+        private void ApplyUpgrade(NetUpgradeCommand cmd)
+        {
+            var start = new float3(cmd.StartX, cmd.StartY, cmd.StartZ);
+            var end = new float3(cmd.EndX, cmd.EndY, cmd.EndZ);
+
+            if (!FindEdge(start, end, out Entity edge))
+            {
+                CS2M.Log.Info($"[NetEdit] upgrade SKIP noMatch start=({start.x:F0},{start.z:F0}) end=({end.x:F0},{end.z:F0})");
+                return;
+            }
+
+            Edge ed = EntityManager.GetComponentData<Edge>(edge);
+            float3 s = EntityManager.GetComponentData<Node>(ed.m_Start).m_Position;
+            float3 en = EntityManager.GetComponentData<Node>(ed.m_End).m_Position;
+            RemoteNetEcho.Mark(RemoteNetEcho.SegHash(s, en, "upg"));
+
+            var up = new Upgraded
+            {
+                m_Flags = new CompositionFlags
+                {
+                    m_General = (CompositionFlags.General) cmd.General,
+                    m_Left = (CompositionFlags.Side) cmd.Left,
+                    m_Right = (CompositionFlags.Side) cmd.Right,
+                },
+            };
+
+            if (EntityManager.HasComponent<Upgraded>(edge))
+            {
+                EntityManager.SetComponentData(edge, up);
+            }
+            else
+            {
+                EntityManager.AddComponentData(edge, up);
+            }
+
+            if (!EntityManager.HasComponent<Updated>(edge))
+            {
+                EntityManager.AddComponent<Updated>(edge);
+            }
+
+            if (!EntityManager.HasComponent<BatchesUpdated>(edge))
+            {
+                EntityManager.AddComponent<BatchesUpdated>(edge);
+            }
+
+            CS2M.Log.Info($"[NetEdit] APPLIED upgrade edge={edge.Index} g={cmd.General} l={cmd.Left} r={cmd.Right}");
         }
 
         private void ApplyDelete(NetDeleteCommand cmd)
