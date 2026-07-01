@@ -106,6 +106,10 @@ namespace CS2M
             updateSystem.UpdateBefore<BudgetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<BudgetApplySystem>(SystemUpdatePhase.Modification5);
 
+            // District sync (paint a district area — boundary polygon via AreaData archetype).
+            updateSystem.UpdateBefore<DistrictDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<DistrictApplySystem>(SystemUpdatePhase.Modification5);
+
             // Delete/move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);

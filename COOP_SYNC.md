@@ -32,6 +32,7 @@ unfocused). Results from the last run (`simSpeed=3`, real city):
 | Net upgrade (sidewalks/trees, by pos) | ✅ PASS | `Upgraded.m_Flags.m_Left` 0→0x1000 (trees) applied+verified |
 | Tax rates | ✅ PASS | main tax 10→13 applied+verified |
 | Service budgets (funding sliders) | ✅ PASS | Roads funding 100→90 via `SetServiceBudget`, verified |
+| Districts (paint area geometry) | ✅ PASS | District entity created from `AreaData.m_Archetype` + `Node` polygon (name is v2 — UI-managed) |
 | City policies | ✅ PASS | apply raises Event+Modify at Modification3 (before `Game.Policies.ModifiedSystem` at Mod4); policy adjustment 10→27 consumed+verified |
 | Pause‑on‑join | ✅ PASS | `selectedSpeed`→0 + `[Join] PAUSED` |
 | Resume‑on‑join | 🟡 works | `[Join] RESUMED speed=1`; read‑back shows 0 only because the game auto‑pauses while unfocused (headless artifact) |

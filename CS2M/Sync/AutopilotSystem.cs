@@ -79,6 +79,7 @@ namespace CS2M.Sync
         private int _taxExpectedMain = int.MinValue;
         private Entity _budgetService;
         private int _budgetExpected = int.MinValue;
+        private int _districtsBefore = -1;
         private float3 _movePosExpected;
         private Entity _zoneBlock;
         private ushort _zoneExpectedIndex;
@@ -302,7 +303,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 15) { return; }
+            if (_testStep > 16) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -320,10 +321,11 @@ namespace CS2M.Sync
                 case 9: VerifyNetUpgrade(); ActDelete(); break;
                 case 10: VerifyDelete(); ActTax(); break;
                 case 11: VerifyTax(); ActBudget(); break;
-                case 12: VerifyBudget(); ActPolicy(); break;
-                case 13: VerifyPolicy(); ActPause(); break;
-                case 14: VerifyPause(); ActResume(); break;
-                case 15: VerifyResume(); Summary(); break;
+                case 12: VerifyBudget(); ActDistrict(); break;
+                case 13: VerifyDistrict(); ActPolicy(); break;
+                case 14: VerifyPolicy(); ActPause(); break;
+                case 15: VerifyPause(); ActResume(); break;
+                case 16: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -581,6 +583,94 @@ namespace CS2M.Sync
             bool gone = !_idSystem.TryResolve(_treeSyncId, out Entity e) || !EntityManager.Exists(e)
                         || EntityManager.HasComponent<Deleted>(e);
             Result("delete", gone, gone ? "tree removed" : "tree still present");
+        }
+
+        private void ActDistrict()
+        {
+            _districtsBefore = -1;
+            if (!TryGetDistrictPrefab(out string type, out string name, out Entity _))
+            {
+                Result("district", false, "no District prefab found");
+                return;
+            }
+
+            if (!TryAnchor(out float3 center))
+            {
+                Result("district", false, "no anchor point in city");
+                return;
+            }
+
+            float y = center.y;
+            var xs = new[] { center.x - 60f, center.x + 60f, center.x + 60f, center.x - 60f, center.x - 60f };
+            var zs = new[] { center.z - 60f, center.z - 60f, center.z + 60f, center.z + 60f, center.z - 60f };
+            var ys = new[] { y, y, y, y, y };
+
+            _districtsBefore = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Areas.District>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            }).CalculateEntityCount();
+
+            L($"[Auto] TEST district INJECT name={name} center=({center.x:F0},{center.z:F0}) before={_districtsBefore}");
+            RemoteDistrictQueue.Enqueue(new DistrictCommand
+            {
+                PrefabType = type, PrefabName = name, OptionMask = 0u, Xs = xs, Ys = ys, Zs = zs,
+            });
+        }
+
+        private void VerifyDistrict()
+        {
+            if (_districtsBefore < 0) { return; }
+            int after = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Areas.District>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            }).CalculateEntityCount();
+            Result("district", after > _districtsBefore, $"districts {_districtsBefore}->{after}");
+        }
+
+        private bool TryGetDistrictPrefab(out string type, out string name, out Entity dp)
+        {
+            type = null;
+            name = null;
+            dp = Entity.Null;
+            EntityQuery q = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.AreaData>());
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!_prefabSystem.TryGetPrefab(e, out PrefabBase pb) || pb == null) { continue; }
+                    if (pb.name.IndexOf("District", System.StringComparison.OrdinalIgnoreCase) < 0) { continue; }
+                    type = pb.GetType().Name;
+                    name = pb.name;
+                    dp = e;
+                    return true;
+                }
+            }
+            finally { ents.Dispose(); }
+
+            return false;
+        }
+
+        private bool TryAnchor(out float3 center)
+        {
+            center = default;
+            if (!_buildingQuery.IsEmptyIgnoreFilter)
+            {
+                NativeArray<Entity> b = _buildingQuery.ToEntityArray(Allocator.Temp);
+                try { center = EntityManager.GetComponentData<Game.Objects.Transform>(b[0]).m_Position; return true; }
+                finally { b.Dispose(); }
+            }
+
+            if (!_edgeQuery.IsEmptyIgnoreFilter)
+            {
+                NativeArray<Entity> e = _edgeQuery.ToEntityArray(Allocator.Temp);
+                try { center = EntityManager.GetComponentData<Game.Net.Curve>(e[0]).m_Bezier.a; return true; }
+                finally { e.Dispose(); }
+            }
+
+            return false;
         }
 
         private void ActBudget()
