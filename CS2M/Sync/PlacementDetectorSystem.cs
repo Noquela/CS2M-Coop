@@ -162,10 +162,15 @@ namespace CS2M.Sync
                         cmd.ElevationFlags = (byte) elevation.m_Flags;
                     }
 
+                    // Stamp a cross-PC id on our own entity and ship it so the other PC's copy
+                    // gets the same id (enables later move/delete of this object).
+                    cmd.SyncId = CS2M_SyncIdSystem.Allocate();
+                    CS2M_SyncIdSystem.Register(EntityManager, entity, cmd.SyncId);
+
                     CS2M.Log.Info(
                         $"[Place] DETECT+RESOLVE-OK type={cmd.PrefabType} name={cmd.PrefabName} " +
                         $"pos=({cmd.PosX:F1},{cmd.PosY:F1},{cmd.PosZ:F1}) seed={cmd.RandomSeed} " +
-                        $"elev={cmd.Elevation:F2} tool={toolId} entity={entity.Index}");
+                        $"elev={cmd.Elevation:F2} syncId={cmd.SyncId} tool={toolId} entity={entity.Index}");
 
                     Command.SendToAll?.Invoke(cmd);
                     CS2M.Log.Info($"[Place] SEND name={cmd.PrefabName}");

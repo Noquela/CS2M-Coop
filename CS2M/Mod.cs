@@ -77,8 +77,14 @@ namespace CS2M
             // Anarchy's AnarchyPlopSystem). The remote-apply system runs at Modification5,
             // AFTER GenerateObjectsSystem (Modification1), so each injected definition is
             // consumed exactly once before we destroy it (no duplicate objects).
+            // Cross-PC entity id service (must exist before apply/detect systems resolve ids).
+            updateSystem.UpdateAt<CS2M_SyncIdSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateBefore<PlacementDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<RemotePlacementApplySystem>(SystemUpdatePhase.Modification5);
+
+            // Money sync (host broadcasts authoritative cash; clients snap to it).
+            updateSystem.UpdateBefore<MoneySyncSenderSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<MoneySyncApplySystem>(SystemUpdatePhase.Modification5);
             Log.Info("Loading complete");
         }
 

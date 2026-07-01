@@ -18,6 +18,9 @@ namespace CS2M.Commands.Data.Game
     /// </remarks>
     public class ObjectPlaceCommand : CommandBase
     {
+        /// <summary>Cross-PC stable id for this object (see <c>CS2M_SyncId</c>), so it can later be moved/deleted.</summary>
+        public ulong SyncId { get; set; }
+
         // --- Prefab identity (machine-independent). ---
         /// <summary>Prefab C# class name, e.g. "BuildingPrefab" / "StaticObjectPrefab".</summary>
         public string PrefabType { get; set; }

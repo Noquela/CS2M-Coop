@@ -129,8 +129,11 @@ namespace CS2M.Sync
                 EntityManager.AddComponent<Updated>(obj);
             }
 
+            // Same cross-PC id as the sender's entity, so later move/delete resolves here too.
+            CS2M_SyncIdSystem.Register(EntityManager, obj, cmd.SyncId);
+
             CS2M.Log.Info(
-                $"[Place] APPLIED name={cmd.PrefabName} entity={obj.Index} prefabEntity={prefabEntity.Index} " +
+                $"[Place] APPLIED name={cmd.PrefabName} entity={obj.Index} syncId={cmd.SyncId} prefabEntity={prefabEntity.Index} " +
                 $"pos=({position.x:F1},{position.y:F1},{position.z:F1}) seed={cmd.RandomSeed} " +
                 $"hasTransform={EntityManager.HasComponent<Game.Objects.Transform>(obj)} " +
                 $"hasBuilding={EntityManager.HasComponent<Game.Buildings.Building>(obj)}");
