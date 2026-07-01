@@ -33,6 +33,7 @@ unfocused). Results from the last run (`simSpeed=3`, real city):
 | Tax rates | ✅ PASS | main tax 10→13 applied+verified |
 | Service budgets (funding sliders) | ✅ PASS | Roads funding 100→90 via `SetServiceBudget`, verified |
 | Districts (paint area geometry) | ✅ PASS | District entity created from `AreaData.m_Archetype` + `Node` polygon (name is v2 — UI-managed) |
+| Water sources (springs/drains) | ✅ PASS | `WaterSourceData`+`Transform` entity created (count 1→2); game's WaterSystem simulates it |
 | City policies | ✅ PASS | apply raises Event+Modify at Modification3 (before `Game.Policies.ModifiedSystem` at Mod4); policy adjustment 10→27 consumed+verified |
 | Pause‑on‑join | ✅ PASS | `selectedSpeed`→0 + `[Join] PAUSED` |
 | Resume‑on‑join | 🟡 works | `[Join] RESUMED speed=1`; read‑back shows 0 only because the game auto‑pauses while unfocused (headless artifact) |

@@ -80,6 +80,7 @@ namespace CS2M.Sync
         private Entity _budgetService;
         private int _budgetExpected = int.MinValue;
         private int _districtsBefore = -1;
+        private int _waterBefore = -1;
         private float3 _movePosExpected;
         private Entity _zoneBlock;
         private ushort _zoneExpectedIndex;
@@ -303,7 +304,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 16) { return; }
+            if (_testStep > 17) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -322,10 +323,11 @@ namespace CS2M.Sync
                 case 10: VerifyDelete(); ActTax(); break;
                 case 11: VerifyTax(); ActBudget(); break;
                 case 12: VerifyBudget(); ActDistrict(); break;
-                case 13: VerifyDistrict(); ActPolicy(); break;
-                case 14: VerifyPolicy(); ActPause(); break;
-                case 15: VerifyPause(); ActResume(); break;
-                case 16: VerifyResume(); Summary(); break;
+                case 13: VerifyDistrict(); ActWater(); break;
+                case 14: VerifyWater(); ActPolicy(); break;
+                case 15: VerifyPolicy(); ActPause(); break;
+                case 16: VerifyPause(); ActResume(); break;
+                case 17: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -583,6 +585,34 @@ namespace CS2M.Sync
             bool gone = !_idSystem.TryResolve(_treeSyncId, out Entity e) || !EntityManager.Exists(e)
                         || EntityManager.HasComponent<Deleted>(e);
             Result("delete", gone, gone ? "tree removed" : "tree still present");
+        }
+
+        private void ActWater()
+        {
+            _waterBefore = -1;
+            if (!TryAnchor(out float3 center)) { Result("water", false, "no anchor point in city"); return; }
+            _waterBefore = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Simulation.WaterSourceData>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            }).CalculateEntityCount();
+            L($"[Auto] TEST water INJECT pos=({center.x:F0},{center.z:F0}) before={_waterBefore}");
+            RemoteWaterQueue.Enqueue(new WaterCommand
+            {
+                PosX = center.x, PosY = center.y, PosZ = center.z,
+                Radius = 20f, Height = 5f, Multiplier = 1f, Polluted = 0f, ConstantDepth = 0,
+            });
+        }
+
+        private void VerifyWater()
+        {
+            if (_waterBefore < 0) { return; }
+            int after = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Simulation.WaterSourceData>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            }).CalculateEntityCount();
+            Result("water", after > _waterBefore, $"waterSources {_waterBefore}->{after}");
         }
 
         private void ActDistrict()

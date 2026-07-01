@@ -110,6 +110,10 @@ namespace CS2M
             updateSystem.UpdateBefore<DistrictDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<DistrictApplySystem>(SystemUpdatePhase.Modification5);
 
+            // Water-source sync (WaterSourceData entities — the game's WaterSystem simulates from them).
+            updateSystem.UpdateBefore<WaterDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<WaterApplySystem>(SystemUpdatePhase.Modification5);
+
             // Delete/move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);
