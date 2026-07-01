@@ -83,6 +83,8 @@ namespace CS2M.Sync
         private float3 _netStart;
         private float3 _netEnd;
         private int _edgesBeforeNetDelete;
+        private Entity _policyEntity;
+        private bool _policyExpectedActive;
         private float _speedBeforePause;
         private bool _forceRun = true; // keep the sim ticking (game auto-pauses when unfocused)
         private readonly List<string> _results = new List<string>();
@@ -294,7 +296,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 12) { return; }
+            if (_testStep > 13) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -310,9 +312,10 @@ namespace CS2M.Sync
                 case 7: VerifyNet(); ActNetDelete(); break;
                 case 8: VerifyNetDelete(); ActDelete(); break;
                 case 9: VerifyDelete(); ActTax(); break;
-                case 10: VerifyTax(); ActPause(); break;
-                case 11: VerifyPause(); ActResume(); break;
-                case 12: VerifyResume(); Summary(); break;
+                case 10: VerifyTax(); ActPolicy(); break;
+                case 11: VerifyPolicy(); ActPause(); break;
+                case 12: VerifyPause(); ActResume(); break;
+                case 13: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -570,6 +573,66 @@ namespace CS2M.Sync
             bool gone = !_idSystem.TryResolve(_treeSyncId, out Entity e) || !EntityManager.Exists(e)
                         || EntityManager.HasComponent<Deleted>(e);
             Result("delete", gone, gone ? "tree removed" : "tree still present");
+        }
+
+        private void ActPolicy()
+        {
+            _policyEntity = Entity.Null;
+            _policyExpectedActive = false;
+            if (!TryCity(out Entity city) || !EntityManager.HasBuffer<Game.Policies.Policy>(city))
+            {
+                Result("policy", false, "no Policy buffer on City");
+                return;
+            }
+
+            DynamicBuffer<Game.Policies.Policy> buf = EntityManager.GetBuffer<Game.Policies.Policy>(city, true);
+            if (buf.Length == 0) { Result("policy", false, "no unlocked policies in this (empty) city"); return; }
+
+            Entity target = Entity.Null;
+            bool newActive = true;
+            string name = null;
+            for (int i = 0; i < buf.Length; i++)
+            {
+                bool active = (buf[i].m_Flags & Game.Policies.PolicyFlags.Active) != 0;
+                if (!active && _prefabSystem.TryGetPrefab(buf[i].m_Policy, out PrefabBase pb) && pb != null)
+                {
+                    target = buf[i].m_Policy; newActive = true; name = pb.name; break;
+                }
+            }
+
+            if (target == Entity.Null && _prefabSystem.TryGetPrefab(buf[0].m_Policy, out PrefabBase pb0) && pb0 != null)
+            {
+                target = buf[0].m_Policy;
+                newActive = (buf[0].m_Flags & Game.Policies.PolicyFlags.Active) == 0;
+                name = pb0.name;
+            }
+
+            if (target == Entity.Null) { Result("policy", false, "no resolvable policy"); return; }
+
+            _policyEntity = target;
+            _policyExpectedActive = newActive;
+            string type = _prefabSystem.TryGetPrefab(target, out PrefabBase pbt) && pbt != null ? pbt.GetType().Name : "PolicyPrefab";
+            L($"[Auto] TEST policy INJECT name={name} active={newActive}");
+            RemotePolicyQueue.Enqueue(new PolicyCommand { PolicyType = type, PolicyName = name, Active = newActive, Adjustment = 0f });
+        }
+
+        private void VerifyPolicy()
+        {
+            if (_policyEntity == Entity.Null) { return; }
+            if (!TryCity(out Entity city) || !EntityManager.HasBuffer<Game.Policies.Policy>(city)) { Result("policy", false, "no Policy buffer"); return; }
+            DynamicBuffer<Game.Policies.Policy> buf = EntityManager.GetBuffer<Game.Policies.Policy>(city, true);
+            bool found = false, active = false;
+            for (int i = 0; i < buf.Length; i++)
+            {
+                if (buf[i].m_Policy == _policyEntity)
+                {
+                    found = true;
+                    active = (buf[i].m_Flags & Game.Policies.PolicyFlags.Active) != 0;
+                    break;
+                }
+            }
+
+            Result("policy", found && active == _policyExpectedActive, $"found={found} active={active} expected={_policyExpectedActive}");
         }
 
         private void ActNetDelete()

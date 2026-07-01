@@ -28,6 +28,9 @@ unfocused). Results from the last run (`simSpeed=3`, real city):
 | Move (by SyncId) | ✅ PASS | building Transform moved to exact target |
 | Zoning (paint by ZonePrefab name) | ✅ PASS | cell index → 39 (real zone), verified |
 | Delete (by SyncId) | ✅ PASS | tree removed, count 2→1 |
+| Net delete (bulldoze, by endpoint pos) | ✅ PASS | edges 483→482; `[NetEdit] APPLIED delete` |
+| Tax rates | ✅ PASS | main tax 10→13 applied+verified |
+| City policies | 🔶 partial | apply raises the Modify event but the game's consumer doesn't act on a mod-created event (buffer flag unchanged) — needs the consumer system identified; detector (buffer diff) is ready |
 | Pause‑on‑join | ✅ PASS | `selectedSpeed`→0 + `[Join] PAUSED` |
 | Resume‑on‑join | 🟡 works | `[Join] RESUMED speed=1`; read‑back shows 0 only because the game auto‑pauses while unfocused (headless artifact) |
 | **Nets (roads/rails/pipes/power/fences)** | ✅ **PASS** | `totalEdges` 482→483; `[Net] APPLIED edge=… startNode=… endNode=…` |

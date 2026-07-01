@@ -96,6 +96,10 @@ namespace CS2M
             updateSystem.UpdateBefore<TaxDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<TaxApplySystem>(SystemUpdatePhase.Modification5);
 
+            // City-policy sync (toggle a policy -> raise the same Modify event on the other PCs).
+            updateSystem.UpdateBefore<PolicyDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<PolicyApplySystem>(SystemUpdatePhase.Modification5);
+
             // Delete/move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);
