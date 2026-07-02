@@ -938,7 +938,26 @@ namespace CS2M.Sync
             NativeArray<Entity> ents = _edgeQuery.ToEntityArray(Allocator.Temp);
             try
             {
-                Entity e = ents[0];
+                // Pick a ROAD edge: side beautification (trees) is an invalid flag for tracks/pipes/
+                // power, where the game keeps the same composition and the test would false-FAIL.
+                Entity e = Entity.Null;
+                foreach (Entity cand in ents)
+                {
+                    if (_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(cand).m_Prefab,
+                            out PrefabBase p) && p != null && p.name.Contains("Road")
+                        && !p.name.Contains("Invisible"))
+                    {
+                        e = cand;
+                        break;
+                    }
+                }
+
+                if (e == Entity.Null)
+                {
+                    Result("net-upgrade", false, "no road edge found to upgrade");
+                    return;
+                }
+
                 Game.Net.Edge ed = EntityManager.GetComponentData<Game.Net.Edge>(e);
                 if (!EntityManager.HasComponent<Game.Net.Node>(ed.m_Start) || !EntityManager.HasComponent<Game.Net.Node>(ed.m_End))
                 {
