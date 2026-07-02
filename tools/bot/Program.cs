@@ -123,12 +123,15 @@ namespace CS2MBot
         private static string _username = "BotFriend";
         private static string _ip = "127.0.0.1";
         private static int _port = 1111;
+        private static string _mode = "act"; // act = build things; listen = assert relayed traffic arrives
 
         private static volatile bool _preconditionsOk;
         private static volatile bool _worldDone;
         private static PreconditionsErrorCommand _lastError;
         private static long _worldBytes;
         private static int _recvMoney, _recvSpeed, _recvProg, _recvChat, _recvCursor, _recvOther;
+        private static int _recvObjectPlace, _recvNetPlace, _recvDelete;
+        private static readonly HashSet<int> _sendersSeen = new HashSet<int>();
 
         // Calibration echoed by the server on a version/dlc/mod mismatch (first attempt sends blanks).
         private static Version _modVersion = new Version(0, 0, 0, 0);
@@ -143,6 +146,7 @@ namespace CS2MBot
                 if (args[i] == "--ip") { _ip = args[i + 1]; }
                 if (args[i] == "--port") { _port = int.Parse(args[i + 1]); }
                 if (args[i] == "--user") { _username = args[i + 1]; }
+                if (args[i] == "--mode") { _mode = args[i + 1]; }
             }
 
             return Run();
@@ -315,6 +319,20 @@ namespace CS2MBot
                 case MoneySyncCommand m: _recvMoney++; break;
                 case SpeedCommand s: _recvSpeed++; break;
                 case ProgressionSyncCommand p: _recvProg++; break;
+                case ObjectPlaceCommand op:
+                    _recvObjectPlace++;
+                    _sendersSeen.Add(op.SenderId);
+                    Log($"RELAYED object place: {op.PrefabName} sender={op.SenderId}");
+                    break;
+                case NetPlaceCommand np:
+                    _recvNetPlace++;
+                    _sendersSeen.Add(np.SenderId);
+                    Log($"RELAYED net place: {np.PrefabName} sender={np.SenderId}");
+                    break;
+                case DeleteCommand dc:
+                    _recvDelete++;
+                    Log($"RELAYED delete sender={dc.SenderId}");
+                    break;
                 case ChatMessageCommand c:
                     _recvChat++;
                     Log($"chat<{c.Username}> {c.Message}");
@@ -335,6 +353,11 @@ namespace CS2MBot
 
         private static int RunSession()
         {
+            if (_mode == "listen")
+            {
+                return RunListenSession();
+            }
+
             Log("=== PLAYING (from the host's perspective) — running remote-friend script ===");
             Pump(3000);
 
@@ -384,6 +407,26 @@ namespace CS2MBot
 
             _net.Stop();
             return hostAuthoritativeFlowing ? 0 : 1;
+        }
+
+        /// <summary>3rd-player validation: sit connected and assert that another CLIENT's actions
+        /// reach us via the host's relay (the star-topology hop that was missing before v43).</summary>
+        private static int RunListenSession()
+        {
+            Log("=== LISTEN mode: waiting for relayed traffic from the OTHER client ===");
+            Pump(45000);
+
+            Log("=== RECEIVED ===");
+            Log($"objectPlace={_recvObjectPlace} netPlace={_recvNetPlace} delete={_recvDelete} " +
+                $"money={_recvMoney} speed={_recvSpeed} senders=[{string.Join(",", _sendersSeen)}]");
+            bool relayed = _recvObjectPlace >= 1 && _recvNetPlace >= 1 && _recvDelete >= 1;
+            bool identified = _sendersSeen.Count > 0 && !_sendersSeen.Contains(0);
+            Log(relayed && identified
+                ? "BOT-RESULT relay: PASS (other client's actions relayed with a non-zero sender id)"
+                : $"BOT-RESULT relay: FAIL (relayed={relayed} identified={identified})");
+
+            _net.Stop();
+            return relayed && identified ? 0 : 1;
         }
 
         private static void Pump(int ms)
