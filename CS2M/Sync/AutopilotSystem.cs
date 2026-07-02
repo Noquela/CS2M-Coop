@@ -95,6 +95,7 @@ namespace CS2M.Sync
         private uint _upgradeExpectedLeft;
         private Entity _policyEntity;
         private float _policyExpectedAdj = float.NaN;
+        private Entity _upgradeCompositionBefore;
         private float _speedBeforePause;
         private uint _frameIndexAtPause;
         private uint _frameIndexAtSabotage;
@@ -948,6 +949,9 @@ namespace CS2M.Sync
                 float3 s = EntityManager.GetComponentData<Game.Net.Node>(ed.m_Start).m_Position;
                 float3 en = EntityManager.GetComponentData<Game.Net.Node>(ed.m_End).m_Position;
                 _upgradeEdge = e;
+                _upgradeCompositionBefore = EntityManager.HasComponent<Game.Net.Composition>(e)
+                    ? EntityManager.GetComponentData<Game.Net.Composition>(e).m_Edge
+                    : Entity.Null;
                 _upgradeExpectedLeft = 0x1000u; // CompositionFlags.Side.PrimaryBeautification (trees, left)
                 L($"[Auto] TEST net-upgrade INJECT edge={e.Index} left=0x{_upgradeExpectedLeft:X}");
                 RemoteNetUpgradeQueue.Enqueue(new NetUpgradeCommand
@@ -963,15 +967,31 @@ namespace CS2M.Sync
         private void VerifyNetUpgrade()
         {
             if (_upgradeEdge == Entity.Null) { return; }
-            if (!EntityManager.Exists(_upgradeEdge) || !EntityManager.HasComponent<Game.Net.Upgraded>(_upgradeEdge))
+            if (!EntityManager.Exists(_upgradeEdge))
             {
-                Result("net-upgrade", false, "no Upgraded on edge (game may have cleared an invalid flag for this road)");
+                Result("net-upgrade", false, "edge vanished");
                 return;
             }
 
-            Game.Net.Upgraded u = EntityManager.GetComponentData<Game.Net.Upgraded>(_upgradeEdge);
-            uint left = (uint) u.m_Flags.m_Left;
-            Result("net-upgrade", (left & _upgradeExpectedLeft) == _upgradeExpectedLeft, $"left=0x{left:X} expectedBit=0x{_upgradeExpectedLeft:X}");
+            // Tag still present (apply landed late in the step window): check the flag directly.
+            if (EntityManager.HasComponent<Game.Net.Upgraded>(_upgradeEdge))
+            {
+                Game.Net.Upgraded u = EntityManager.GetComponentData<Game.Net.Upgraded>(_upgradeEdge);
+                uint left = (uint) u.m_Flags.m_Left;
+                Result("net-upgrade", (left & _upgradeExpectedLeft) == _upgradeExpectedLeft,
+                    $"left=0x{left:X} expectedBit=0x{_upgradeExpectedLeft:X}");
+                return;
+            }
+
+            // Normal since v41 (apply runs before Mod1): the pipeline CONSUMES Upgraded the same
+            // frame — the real effect is CompositionSelectSystem picking a NEW composition for the
+            // edge. Reading the re-selected composition is the non-circular proof the upgrade landed.
+            Entity compNow = EntityManager.HasComponent<Game.Net.Composition>(_upgradeEdge)
+                ? EntityManager.GetComponentData<Game.Net.Composition>(_upgradeEdge).m_Edge
+                : Entity.Null;
+            bool changed = compNow != Entity.Null && compNow != _upgradeCompositionBefore;
+            Result("net-upgrade", changed,
+                $"composition {_upgradeCompositionBefore.Index}->{compNow.Index} (Upgraded consumed by pipeline)");
         }
 
         private void ActPolicy()
