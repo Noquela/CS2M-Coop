@@ -113,9 +113,23 @@ namespace CS2M.Sync
         private int _connectRetryFrames;
         private int _connectAttempts;
 
+        // ---- "/validate" chat command: run the full self-check inside the CURRENT live session ----
+        private static bool _chatValidationRequested;
+        private bool _chatValidation;
+
+        /// <summary>Called by the chat panel when the player types "/validate".</summary>
+        public static void RequestChatValidation()
+        {
+            _chatValidationRequested = true;
+        }
+
         protected override void OnCreate()
         {
             base.OnCreate();
+
+            // Systems/queries are initialized unconditionally so the "/validate" chat command works
+            // in any session; the env-var only gates the AUTOMATED (headless) roles below.
+            InitSystemsAndQueries();
 
             string role = Environment.GetEnvironmentVariable("CS2M_AUTOPILOT");
             if (string.IsNullOrEmpty(role))
@@ -144,6 +158,15 @@ namespace CS2M.Sync
 
             _testEnabled = Environment.GetEnvironmentVariable("CS2M_AP_TEST") != "0";
 
+            GameManager.instance.onGameLoadingComplete += OnLoadingComplete;
+
+            string r = _selftest ? "SELFTEST" : (_isHost ? "HOST" : "CLIENT");
+            L($"[Auto] ENABLED role={r} port={_port} ip={_ip} scriptedTest={_testEnabled} " +
+              $"log={_logPath ?? "(game log only)"}");
+        }
+
+        private void InitSystemsAndQueries()
+        {
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             _citySystem = World.GetOrCreateSystemManaged<CitySystem>();
             _sim = World.GetOrCreateSystemManaged<SimulationSystem>();
@@ -209,12 +232,6 @@ namespace CS2M.Sync
                 All = new[] { ComponentType.ReadOnly<Game.Net.Edge>() },
                 None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
             });
-
-            GameManager.instance.onGameLoadingComplete += OnLoadingComplete;
-
-            string r = _selftest ? "SELFTEST" : (_isHost ? "HOST" : "CLIENT");
-            L($"[Auto] ENABLED role={r} port={_port} ip={_ip} scriptedTest={_testEnabled} " +
-              $"log={_logPath ?? "(game log only)"}");
         }
 
         protected override void OnDestroy()
@@ -248,8 +265,76 @@ namespace CS2M.Sync
 
         protected override void OnUpdate()
         {
+            if (_chatValidationRequested)
+            {
+                _chatValidationRequested = false;
+                StartChatValidation();
+            }
+
+            if (_chatValidation)
+            {
+                UpdateChatValidation();
+                return;
+            }
+
             if (_disabled) { return; }
             if (_isHost) { UpdateHost(); } else { UpdateClient(); }
+        }
+
+        // ------------- "/validate": full self-check inside the live session (no relaunch) -------------
+
+        private void StartChatValidation()
+        {
+            if (_chatValidation)
+            {
+                return;
+            }
+
+            if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
+            {
+                Chat("validation needs an active session (host or join first).");
+                return;
+            }
+
+            _chatValidation = true;
+            _testStep = 0;
+            _testTimer = 60;
+            _results.Clear();
+            _forceRun = false; // never override the live session's speed
+            L("[Auto] CHAT VALIDATION starting (triggered by /validate)");
+            Chat($"validating this build in-session — ~20 checks over ~1 min. role={CS2M.API.Commands.Command.CurrentRole}. " +
+                 "NOTE: the check modifies the city (money/XP/test objects) — best on a test save.");
+        }
+
+        private void UpdateChatValidation()
+        {
+            RunSelftestStep();
+
+            // Fake remote cursor while validating: the player can SEE the label pipeline working.
+            if (TryAnchor(out float3 cursorAnchor))
+            {
+                RemotePlayerCursors.Update(1, cursorAnchor.x + 30f, cursorAnchor.y, cursorAnchor.z + 30f,
+                    true, "FakeFriend");
+            }
+
+            if (_testStep > 19)
+            {
+                _chatValidation = false;
+                RemotePlayerCursors.Remove(1);
+                int pass = 0, fail = 0;
+                foreach (string line in _results)
+                {
+                    if (line.Contains(": PASS")) { pass++; } else { fail++; }
+                }
+
+                Chat($"validation DONE: {pass} PASS / {fail} FAIL (details in CS2M.log)");
+            }
+        }
+
+        private void Chat(string msg)
+        {
+            try { CS2M.API.Chat.Instance?.PrintChatMessage("CS2M", msg); }
+            catch { }
         }
 
         // ---------------------------------------------------------------- HOST / SELFTEST
@@ -1021,7 +1106,8 @@ namespace CS2M.Sync
             RemoteJoinState.Update("TestJoiner", false);
             // Re-arm the force-run: in a headless/unfocused window the game auto-pauses, which made
             // the old resume check a guaranteed false FAIL. frameIndex advancing is the real signal.
-            _forceRun = true;
+            // (Never force-run during a live "/validate" — the player owns the sim speed there.)
+            _forceRun = !_chatValidation;
             _frameIndexAtResume = _sim.frameIndex;
         }
 
@@ -1050,6 +1136,10 @@ namespace CS2M.Sync
             string line = $"{name}: {(ok ? "PASS" : "FAIL")} ({detail})";
             _results.Add(line);
             L($"[Auto] RESULT {line}");
+            if (_chatValidation)
+            {
+                Chat($"{(ok ? "PASS" : "FAIL")} — {name}" + (ok ? "" : $" ({detail})"));
+            }
         }
 
         // ------- state readers -------

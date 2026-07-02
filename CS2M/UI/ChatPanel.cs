@@ -93,6 +93,15 @@ namespace CS2M.UI
                 return;
             }
 
+            // Chat command: "/validate" runs the full sync self-check in the CURRENT session and
+            // prints PASS/FAIL per feature here — validates a build without any relaunch/env vars.
+            if (LocalChatMessage.value != null && LocalChatMessage.value.Trim() == "/validate")
+            {
+                Sync.AutopilotSystem.RequestChatValidation();
+                LocalChatMessage.Update(string.Empty);
+                return;
+            }
+
             PrintChatMessage(username, LocalChatMessage.value);
 
             ChatMessageCommand message = new ChatMessageCommand()
