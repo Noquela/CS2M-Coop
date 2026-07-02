@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- net48 on purpose: the mod DLLs are net48 and we reference them directly so the wire
+         model (type-id assignment, LiteNetLib protocol version) is byte-identical to the game's. -->
+    <TargetFramework>net48</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>cs2m-bot</AssemblyName>
+    <LangVersion>9</LangVersion>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Public nugets at the EXACT versions the mod merges (protocol/wire compatibility). -->
+    <PackageReference Include="LiteNetLib" Version="1.3.1" />
+    <PackageReference Include="MessagePack" Version="3.1.3" />
+    <PackageReference Include="MessagePack.Attributeless" Version="1.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The real mod assemblies (deployed build) — the command POCO types come from here. -->
+    <Reference Include="CS2M">
+      <HintPath>C:\Users\Bruno\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2M\CS2M.dll</HintPath>
+      <!-- The merged DLL re-exports MessagePack/LiteNetLib types that collide with the nugets;
+           alias it so only the explicitly-qualified command POCOs come from here. -->
+      <Aliases>cs2m</Aliases>
+    </Reference>
+    <Reference Include="CS2M.API">
+      <HintPath>C:\Users\Bruno\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2M\CS2M.API.dll</HintPath>
+    </Reference>
+    <!-- Colossal.Version lives here (game managed dir). -->
+    <Reference Include="Colossal.Core">
+      <HintPath>C:\JogosCrackeados\Cities.Skylines.II.v1.5.3f1\game\Cities2_Data\Managed\Colossal.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
