@@ -22,5 +22,13 @@ namespace CS2M.Commands.Data.Game
         public float[] Ys { get; set; }
         public float[] Zs { get; set; }
         public float[] Els { get; set; }
+
+        /// <summary>v46: true = bulldozed (the receiver deletes the matching area).</summary>
+        public bool Delete { get; set; }
+
+        /// <summary>v46: standalone areas (surfaces/pavement — no owner) have OwnerPrefabName null;
+        /// they match by prefab + polygon center on the receiver.</summary>
+        public float CenterX { get; set; }
+        public float CenterZ { get; set; }
     }
 }

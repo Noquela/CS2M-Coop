@@ -54,6 +54,8 @@ namespace CS2M.Sync
     {
         private PrefabSystem _prefabSystem;
         private EntityQuery _appliedAreas;
+        private EntityQuery _appliedStandalone;
+        private EntityQuery _deletedAreas;
         private readonly HashSet<Entity> _recentlySent = new HashSet<Entity>();
         private int _clearCounter;
 
@@ -79,7 +81,47 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<CS2M_RemotePlaced>(),
                 },
             });
-            RequireForUpdate(_appliedAreas);
+
+            // v46: standalone areas — surfaces/pavement painted with the area tool, no owner.
+            _appliedStandalone = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.Area>(),
+                    ComponentType.ReadOnly<Game.Areas.Node>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Applied>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(),
+                    ComponentType.ReadOnly<Game.Areas.District>(), // districts have their own sync
+                    ComponentType.ReadOnly<Game.Areas.MapTile>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+            });
+
+            // v46: bulldozed areas (surfaces, work areas AND districts) sync by prefab + center.
+            _deletedAreas = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.Area>(),
+                    ComponentType.ReadOnly<Game.Areas.Node>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Game.Areas.MapTile>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+            });
+
+            RequireAnyForUpdate(_appliedAreas, _appliedStandalone, _deletedAreas);
             CS2M.Log.Info("[Area] AreaEditDetectorSystem created");
         }
 
@@ -150,6 +192,118 @@ namespace CS2M.Sync
                         Xs = xs, Ys = ys, Zs = zs, Els = els,
                     });
                     CS2M.Log.Info($"[Area] DETECT+SEND name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length}");
+                }
+            }
+            finally
+            {
+                areas.Dispose();
+            }
+
+            DetectStandalone();
+            DetectDeleted();
+        }
+
+        private void DetectStandalone()
+        {
+            if (_appliedStandalone.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> areas = _appliedStandalone.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity area in areas)
+                {
+                    if (!_recentlySent.Add(area))
+                    {
+                        continue;
+                    }
+
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
+                            out PrefabBase prefab) || prefab == null)
+                    {
+                        continue;
+                    }
+
+                    DynamicBuffer<Game.Areas.Node> nodes = EntityManager.GetBuffer<Game.Areas.Node>(area, true);
+                    var xs = new float[nodes.Length];
+                    var ys = new float[nodes.Length];
+                    var zs = new float[nodes.Length];
+                    var els = new float[nodes.Length];
+                    float cx = 0f, cz = 0f;
+                    for (int i = 0; i < nodes.Length; i++)
+                    {
+                        xs[i] = nodes[i].m_Position.x;
+                        ys[i] = nodes[i].m_Position.y;
+                        zs[i] = nodes[i].m_Position.z;
+                        els[i] = nodes[i].m_Elevation;
+                        cx += xs[i];
+                        cz += zs[i];
+                    }
+
+                    Command.SendToAll?.Invoke(new AreaEditCommand
+                    {
+                        PrefabType = prefab.GetType().Name,
+                        PrefabName = prefab.name,
+                        Xs = xs, Ys = ys, Zs = zs, Els = els,
+                        CenterX = cx / nodes.Length,
+                        CenterZ = cz / nodes.Length,
+                    });
+                    CS2M.Log.Info($"[Area] DETECT+SEND standalone name={prefab.name} nodes={nodes.Length}");
+                }
+            }
+            finally
+            {
+                areas.Dispose();
+            }
+        }
+
+        private void DetectDeleted()
+        {
+            if (_deletedAreas.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> areas = _deletedAreas.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity area in areas)
+                {
+                    if (!_recentlySent.Add(area))
+                    {
+                        continue;
+                    }
+
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
+                            out PrefabBase prefab) || prefab == null)
+                    {
+                        continue;
+                    }
+
+                    DynamicBuffer<Game.Areas.Node> nodes = EntityManager.GetBuffer<Game.Areas.Node>(area, true);
+                    if (nodes.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    float cx = 0f, cz = 0f;
+                    for (int i = 0; i < nodes.Length; i++)
+                    {
+                        cx += nodes[i].m_Position.x;
+                        cz += nodes[i].m_Position.z;
+                    }
+
+                    Command.SendToAll?.Invoke(new AreaEditCommand
+                    {
+                        PrefabType = prefab.GetType().Name,
+                        PrefabName = prefab.name,
+                        Delete = true,
+                        CenterX = cx / nodes.Length,
+                        CenterZ = cz / nodes.Length,
+                    });
+                    CS2M.Log.Info($"[Area] DETECT+SEND delete name={prefab.name} center=({cx / nodes.Length:F0},{cz / nodes.Length:F0})");
                 }
             }
             finally
@@ -232,8 +386,21 @@ namespace CS2M.Sync
 
         private void ApplyOne(AreaEditCommand cmd)
         {
+            if (cmd.Delete)
+            {
+                ApplyDelete(cmd);
+                return;
+            }
+
             if (cmd.Xs == null || cmd.Zs == null || cmd.Xs.Length < 3)
             {
+                return;
+            }
+
+            // v46: standalone area (surface/pavement — no owner shipped).
+            if (cmd.OwnerSyncId == 0 && string.IsNullOrEmpty(cmd.OwnerPrefabName))
+            {
+                ApplyStandalone(cmd);
                 return;
             }
 
@@ -320,6 +487,144 @@ namespace CS2M.Sync
 
             _pendingDefinitions.Add(def);
             CS2M.Log.Info($"[Area] APPLIED-DEF create name={cmd.PrefabName} nodes={cmd.Xs.Length}");
+        }
+
+        /// <summary>Finds any non-tile area of the same prefab whose polygon center is nearest the
+        /// shipped center (districts included — a bulldozed district syncs through here too).</summary>
+        private Entity FindAreaByCenter(string prefabName, float cx, float cz, float maxDistSq)
+        {
+            EntityQuery all = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.Area>(),
+                    ComponentType.ReadOnly<Game.Areas.Node>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Game.Areas.MapTile>(),
+                },
+            });
+
+            Entity best = Entity.Null;
+            float bestD = maxDistSq;
+            NativeArray<Entity> areas = all.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity area in areas)
+                {
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
+                            out PrefabBase p) || p == null || p.name != prefabName)
+                    {
+                        continue;
+                    }
+
+                    DynamicBuffer<Game.Areas.Node> nodes = EntityManager.GetBuffer<Game.Areas.Node>(area, true);
+                    if (nodes.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    float ax = 0f, az = 0f;
+                    for (int i = 0; i < nodes.Length; i++)
+                    {
+                        ax += nodes[i].m_Position.x;
+                        az += nodes[i].m_Position.z;
+                    }
+
+                    ax /= nodes.Length;
+                    az /= nodes.Length;
+                    float dx = ax - cx;
+                    float dz = az - cz;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = area;
+                    }
+                }
+            }
+            finally
+            {
+                areas.Dispose();
+            }
+
+            return best;
+        }
+
+        private void ApplyDelete(AreaEditCommand cmd)
+        {
+            Entity target = FindAreaByCenter(cmd.PrefabName, cmd.CenterX, cmd.CenterZ, 100f);
+            if (target == Entity.Null)
+            {
+                CS2M.Log.Info($"[Area] SKIP delete noMatch name={cmd.PrefabName} at=({cmd.CenterX:F0},{cmd.CenterZ:F0})");
+                return;
+            }
+
+            if (!EntityManager.HasComponent<CS2M_RemotePlaced>(target))
+            {
+                EntityManager.AddComponent<CS2M_RemotePlaced>(target); // echo guard
+            }
+
+            EntityManager.AddComponent<Deleted>(target);
+            CS2M.Log.Info($"[Area] APPLIED delete name={cmd.PrefabName} entity={target.Index}");
+        }
+
+        private void ApplyStandalone(AreaEditCommand cmd)
+        {
+            Entity target = FindAreaByCenter(cmd.PrefabName, cmd.CenterX, cmd.CenterZ, 25f);
+            if (target != Entity.Null)
+            {
+                if (!EntityManager.HasComponent<CS2M_RemotePlaced>(target))
+                {
+                    EntityManager.AddComponent<CS2M_RemotePlaced>(target);
+                }
+
+                if (!EntityManager.HasComponent<Updated>(target))
+                {
+                    EntityManager.AddComponent<Updated>(target);
+                }
+
+                DynamicBuffer<Game.Areas.Node> nodes = EntityManager.GetBuffer<Game.Areas.Node>(target);
+                nodes.ResizeUninitialized(cmd.Xs.Length);
+                for (int i = 0; i < cmd.Xs.Length; i++)
+                {
+                    float el = cmd.Els != null && i < cmd.Els.Length ? cmd.Els[i] : float.MinValue;
+                    nodes[i] = new Game.Areas.Node(new float3(cmd.Xs[i], cmd.Ys[i], cmd.Zs[i]), el);
+                }
+
+                CS2M.Log.Info($"[Area] APPLIED standalone rewrite name={cmd.PrefabName} nodes={cmd.Xs.Length}");
+                return;
+            }
+
+            var prefabId = new PrefabID(cmd.PrefabType, cmd.PrefabName, default(Colossal.Hash128));
+            if (!_prefabSystem.TryGetPrefab(prefabId, out PrefabBase areaPrefab) || areaPrefab == null
+                || !_prefabSystem.TryGetEntity(areaPrefab, out Entity areaPrefabEntity))
+            {
+                CS2M.Log.Info($"[Area] RESOLVE-FAIL standalone name={cmd.PrefabName}");
+                return;
+            }
+
+            Entity def = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(def, new CreationDefinition
+            {
+                m_Prefab = areaPrefabEntity,
+                m_Flags = CreationFlags.Permanent,
+            });
+            EntityManager.AddComponent<Updated>(def);
+            DynamicBuffer<Game.Areas.Node> defNodes = EntityManager.AddBuffer<Game.Areas.Node>(def);
+            defNodes.ResizeUninitialized(cmd.Xs.Length);
+            for (int i = 0; i < cmd.Xs.Length; i++)
+            {
+                float el = cmd.Els != null && i < cmd.Els.Length ? cmd.Els[i] : float.MinValue;
+                defNodes[i] = new Game.Areas.Node(new float3(cmd.Xs[i], cmd.Ys[i], cmd.Zs[i]), el);
+            }
+
+            _pendingDefinitions.Add(def);
+            CS2M.Log.Info($"[Area] APPLIED-DEF standalone create name={cmd.PrefabName} nodes={cmd.Xs.Length}");
         }
 
         private Entity ResolveOwner(AreaEditCommand cmd)

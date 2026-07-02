@@ -45,9 +45,11 @@ namespace CS2M.Sync
 
         private void ApplyOne(PolicyCommand cmd)
         {
-            Entity city = _citySystem.City;
-            if (city == Entity.Null)
+            Entity target = ResolveTarget(cmd);
+            if (target == Entity.Null)
             {
+                CS2M.Log.Info($"[Policy] SKIP noTarget kind={cmd.TargetKind} name={cmd.PolicyName} " +
+                              $"at=({cmd.TargetX:F0},{cmd.TargetZ:F0})");
                 return;
             }
 
@@ -64,13 +66,81 @@ namespace CS2M.Sync
                 return;
             }
 
-            PolicySync.MarkApplied(cmd.PolicyName, cmd.Active);
+            if (cmd.TargetKind == 0)
+            {
+                PolicySync.MarkApplied(cmd.PolicyName, cmd.Active);
+            }
 
             Entity e = EntityManager.CreateEntity();
             EntityManager.AddComponent<Event>(e);
-            EntityManager.AddComponentData(e, new Modify(city, policyEntity, cmd.Active, cmd.Adjustment));
+            EntityManager.AddComponentData(e, new Modify(target, policyEntity, cmd.Active, cmd.Adjustment));
+            // Echo guard: the scoped-policy detector reads Modify events — never re-send ours.
+            EntityManager.AddComponent<CS2M_RemotePlaced>(e);
 
-            CS2M.Log.Info($"[Policy] APPLIED name={cmd.PolicyName} active={cmd.Active} adj={cmd.Adjustment}");
+            CS2M.Log.Info($"[Policy] APPLIED kind={cmd.TargetKind} name={cmd.PolicyName} active={cmd.Active} adj={cmd.Adjustment}");
+        }
+
+        private Entity ResolveTarget(PolicyCommand cmd)
+        {
+            if (cmd.TargetKind == 0)
+            {
+                return _citySystem.City;
+            }
+
+            if (cmd.TargetKind == 1)
+            {
+                if (cmd.TargetSyncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(cmd.TargetSyncId, out Entity byId)
+                    && EntityManager.Exists(byId) && !EntityManager.HasComponent<Deleted>(byId))
+                {
+                    return byId;
+                }
+
+                return FindNearest(GetEntityQuery(
+                        ComponentType.ReadOnly<Game.Buildings.Building>(),
+                        ComponentType.ReadOnly<Game.Objects.Transform>(),
+                        ComponentType.Exclude<Game.Tools.Temp>(),
+                        ComponentType.Exclude<Deleted>()),
+                    cmd.TargetX, cmd.TargetZ, 9f, useGeometry: false);
+            }
+
+            // districts: match by area center
+            return FindNearest(GetEntityQuery(
+                    ComponentType.ReadOnly<Game.Areas.District>(),
+                    ComponentType.ReadOnly<Game.Areas.Geometry>(),
+                    ComponentType.Exclude<Game.Tools.Temp>(),
+                    ComponentType.Exclude<Deleted>()),
+                cmd.TargetX, cmd.TargetZ, 2500f, useGeometry: true);
+        }
+
+        private Entity FindNearest(EntityQuery query, float x, float z, float maxDistSq, bool useGeometry)
+        {
+            Entity best = Entity.Null;
+            float bestD = maxDistSq;
+            Unity.Collections.NativeArray<Entity> ents =
+                query.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    Unity.Mathematics.float3 p = useGeometry
+                        ? EntityManager.GetComponentData<Game.Areas.Geometry>(cand).m_CenterPosition
+                        : EntityManager.GetComponentData<Game.Objects.Transform>(cand).m_Position;
+                    float dx = p.x - x;
+                    float dz = p.z - z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = cand;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return best;
         }
     }
 }
