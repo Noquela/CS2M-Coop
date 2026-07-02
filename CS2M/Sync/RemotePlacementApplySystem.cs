@@ -71,7 +71,7 @@ namespace CS2M.Sync
 
             while (RemotePlacementQueue.TryDequeueObject(out ObjectPlaceCommand cmd))
             {
-                ApplyOne(cmd);
+                try { ApplyOne(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] apply failed in RemotePlacementApplySystem: {ex.Message}"); }
             }
         }
 
@@ -122,6 +122,13 @@ namespace CS2M.Sync
             var position = new float3(cmd.PosX, cmd.PosY, cmd.PosZ);
             var rotation = new quaternion(cmd.RotX, cmd.RotY, cmd.RotZ, cmd.RotW);
 
+            // v44: a sim spawn (host-authoritative growable) REPLACES whatever stood on that lot —
+            // this is how level-ups converge when the old building predates the session (no sync id).
+            if (cmd.Source == 1)
+            {
+                ClearLotFor(position);
+            }
+
             // 3. Create the real object from the archetype and set its transform/identity.
             //    (CreateEntity()+SetArchetype avoids the CreateEntity(ReadOnlySpan) overload
             //    which won't compile on net472 — no ReadOnlySpan there.)
@@ -144,6 +151,31 @@ namespace CS2M.Sync
             if (cmd.Elevation != 0f || cmd.ElevationFlags != 0)
             {
                 SetOrAdd(obj, new Elevation(cmd.Elevation, (ElevationFlags) cmd.ElevationFlags));
+            }
+
+            // v44: service-building extension — attach to the resolved owner; the game's
+            // ServiceUpgradeSystem (reacting to Created+Owner, and we run before Mod1) then wires
+            // InstalledUpgrade and the upgrade's effects on the parent itself.
+            if (!string.IsNullOrEmpty(cmd.OwnerPrefabName) || cmd.OwnerSyncId != 0)
+            {
+                Entity owner = ResolveOwner(cmd);
+                if (owner == Entity.Null)
+                {
+                    CS2M.Log.Info($"[Place] SKIP extension noOwner name={cmd.PrefabName} owner={cmd.OwnerPrefabName}");
+                    EntityManager.AddComponent<Deleted>(obj);
+                    return;
+                }
+
+                SetOrAdd(obj, new Owner(owner));
+                if (EntityManager.HasComponent<Attached>(obj))
+                {
+                    EntityManager.SetComponentData(obj, new Attached(owner, Entity.Null, 0f));
+                }
+
+                if (!EntityManager.HasComponent<Updated>(owner))
+                {
+                    EntityManager.AddComponent<Updated>(owner);
+                }
             }
 
             // Echo guard: mark this as remotely-created so our detector skips it.
@@ -179,6 +211,106 @@ namespace CS2M.Sync
             {
                 ChargeConstructionCost(prefabEntity, cmd.PrefabName);
             }
+        }
+
+        /// <summary>Deletes any building standing within ~2 m of the incoming sim spawn's lot
+        /// (the pre-level-up twin, or a stray local growable from before suppression kicked in).</summary>
+        private void ClearLotFor(float3 position)
+        {
+            EntityQuery buildings = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(),
+                },
+            });
+
+            Unity.Collections.NativeArray<Entity> ents =
+                buildings.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    var p = EntityManager.GetComponentData<Game.Objects.Transform>(cand).m_Position;
+                    float dx = p.x - position.x;
+                    float dz = p.z - position.z;
+                    if (dx * dx + dz * dz >= 4f)
+                    {
+                        continue;
+                    }
+
+                    if (!EntityManager.HasComponent<CS2M_RemotePlaced>(cand))
+                    {
+                        EntityManager.AddComponent<CS2M_RemotePlaced>(cand); // no delete echo
+                    }
+
+                    EntityManager.AddComponent<Deleted>(cand);
+                    CS2M.Log.Verbose($"[Grow] replaced local building entity={cand.Index} at spawn lot");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+        }
+
+        /// <summary>Resolve the extension's parent building: synced id first, else nearest
+        /// same-prefab building at the shipped position (native buildings have no id).</summary>
+        private Entity ResolveOwner(ObjectPlaceCommand cmd)
+        {
+            if (cmd.OwnerSyncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(cmd.OwnerSyncId, out Entity byId)
+                && EntityManager.Exists(byId) && !EntityManager.HasComponent<Deleted>(byId))
+            {
+                return byId;
+            }
+
+            EntityQuery buildings = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
+            });
+
+            Entity best = Entity.Null;
+            float bestD = 9f; // 3 m
+            Unity.Collections.NativeArray<Entity> ents =
+                buildings.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    var p = EntityManager.GetComponentData<Game.Objects.Transform>(cand).m_Position;
+                    float dx = p.x - cmd.OwnerX;
+                    float dz = p.z - cmd.OwnerZ;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = cand;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return best;
         }
 
         /// <summary>

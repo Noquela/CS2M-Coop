@@ -73,6 +73,22 @@ namespace CS2M
             Logger.Debug(message);
         }
 
+        /// <summary>
+        ///     High-volume sync chatter (per-command RECV lines, cursor heartbeats, id registrations).
+        ///     Suppressed by default so a busy session doesn't produce megabytes of log; set the
+        ///     CS2M_VERBOSE=1 environment variable to get the full firehose for debugging.
+        /// </summary>
+        public static readonly bool VerboseEnabled =
+            Environment.GetEnvironmentVariable("CS2M_VERBOSE") == "1";
+
+        public static void Verbose(string message)
+        {
+            if (VerboseEnabled)
+            {
+                Logger.Info(message);
+            }
+        }
+
         public static void Trace(string message)
         {
             Logger.Trace(message);

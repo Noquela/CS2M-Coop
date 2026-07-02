@@ -39,7 +39,7 @@ namespace CS2M.Sync
 
             while (RemotePolicyQueue.TryDequeue(out PolicyCommand cmd))
             {
-                ApplyOne(cmd);
+                try { ApplyOne(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] apply failed in PolicyApplySystem: {ex.Message}"); }
             }
         }
 

@@ -13,7 +13,7 @@ namespace CS2M.Commands.Handler.Game
 
         protected override void Handle(NetDeleteCommand command)
         {
-            CS2M.Log.Info($"[NetEdit] RECV delete start=({command.StartX:F0},{command.StartZ:F0}) end=({command.EndX:F0},{command.EndZ:F0})");
+            CS2M.Log.Verbose($"[NetEdit] RECV delete start=({command.StartX:F0},{command.StartZ:F0}) end=({command.EndX:F0},{command.EndZ:F0})");
             RemoteNetDeleteQueue.Enqueue(command);
         }
     }

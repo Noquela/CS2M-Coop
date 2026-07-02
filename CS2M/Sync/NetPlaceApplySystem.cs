@@ -78,7 +78,7 @@ namespace CS2M.Sync
 
             while (RemoteNetQueue.TryDequeue(out NetPlaceCommand cmd))
             {
-                ApplyOne(cmd);
+                try { ApplyOne(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] apply failed in NetPlaceApplySystem: {ex.Message}"); }
             }
         }
 

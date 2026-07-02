@@ -37,7 +37,7 @@ namespace CS2M.Sync
 
             while (RemoteDistrictQueue.TryDequeue(out DistrictCommand cmd))
             {
-                ApplyOne(cmd);
+                try { ApplyOne(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] apply failed in DistrictApplySystem: {ex.Message}"); }
             }
         }
 

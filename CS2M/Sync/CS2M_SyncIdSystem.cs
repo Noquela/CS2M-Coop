@@ -65,7 +65,7 @@ namespace CS2M.Sync
             }
 
             Map[id] = e;
-            CS2M.Log.Info($"[Id] REGISTER id={id} entity={e.Index}");
+            CS2M.Log.Verbose($"[Id] REGISTER id={id} entity={e.Index}");
         }
 
         /// <summary>Resolve a sync id to the current local entity, rebuilding the cache on a miss.</summary>

@@ -77,7 +77,33 @@ namespace CS2MTests
         public float RotW { get; set; }
     }
 
-    public class DeleteCommand : CommandBase { public ulong SyncId { get; set; } }
+    public class DeleteCommand : CommandBase
+    {
+        public ulong SyncId { get; set; }
+        public string PrefabType { get; set; }
+        public string PrefabName { get; set; }
+        public float PosX { get; set; }
+        public float PosY { get; set; }
+        public float PosZ { get; set; }
+    }
+
+    public class DevTreeCommand : CommandBase { public string NodeName { get; set; } }
+
+    public class EnvSyncCommand : CommandBase
+    {
+        public float Temperature { get; set; }
+        public float Precipitation { get; set; }
+        public float Cloudiness { get; set; }
+        public uint ElapsedTimeFrames { get; set; }
+    }
+
+    public class StateHashCommand : CommandBase
+    {
+        public int Edges { get; set; }
+        public int SyncedObjects { get; set; }
+        public int Districts { get; set; }
+        public int WaterSources { get; set; }
+    }
 
     public class MoneySyncCommand : CommandBase { public int Cash { get; set; } }
 
@@ -238,6 +264,10 @@ namespace CS2MTests
             RoundTrip(opts, new NetPlaceCommand { SyncId = 7UL, PrefabType = "NetPrefab", PrefabName = "Small Road", Ax = 12.9f, Dz = 478.4f, RandomSeed = 4309 }, c => c.PrefabName == "Small Road" && Math.Abs(c.Dz - 478.4f) < 0.01f);
             RoundTrip(opts, new MoveCommand { SyncId = 42UL, PosX = 1f, PosY = 2f, PosZ = 3f, RotW = 1f }, c => c.SyncId == 42UL && c.PosZ == 3f);
             RoundTrip(opts, new DeleteCommand { SyncId = 99UL }, c => c.SyncId == 99UL);
+            RoundTrip(opts, new DeleteCommand { SyncId = 0UL, PrefabType = "BuildingPrefab", PrefabName = "WaterTower03", PosX = -152.4f, PosY = 478f, PosZ = -61f }, c => c.SyncId == 0UL && c.PrefabName == "WaterTower03" && Math.Abs(c.PosX - (-152.4f)) < 0.01f);
+            RoundTrip(opts, new DevTreeCommand { NodeName = "Healthcare Node 3" }, c => c.NodeName == "Healthcare Node 3");
+            RoundTrip(opts, new EnvSyncCommand { Temperature = 21.5f, Precipitation = 0.7f, Cloudiness = 0.4f, ElapsedTimeFrames = 987654u }, c => Math.Abs(c.Temperature - 21.5f) < 0.01f && c.ElapsedTimeFrames == 987654u);
+            RoundTrip(opts, new StateHashCommand { Edges = 1085, SyncedObjects = 42, Districts = 3, WaterSources = 5 }, c => c.Edges == 1085 && c.SyncedObjects == 42 && c.WaterSources == 5);
             RoundTrip(opts, new MoneySyncCommand { Cash = 1234567 }, c => c.Cash == 1234567);
             RoundTrip(opts, new ProgressionSyncCommand { Xp = 5000, MaxPopulation = 12000, AchievedMilestone = 7, XpRewardRecord = 3 }, c => c.Xp == 5000 && c.AchievedMilestone == 7 && c.XpRewardRecord == 3);
             RoundTrip(opts, new ZonePaintCommand { BlockX = 100f, BlockZ = 200f, SizeX = 6, SizeY = 4, CellIndices = new[] { 0, 5, 11, 23 }, ZoneNames = new[] { "EU Residential Low", "", "EU Commercial", "EU Residential Low" } }, c => c.CellIndices.Length == 4 && c.CellIndices[2] == 11 && c.ZoneNames[1] == "" && c.ZoneNames[2] == "EU Commercial");

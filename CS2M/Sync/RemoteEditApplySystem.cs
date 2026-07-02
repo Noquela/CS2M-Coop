@@ -56,12 +56,12 @@ namespace CS2M.Sync
 
             while (RemoteEditQueue.TryDelete(out DeleteCommand del))
             {
-                ApplyDelete(del);
+                try { ApplyDelete(del); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] delete apply failed: {ex.Message}"); }
             }
 
             while (RemoteEditQueue.TryMove(out MoveCommand mv))
             {
-                ApplyMove(mv);
+                try { ApplyMove(mv); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] move apply failed: {ex.Message}"); }
             }
         }
 

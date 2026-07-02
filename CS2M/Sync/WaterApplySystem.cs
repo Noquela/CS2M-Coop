@@ -33,7 +33,7 @@ namespace CS2M.Sync
 
             while (RemoteWaterQueue.TryDequeue(out WaterCommand cmd))
             {
-                ApplyOne(cmd);
+                try { ApplyOne(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] apply failed in WaterApplySystem: {ex.Message}"); }
             }
         }
 

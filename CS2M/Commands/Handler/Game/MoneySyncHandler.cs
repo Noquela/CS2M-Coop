@@ -13,7 +13,7 @@ namespace CS2M.Commands.Handler.Game
 
         protected override void Handle(MoneySyncCommand command)
         {
-            CS2M.Log.Info($"[Money] RECV cash={command.Cash}");
+            CS2M.Log.Verbose($"[Money] RECV cash={command.Cash}");
             RemoteMoneyQueue.Set(command.Cash);
         }
     }

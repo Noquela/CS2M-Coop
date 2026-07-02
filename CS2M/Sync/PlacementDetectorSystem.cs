@@ -33,6 +33,7 @@ namespace CS2M.Sync
         private ToolSystem _toolSystem;
         private PrefabSystem _prefabSystem;
         private EntityQuery _appliedQuery;
+        private EntityQuery _appliedExtensions;
 
         // Guards against sending the same entity twice if Applied lingers across frames.
         private readonly HashSet<Entity> _recentlySent = new HashSet<Entity>();
@@ -83,7 +84,26 @@ namespace CS2M.Sync
                 },
             });
 
-            RequireForUpdate(_appliedQuery);
+            // v44: service-building extensions — Applied objects WITH an Owner whose owner is a
+            // building (the main query excludes Owner to skip auto sub-objects; extensions are the
+            // one player-placed Owner case worth syncing).
+            _appliedExtensions = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Applied>(),
+                    ComponentType.ReadOnly<Owner>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+            });
+
+            RequireAnyForUpdate(_appliedQuery, _appliedExtensions);
             CS2M.Log.Info("[Place] PlacementDetectorSystem created");
         }
 
@@ -174,6 +194,85 @@ namespace CS2M.Sync
 
                     Command.SendToAll?.Invoke(cmd);
                     CS2M.Log.Info($"[Place] SEND name={cmd.PrefabName}");
+                }
+            }
+            finally
+            {
+                applied.Dispose();
+            }
+
+            DetectExtensions(toolId);
+        }
+
+        /// <summary>
+        ///     v44: service-building extensions (hospital wings etc.) — Applied objects with an Owner
+        ///     that is a building. Shipped with the owner's identity (SyncId when synced, else
+        ///     prefab+position) so the receiver re-attaches them; ServiceUpgradeSystem wires the rest.
+        /// </summary>
+        private void DetectExtensions(string toolId)
+        {
+            if (_appliedExtensions.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> applied = _appliedExtensions.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity entity in applied)
+                {
+                    if (!_recentlySent.Add(entity))
+                    {
+                        continue;
+                    }
+
+                    Entity owner = EntityManager.GetComponentData<Owner>(entity).m_Owner;
+                    if (!EntityManager.HasComponent<Game.Buildings.Building>(owner)
+                        || !EntityManager.HasComponent<Game.Objects.Transform>(owner)
+                        || !EntityManager.HasComponent<PrefabRef>(owner))
+                    {
+                        continue; // only building extensions; other owned sub-objects are derived
+                    }
+
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab,
+                            out PrefabBase prefab) || prefab == null)
+                    {
+                        continue;
+                    }
+
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(owner).m_Prefab,
+                            out PrefabBase ownerPrefab) || ownerPrefab == null)
+                    {
+                        continue;
+                    }
+
+                    Game.Objects.Transform tf = EntityManager.GetComponentData<Game.Objects.Transform>(entity);
+                    Game.Objects.Transform ownerTf = EntityManager.GetComponentData<Game.Objects.Transform>(owner);
+
+                    var cmd = new ObjectPlaceCommand
+                    {
+                        PrefabType = prefab.GetType().Name,
+                        PrefabName = prefab.name,
+                        PosX = tf.m_Position.x, PosY = tf.m_Position.y, PosZ = tf.m_Position.z,
+                        RotX = tf.m_Rotation.value.x, RotY = tf.m_Rotation.value.y,
+                        RotZ = tf.m_Rotation.value.z, RotW = tf.m_Rotation.value.w,
+                        RandomSeed = ReadSeed(entity),
+                        OwnerSyncId = EntityManager.HasComponent<CS2M_SyncId>(owner)
+                            ? EntityManager.GetComponentData<CS2M_SyncId>(owner).m_Id
+                            : 0,
+                        OwnerPrefabName = ownerPrefab.name,
+                        OwnerX = ownerTf.m_Position.x,
+                        OwnerY = ownerTf.m_Position.y,
+                        OwnerZ = ownerTf.m_Position.z,
+                    };
+
+                    cmd.SyncId = CS2M_SyncIdSystem.Allocate();
+                    CS2M_SyncIdSystem.Register(EntityManager, entity, cmd.SyncId);
+
+                    Command.SendToAll?.Invoke(cmd);
+                    CS2M.Log.Info(
+                        $"[Place] DETECT+SEND extension name={cmd.PrefabName} owner={cmd.OwnerPrefabName} " +
+                        $"ownerSyncId={cmd.OwnerSyncId} tool={toolId} entity={entity.Index}");
                 }
             }
             finally

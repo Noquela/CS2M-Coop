@@ -415,7 +415,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 19) { return; }
+            if (_testStep > 22) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -440,7 +440,10 @@ namespace CS2M.Sync
                 case 16: VerifyPolicy(); ActPause(); break;
                 case 17: VerifyPauseFrozen(); SabotagePause(); break;
                 case 18: VerifyPauseEnforced(); ActResume(); break;
-                case 19: VerifyResume(); Summary(); break;
+                case 19: VerifyResume(); ActDevTree(); break;
+                case 20: VerifyDevTree(); ActEnvAndNativeDelete(); break;
+                case 21: VerifyEnvAndNativeDelete(); ActTile(); break;
+                case 22: VerifyTile(); Summary(); break;
             }
 
             _testStep++;
@@ -1155,6 +1158,164 @@ namespace CS2M.Sync
             uint fi = _sim.frameIndex;
             Result("resume", fi > _frameIndexAtResume,
                 $"frameIndex {_frameIndexAtResume}->{fi} (sim must tick again after resume)");
+        }
+
+        // ------- v44 steps: dev tree, environment/clock, native delete, map tiles -------
+
+        private Entity _devTreeNode;
+        private Entity _nativeTree;
+        private Entity _lockedTile;
+        private uint _envElapsedTarget;
+
+        private void ActDevTree()
+        {
+            _devTreeNode = Entity.Null;
+            EntityQuery nodes = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.DevTreeNodeData>());
+            NativeArray<Entity> ents = nodes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity n in ents)
+                {
+                    if (EntityManager.HasComponent<Game.Prefabs.Locked>(n)
+                        && EntityManager.IsComponentEnabled<Game.Prefabs.Locked>(n))
+                    {
+                        _devTreeNode = n;
+                        break;
+                    }
+                }
+            }
+            finally { ents.Dispose(); }
+
+            if (_devTreeNode == Entity.Null) { Result("devtree", false, "no locked node found"); return; }
+            if (!_prefabSystem.TryGetPrefab(_devTreeNode, out PrefabBase p) || p == null)
+            {
+                Result("devtree", false, "no prefab for node");
+                _devTreeNode = Entity.Null;
+                return;
+            }
+
+            L($"[Auto] TEST devtree INJECT node={p.name}");
+            RemoteDevTreeQueue.Enqueue(new CS2M.Commands.Data.Game.DevTreeCommand { NodeName = p.name });
+        }
+
+        private void VerifyDevTree()
+        {
+            if (_devTreeNode == Entity.Null) { return; }
+            bool unlocked = !EntityManager.IsComponentEnabled<Game.Prefabs.Locked>(_devTreeNode);
+            Result("devtree", unlocked, unlocked ? "node Locked disabled (UnlockSystem consumed our event)" : "node still locked");
+        }
+
+        private void ActEnvAndNativeDelete()
+        {
+            // env: force a distinct temperature + shift the clock 5000 frames ahead of local.
+            EntityQuery tdq = GetEntityQuery(ComponentType.ReadOnly<Game.Common.TimeData>());
+            uint elapsed = 0;
+            if (!tdq.IsEmptyIgnoreFilter)
+            {
+                elapsed = _sim.frameIndex - tdq.GetSingleton<Game.Common.TimeData>().m_FirstFrame;
+            }
+
+            _envElapsedTarget = elapsed + 5000;
+            RemoteEnvQueue.Set(new CS2M.Commands.Data.Game.EnvSyncCommand
+            {
+                Temperature = 7.75f, Precipitation = 0.66f, Cloudiness = 0.55f,
+                ElapsedTimeFrames = _envElapsedTarget,
+            });
+
+            // native delete: pick a tree WITHOUT a sync id and delete it by prefab+position.
+            _nativeTree = Entity.Null;
+            NativeArray<Entity> trees = _treeQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity t in trees)
+                {
+                    if (!EntityManager.HasComponent<CS2M_SyncId>(t))
+                    {
+                        _nativeTree = t;
+                        break;
+                    }
+                }
+            }
+            finally { trees.Dispose(); }
+
+            if (_nativeTree == Entity.Null)
+            {
+                L("[Auto] TEST env INJECT (no native tree available for native-delete)");
+                return;
+            }
+
+            _prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(_nativeTree).m_Prefab,
+                out PrefabBase prefab);
+            var pos = EntityManager.GetComponentData<Game.Objects.Transform>(_nativeTree).m_Position;
+            L($"[Auto] TEST env+nativeDelete INJECT tree={prefab?.name} pos=({pos.x:F0},{pos.z:F0})");
+            RemoteEditQueue.EnqueueDelete(new DeleteCommand
+            {
+                SyncId = 0,
+                PrefabType = prefab != null ? prefab.GetType().Name : "StaticObjectPrefab",
+                PrefabName = prefab != null ? prefab.name : "",
+                PosX = pos.x, PosY = pos.y, PosZ = pos.z,
+            });
+        }
+
+        private void VerifyEnvAndNativeDelete()
+        {
+            var climate = World.GetOrCreateSystemManaged<Game.Simulation.ClimateSystem>();
+            bool weather = climate.temperature.overrideState
+                           && System.Math.Abs(climate.temperature.overrideValue - 7.75f) < 0.01f;
+
+            EntityQuery tdq = GetEntityQuery(ComponentType.ReadOnly<Game.Common.TimeData>());
+            bool clock = false;
+            if (!tdq.IsEmptyIgnoreFilter)
+            {
+                uint elapsed = _sim.frameIndex - tdq.GetSingleton<Game.Common.TimeData>().m_FirstFrame;
+                long drift = (long)elapsed - _envElapsedTarget;
+                clock = drift > -400 && drift < 400; // realigned to the shifted clock (± step window)
+            }
+
+            Result("env", weather && clock, $"weatherOverride={weather} clockRealigned={clock}");
+
+            if (_nativeTree != Entity.Null)
+            {
+                bool gone = !EntityManager.Exists(_nativeTree) || EntityManager.HasComponent<Deleted>(_nativeTree);
+                Result("native-delete", gone, gone ? "native tree removed by prefab+pos" : "native tree still present");
+            }
+
+            // release the override so the rest of the run isn't affected
+            climate.temperature.overrideState = false;
+            climate.precipitation.overrideState = false;
+            climate.cloudiness.overrideState = false;
+        }
+
+        private void ActTile()
+        {
+            _lockedTile = Entity.Null;
+            EntityQuery locked = GetEntityQuery(
+                ComponentType.ReadOnly<Game.Areas.MapTile>(),
+                ComponentType.ReadOnly<Game.Common.Native>(),
+                ComponentType.ReadOnly<Game.Areas.Geometry>());
+            if (locked.IsEmptyIgnoreFilter)
+            {
+                Result("tile", true, "guard OK: no locked tiles on this map (all owned)");
+                return;
+            }
+
+            NativeArray<Entity> tiles = locked.ToEntityArray(Allocator.Temp);
+            try { _lockedTile = tiles[0]; }
+            finally { tiles.Dispose(); }
+
+            var center = EntityManager.GetComponentData<Game.Areas.Geometry>(_lockedTile).m_CenterPosition;
+            L($"[Auto] TEST tile INJECT center=({center.x:F0},{center.z:F0})");
+            TileSync.Enqueue(new CS2M.Commands.Data.Game.TilePurchaseCommand
+            {
+                Xs = new[] { center.x }, Zs = new[] { center.z },
+            });
+        }
+
+        private void VerifyTile()
+        {
+            if (_lockedTile == Entity.Null) { return; }
+            bool owned = !EntityManager.HasComponent<Game.Common.Native>(_lockedTile);
+            Result("tile", owned, owned ? "tile unlocked (Native removed)" : "tile still locked");
         }
 
         private void Summary()

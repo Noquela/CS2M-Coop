@@ -53,5 +53,19 @@ namespace CS2M.Commands.Data.Game
 
         /// <summary>Game.Objects.ElevationFlags as a byte (0 when the object has no Elevation component).</summary>
         public byte ElevationFlags { get; set; }
+
+        // --- v44: service-building EXTENSIONS (hospital wings etc.). ---
+        // Extensions are objects OWNED by a parent building. When these fields are set the
+        // receiver attaches the created object to the resolved owner; the game's
+        // ServiceUpgradeSystem (reacting to Created+Owner) wires InstalledUpgrade/effects itself.
+        public ulong OwnerSyncId { get; set; }
+        public string OwnerPrefabName { get; set; }
+        public float OwnerX { get; set; }
+        public float OwnerY { get; set; }
+        public float OwnerZ { get; set; }
+
+        /// <summary>v44: 0 = player-placed; 1 = spawned by the HOST's zone simulation (growable).
+        /// Sim spawns replace any overlapping older building on the receiver (level-up flow).</summary>
+        public byte Source { get; set; }
     }
 }

@@ -71,7 +71,7 @@ namespace CS2M.Sync
 
             while (RemoteZoneQueue.TryDequeue(out ZonePaintCommand cmd))
             {
-                ApplyOne(cmd, true);
+                try { ApplyOne(cmd, true); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] zone apply failed: {ex.Message}"); }
             }
 
             RetryPending();

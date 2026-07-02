@@ -42,7 +42,7 @@ namespace CS2M.Sync
 
             while (RemoteTerrainQueue.TryDequeue(out TerrainCommand cmd))
             {
-                ApplyOne(cmd);
+                try { ApplyOne(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] apply failed in TerrainApplySystem: {ex.Message}"); }
             }
         }
 

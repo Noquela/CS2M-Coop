@@ -124,6 +124,8 @@ namespace CS2MBot
         private static string _ip = "127.0.0.1";
         private static int _port = 1111;
         private static string _mode = "act"; // act = build things; listen = assert relayed traffic arrives
+        private static int _latencyMs; // --latency N: simulate bad internet (LiteNetLib built-in)
+        private static int _lossPct;   // --loss P: simulate packet loss %
 
         private static volatile bool _preconditionsOk;
         private static volatile bool _worldDone;
@@ -147,6 +149,8 @@ namespace CS2MBot
                 if (args[i] == "--port") { _port = int.Parse(args[i + 1]); }
                 if (args[i] == "--user") { _username = args[i + 1]; }
                 if (args[i] == "--mode") { _mode = args[i + 1]; }
+                if (args[i] == "--latency") { _latencyMs = int.Parse(args[i + 1]); }
+                if (args[i] == "--loss") { _lossPct = int.Parse(args[i + 1]); }
             }
 
             return Run();
@@ -253,6 +257,15 @@ namespace CS2MBot
 
             var listener = new EventBasedNetListener();
             _net = new NetManager(listener) { MtuDiscovery = true };
+            if (_latencyMs > 0 || _lossPct > 0)
+            {
+                _net.SimulateLatency = _latencyMs > 0;
+                _net.SimulationMinLatency = _latencyMs / 2;
+                _net.SimulationMaxLatency = _latencyMs;
+                _net.SimulatePacketLoss = _lossPct > 0;
+                _net.SimulationPacketLossChance = _lossPct;
+                Log($"network simulation: latency<= {_latencyMs}ms loss={_lossPct}%");
+            }
             listener.PeerConnectedEvent += peer =>
             {
                 _server = peer;

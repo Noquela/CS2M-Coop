@@ -13,7 +13,7 @@ namespace CS2M.Commands.Handler.Game
 
         protected override void Handle(DevTreeCommand command)
         {
-            CS2M.Log.Info($"[DevTree] RECV node={command.NodeName}");
+            CS2M.Log.Verbose($"[DevTree] RECV node={command.NodeName}");
             RemoteDevTreeQueue.Enqueue(command);
         }
     }

@@ -175,6 +175,15 @@ namespace CS2M
             updateSystem.UpdateAt<StateHashSenderSystem>(SystemUpdatePhase.Rendering);
             updateSystem.UpdateAt<StateHashApplySystem>(SystemUpdatePhase.Rendering);
 
+            // Map-tile purchase sync (owned-tile diff; unlock mirrors MapTilePurchaseSystem.UnlockTile).
+            updateSystem.UpdateBefore<TileDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<TileApplySystem>(SystemUpdatePhase.Modification5);
+
+            // EXPERIMENTAL: host-authoritative growables (CS2M_GROWABLE_SYNC=0 disables).
+            // Host detects sim spawns before ModificationEnd; clients suppress their zone spawning.
+            updateSystem.UpdateBefore<GrowableDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<GrowableSuppressSystem>(SystemUpdatePhase.Rendering);
+
             // Headless self-test driver. Completely inert unless CS2M_AUTOPILOT is set, so the
             // normal build is unaffected. Runs at UIUpdate (same group as UISystem) so the client
             // half can auto-connect from the main menu; the host half auto-hosts + runs a scripted

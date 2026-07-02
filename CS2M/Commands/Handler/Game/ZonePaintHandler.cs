@@ -14,7 +14,7 @@ namespace CS2M.Commands.Handler.Game
         protected override void Handle(ZonePaintCommand command)
         {
             int n = command.CellIndices != null ? command.CellIndices.Length : 0;
-            CS2M.Log.Info($"[Zone] RECV block=({command.BlockX:F0},{command.BlockZ:F0}) cells={n}");
+            CS2M.Log.Verbose($"[Zone] RECV block=({command.BlockX:F0},{command.BlockZ:F0}) cells={n}");
             RemoteZoneQueue.Enqueue(command);
         }
     }
