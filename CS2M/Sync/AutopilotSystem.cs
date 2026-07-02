@@ -1166,6 +1166,7 @@ namespace CS2M.Sync
         private Entity _nativeTree;
         private Entity _lockedTile;
         private uint _envElapsedTarget;
+        private uint _envFrameIndexAtInject;
 
         private void ActDevTree()
         {
@@ -1216,6 +1217,7 @@ namespace CS2M.Sync
             }
 
             _envElapsedTarget = elapsed + 5000;
+            _envFrameIndexAtInject = _sim.frameIndex;
             RemoteEnvQueue.Set(new CS2M.Commands.Data.Game.EnvSyncCommand
             {
                 Temperature = 7.75f, Precipitation = 0.66f, Cloudiness = 0.55f,
@@ -1267,9 +1269,13 @@ namespace CS2M.Sync
             bool clock = false;
             if (!tdq.IsEmptyIgnoreFilter)
             {
+                // Anchor on frameIndex: the sim keeps ticking between apply and verify, so compare
+                // (elapsed - framesSinceInject) against the fixed target instead of raw elapsed —
+                // this is timing-independent (the old raw check was flaky at high sim speed).
                 uint elapsed = _sim.frameIndex - tdq.GetSingleton<Game.Common.TimeData>().m_FirstFrame;
-                long drift = (long)elapsed - _envElapsedTarget;
-                clock = drift > -400 && drift < 400; // realigned to the shifted clock (± step window)
+                long anchored = (long)elapsed - (long)(_sim.frameIndex - _envFrameIndexAtInject);
+                long drift = anchored - _envElapsedTarget;
+                clock = drift > -120 && drift < 120;
             }
 
             Result("env", weather && clock, $"weatherOverride={weather} clockRealigned={clock}");
