@@ -129,6 +129,7 @@ namespace CS2M.Sync
             ulong syncId = 0;
             string prefabName = null;
             float tx = 0f, tz = 0f;
+            int number = 0;
 
             if (EntityManager.HasComponent<Game.Areas.District>(e)
                 && EntityManager.HasComponent<Game.Areas.Geometry>(e))
@@ -137,6 +138,32 @@ namespace CS2M.Sync
                 var c = EntityManager.GetComponentData<Game.Areas.Geometry>(e).m_CenterPosition;
                 tx = c.x;
                 tz = c.z;
+            }
+            else if (EntityManager.HasComponent<Game.Routes.Route>(e)
+                     && EntityManager.HasComponent<PrefabRef>(e))
+            {
+                // v49: transport lines — SyncId first, prefab name + RouteNumber as fallback.
+                kind = 3;
+                if (EntityManager.HasComponent<CS2M_SyncId>(e))
+                {
+                    syncId = EntityManager.GetComponentData<CS2M_SyncId>(e).m_Id;
+                }
+
+                if (EntityManager.HasComponent<Game.Routes.RouteNumber>(e))
+                {
+                    number = EntityManager.GetComponentData<Game.Routes.RouteNumber>(e).m_Number;
+                }
+
+                if (_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(e).m_Prefab,
+                        out PrefabBase routePb) && routePb != null)
+                {
+                    prefabName = routePb.name;
+                }
+
+                if (syncId == 0 && number == 0)
+                {
+                    return; // unresolvable on the other side
+                }
             }
             else if (EntityManager.HasComponent<Game.Buildings.Building>(e)
                      && EntityManager.HasComponent<Game.Objects.Transform>(e)
@@ -169,6 +196,7 @@ namespace CS2M.Sync
                 TargetPrefabName = prefabName,
                 TargetX = tx,
                 TargetZ = tz,
+                Number = number,
                 Name = name,
             });
             CS2M.Log.Info($"[Rename] DETECT+SEND kind={kind} name=\"{name}\"");
@@ -230,6 +258,17 @@ namespace CS2M.Sync
 
         private Entity Resolve(RenameCommand cmd)
         {
+            if (cmd.TargetKind == 3)
+            {
+                return RouteResolver.Resolve(EntityManager, GetEntityQuery(
+                        ComponentType.ReadOnly<Game.Routes.Route>(),
+                        ComponentType.ReadOnly<Game.Routes.RouteNumber>(),
+                        ComponentType.ReadOnly<PrefabRef>(),
+                        ComponentType.Exclude<Temp>(),
+                        ComponentType.Exclude<Deleted>()),
+                    _prefabSystem, cmd.TargetSyncId, cmd.TargetPrefabName, cmd.Number);
+            }
+
             if (cmd.TargetKind == 1)
             {
                 if (cmd.TargetSyncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(cmd.TargetSyncId, out Entity byId)

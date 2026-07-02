@@ -23,6 +23,7 @@ namespace CS2M.Sync
     {
         private EntityQuery _deletedQuery;
         private EntityQuery _deletedNativeQuery;
+        private EntityQuery _deletedRouteQuery;
         private ToolSystem _toolSystem;
         private PrefabSystem _prefabSystem;
         private readonly HashSet<ulong> _recentlySent = new HashSet<ulong>();
@@ -55,6 +56,25 @@ namespace CS2M.Sync
                 },
             });
 
+            // v49: transport lines — the info panel deletes them with a bare AddComponent<Deleted>.
+            // Addressed by SyncId or prefab + RouteNumber (save-loaded lines have no SyncId).
+            // NOTE: no CS2M_RemotePlaced exclusion here — remotely-created lines carry it forever and
+            // deleting one must still sync; the echo guard is RouteSync.ConsumeDeleteEcho instead.
+            _deletedRouteQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Game.Routes.Route>(),
+                    ComponentType.ReadOnly<Game.Routes.TransportLine>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                },
+            });
+
             // v42: NATIVE objects (from the save, no CS2M_SyncId) — addressed by prefab + position.
             _deletedNativeQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -77,7 +97,7 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<CS2M_SyncId>(),
                 },
             });
-            RequireAnyForUpdate(_deletedQuery, _deletedNativeQuery);
+            RequireAnyForUpdate(_deletedQuery, _deletedNativeQuery, _deletedRouteQuery);
             CS2M.Log.Info("[Del] DeleteDetectorSystem created");
         }
 
@@ -116,6 +136,77 @@ namespace CS2M.Sync
             }
 
             DetectNativeDeletes();
+            DetectRouteDeletes();
+        }
+
+        /// <summary>v49: deleted transport lines. Waypoints/segments are NOT sent — both sides'
+        /// ElementSystem cascades them from the route's Deleted.</summary>
+        private void DetectRouteDeletes()
+        {
+            if (_deletedRouteQuery.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> ents = _deletedRouteQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!_nativesSent.Add(e))
+                    {
+                        continue;
+                    }
+
+                    ulong id = EntityManager.HasComponent<CS2M_SyncId>(e)
+                        ? EntityManager.GetComponentData<CS2M_SyncId>(e).m_Id
+                        : 0;
+                    int number = EntityManager.HasComponent<Game.Routes.RouteNumber>(e)
+                        ? EntityManager.GetComponentData<Game.Routes.RouteNumber>(e).m_Number
+                        : 0;
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(e).m_Prefab,
+                            out PrefabBase prefab) || prefab == null)
+                    {
+                        continue;
+                    }
+
+                    if (id == 0 && number == 0)
+                    {
+                        continue; // unresolvable remotely
+                    }
+
+                    if (RouteSync.ConsumeDeleteEcho(RouteSync.DeleteKey(id, prefab.name, number)))
+                    {
+                        if (id != 0)
+                        {
+                            CS2M_SyncIdSystem.Map.Remove(id);
+                            RouteSync.Snapshot.Remove(id);
+                        }
+
+                        continue; // this deletion came FROM the network
+                    }
+
+                    if (id != 0)
+                    {
+                        CS2M_SyncIdSystem.Map.Remove(id);
+                        RouteSync.Snapshot.Remove(id);
+                    }
+
+                    Command.SendToAll?.Invoke(new DeleteCommand
+                    {
+                        SyncId = id,
+                        TargetKind = 1,
+                        PrefabType = prefab.GetType().Name,
+                        PrefabName = prefab.name,
+                        Number = number,
+                    });
+                    CS2M.Log.Info($"[Del] DETECT+SEND route id={id} number={number} name={prefab.name}");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
         }
 
         /// <summary>

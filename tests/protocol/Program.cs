@@ -85,9 +85,76 @@ namespace CS2MTests
         public float PosX { get; set; }
         public float PosY { get; set; }
         public float PosZ { get; set; }
+        public byte TargetKind { get; set; }
+        public int Number { get; set; }
     }
 
     public class DevTreeCommand : CommandBase { public string NodeName { get; set; } }
+
+    public class TilePurchaseCommand : CommandBase { public float[] Xs { get; set; } public float[] Zs { get; set; } }
+
+    public class LoanCommand : CommandBase { public int Amount { get; set; } }
+
+    public class RenameCommand : CommandBase
+    {
+        public byte TargetKind { get; set; }
+        public int Number { get; set; }
+        public ulong TargetSyncId { get; set; }
+        public string TargetPrefabName { get; set; }
+        public float TargetX { get; set; }
+        public float TargetZ { get; set; }
+        public string Name { get; set; }
+    }
+
+    public class AreaEditCommand : CommandBase
+    {
+        public ulong OwnerSyncId { get; set; }
+        public string OwnerPrefabName { get; set; }
+        public float OwnerX { get; set; }
+        public float OwnerY { get; set; }
+        public float OwnerZ { get; set; }
+        public string PrefabType { get; set; }
+        public string PrefabName { get; set; }
+        public float[] Xs { get; set; }
+        public float[] Ys { get; set; }
+        public float[] Zs { get; set; }
+        public float[] Els { get; set; }
+        public bool Delete { get; set; }
+        public float CenterX { get; set; }
+        public float CenterZ { get; set; }
+    }
+
+    public class RouteCreateCommand : CommandBase
+    {
+        public ulong SyncId { get; set; }
+        public bool Replace { get; set; }
+        public string PrefabType { get; set; }
+        public string PrefabName { get; set; }
+        public bool Complete { get; set; }
+        public byte ColorR { get; set; }
+        public byte ColorG { get; set; }
+        public byte ColorB { get; set; }
+        public byte ColorA { get; set; }
+        public int Number { get; set; }
+        public float[] WpX { get; set; }
+        public float[] WpY { get; set; }
+        public float[] WpZ { get; set; }
+        public byte[] WpHasConn { get; set; }
+        public ulong[] WpConnId { get; set; }
+        public float[] WpConnX { get; set; }
+        public float[] WpConnZ { get; set; }
+    }
+
+    public class RouteColorCommand : CommandBase
+    {
+        public ulong SyncId { get; set; }
+        public string PrefabName { get; set; }
+        public int Number { get; set; }
+        public byte ColorR { get; set; }
+        public byte ColorG { get; set; }
+        public byte ColorB { get; set; }
+        public byte ColorA { get; set; }
+    }
 
     public class EnvSyncCommand : CommandBase
     {
@@ -159,6 +226,11 @@ namespace CS2MTests
         public string PolicyName { get; set; }
         public bool Active { get; set; }
         public float Adjustment { get; set; }
+        public byte TargetKind { get; set; }
+        public ulong TargetSyncId { get; set; }
+        public float TargetX { get; set; }
+        public float TargetZ { get; set; }
+        public string TargetName { get; set; }
     }
 
     public class DistrictCommand : CommandBase
@@ -285,6 +357,14 @@ namespace CS2MTests
             RoundTrip(opts, new ResyncCommand(), c => true);
             RoundTrip(opts, new NetDeleteCommand { StartX = 3644f, StartZ = 7096f, EndX = 3835f, EndZ = 7100f }, c => Math.Abs(c.StartX - 3644f) < 0.01f && Math.Abs(c.EndZ - 7100f) < 0.01f);
             RoundTrip(opts, new NetUpgradeCommand { StartX = 1f, EndX = 2f, General = 0u, Left = 0x1000u, Right = 0u }, c => c.Left == 0x1000u && c.General == 0u);
+            RoundTrip(opts, new TilePurchaseCommand { Xs = new[] { 100f, 200f }, Zs = new[] { -100f, -200f } }, c => c.Xs.Length == 2 && c.Zs[1] == -200f);
+            RoundTrip(opts, new LoanCommand { Amount = 250000 }, c => c.Amount == 250000);
+            RoundTrip(opts, new RenameCommand { TargetKind = 1, Number = 3, TargetPrefabName = "Bus Line", Name = "Linha Centro" }, c => c.TargetKind == 1 && c.Name == "Linha Centro");
+            RoundTrip(opts, new AreaEditCommand { OwnerPrefabName = "GrainFarm01", PrefabName = "Grain Field", Xs = new[] { 1f, 2f, 3f }, Ys = new[] { 0f, 0f, 0f }, Zs = new[] { 4f, 5f, 6f }, Els = new[] { -3.4e38f, 0f, 0f }, Delete = false, CenterX = 2f, CenterZ = 5f }, c => c.PrefabName == "Grain Field" && c.Xs.Length == 3 && c.CenterZ == 5f);
+            RoundTrip(opts, new RouteCreateCommand { SyncId = 42UL, PrefabType = "TransportLinePrefab", PrefabName = "Bus Line", Complete = true, ColorR = 10, ColorG = 20, ColorB = 30, ColorA = 255, Number = 7, WpX = new[] { 1f, 2f, 3f }, WpY = new[] { 0f, 0f, 0f }, WpZ = new[] { 9f, 8f, 7f }, WpHasConn = new byte[] { 1, 0, 1 }, WpConnId = new ulong[] { 5UL, 0UL, 0UL }, WpConnX = new[] { 1f, 0f, 3f }, WpConnZ = new[] { 9f, 0f, 7f } }, c => c.Complete && c.Number == 7 && c.WpX.Length == 3 && c.WpHasConn[2] == 1 && c.WpConnId[0] == 5UL);
+            RoundTrip(opts, new RouteColorCommand { SyncId = 42UL, PrefabName = "Bus Line", Number = 7, ColorR = 200, ColorG = 100, ColorB = 50, ColorA = 255 }, c => c.Number == 7 && c.ColorR == 200);
+            RoundTrip(opts, new DeleteCommand { SyncId = 0UL, TargetKind = 1, PrefabName = "Bus Line", Number = 7 }, c => c.TargetKind == 1 && c.Number == 7);
+            RoundTrip(opts, new PolicyCommand { PolicyType = "PolicyPrefab", PolicyName = "Recycling", Active = true, Adjustment = 0f, TargetKind = 1, TargetSyncId = 99UL, TargetX = 10f, TargetZ = 20f, TargetName = "" }, c => c.TargetKind == 1 && c.TargetSyncId == 99UL);
 
             Console.WriteLine($"\n=== {_pass} passed, {_fail} failed ===");
             return _fail == 0 ? 0 : 1;

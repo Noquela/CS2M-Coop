@@ -36,6 +36,13 @@ edita a própria cidade sozinho**: nada do que um faz aparece pro outro. Este fo
 | | Delete de objetos nativos | prefab + posição (gate: só com o bulldozer ativo) |
 | **Ambiente** | Clima (chuva/nuvens/temperatura) | overrides do `ClimateSystem` (~0,5 Hz) |
 | | Relógio/data compartilhados | realinhamento do `TimeData.m_FirstFrame` |
+| **Transporte** | **Linhas (criar/re-rotear/deletar/cor/número)** | waypoints completos + paradas por `SyncId`/posição; o receptor constrói dos archetypes e os sistemas do jogo fazem pathing/veículos |
+| **Cidade** | Empréstimos | delta reconciliado pelo host |
+| | Renomear (prédios, distritos, linhas) | `NameSystem` por identidade |
+| | Mover prédios nativos | transform pré-move capturado do Temp do move tool |
+| | Políticas de prédio/distrito ("esvaziar aterro"…) | eventos `Modify` da própria UI, com alvo resolvido |
+| | Superfícies/pavimento + delete de áreas | polígono + prefab/centro |
+| | Campos de fazenda/minas (padrão + edição) | réplica do `CreateAreas` + `AreaEditCommand` |
 | **Economia/cidade** | Dinheiro (caixa da cidade) | valor autoritativo do host (~1 Hz) |
 | | Custo de construção remota | **o host debita** o custo do que o cliente constrói |
 | | Impostos (todas as alíquotas) | array de `TaxSystem.GetTaxRates()` |

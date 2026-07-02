@@ -87,6 +87,18 @@ namespace CS2M.Sync
                 return _citySystem.City;
             }
 
+            if (cmd.TargetKind == 3)
+            {
+                // v49: transport line — SyncId first, then prefab name + RouteNumber (in TargetX).
+                return RouteResolver.Resolve(EntityManager, GetEntityQuery(
+                        ComponentType.ReadOnly<Game.Routes.Route>(),
+                        ComponentType.ReadOnly<Game.Routes.RouteNumber>(),
+                        ComponentType.ReadOnly<PrefabRef>(),
+                        ComponentType.Exclude<Game.Tools.Temp>(),
+                        ComponentType.Exclude<Deleted>()),
+                    _prefabSystem, cmd.TargetSyncId, cmd.TargetName, (int)cmd.TargetX);
+            }
+
             if (cmd.TargetKind == 1)
             {
                 if (cmd.TargetSyncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(cmd.TargetSyncId, out Entity byId)

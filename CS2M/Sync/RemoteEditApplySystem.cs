@@ -67,6 +67,12 @@ namespace CS2M.Sync
 
         private void ApplyDelete(DeleteCommand cmd)
         {
+            if (cmd.TargetKind == 1)
+            {
+                ApplyRouteDelete(cmd);
+                return;
+            }
+
             Entity e;
             if (cmd.SyncId == 0)
             {
@@ -102,6 +108,43 @@ namespace CS2M.Sync
 
             CS2M.Log.Info($"[Del] APPLIED id={cmd.SyncId} entity={e.Index}" +
                           (cmd.SyncId == 0 ? $" (native {cmd.PrefabName})" : ""));
+        }
+
+        /// <summary>v49: a transport line — resolved by SyncId or prefab + RouteNumber. Only the
+        /// route gets Deleted; both sides' ElementSystem cascades waypoints/segments.</summary>
+        private void ApplyRouteDelete(DeleteCommand cmd)
+        {
+            Entity route = RouteResolver.Resolve(EntityManager, GetEntityQuery(
+                    ComponentType.ReadOnly<Game.Routes.Route>(),
+                    ComponentType.ReadOnly<Game.Routes.RouteNumber>(),
+                    ComponentType.ReadOnly<Game.Prefabs.PrefabRef>(),
+                    ComponentType.Exclude<Game.Tools.Temp>(),
+                    ComponentType.Exclude<Deleted>()),
+                _prefabSystem, cmd.SyncId, cmd.PrefabName, cmd.Number);
+            if (route == Entity.Null)
+            {
+                CS2M.Log.Info($"[Del] SKIP route noMatch id={cmd.SyncId} number={cmd.Number} name={cmd.PrefabName}");
+                return;
+            }
+
+            // Mark every key the local detector might compute for this route (its own id can differ
+            // from the command's when resolution fell back to prefab+number).
+            RouteSync.MarkDeleteEcho(RouteSync.DeleteKey(cmd.SyncId, cmd.PrefabName, cmd.Number));
+            RouteSync.MarkDeleteEcho(RouteSync.DeleteKey(0, cmd.PrefabName, cmd.Number));
+            if (EntityManager.HasComponent<CS2M_SyncId>(route))
+            {
+                ulong localId = EntityManager.GetComponentData<CS2M_SyncId>(route).m_Id;
+                RouteSync.MarkDeleteEcho(RouteSync.DeleteKey(localId, cmd.PrefabName, cmd.Number));
+            }
+
+            EntityManager.AddComponent<Deleted>(route);
+            if (cmd.SyncId != 0)
+            {
+                CS2M_SyncIdSystem.Map.Remove(cmd.SyncId);
+                RouteSync.Snapshot.Remove(cmd.SyncId);
+            }
+
+            CS2M.Log.Info($"[Del] APPLIED route id={cmd.SyncId} number={cmd.Number} entity={route.Index}");
         }
 
         /// <summary>Nearest object of the same prefab within 2 m of the sender's position (exact

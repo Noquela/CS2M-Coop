@@ -1,3 +1,4 @@
+extern alias msgpackshims;
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -59,8 +60,8 @@ namespace CS2M.Commands.ApiServer
                 // Configure MessagePack resolver
                 IFormatterResolver resolver = CompositeResolver.Create(
                     // enable extension packages first
-                    MessagePack.Unity.Extension.UnityBlitResolver.Instance,
-                    MessagePack.Unity.UnityResolver.Instance,
+                    msgpackshims::MessagePack.Unity.Extension.UnityBlitResolver.Instance,
+                    msgpackshims::MessagePack.Unity.UnityResolver.Instance,
                     StandardResolver.Instance
                 );
                 var options = MessagePackSerializerOptions.Standard.WithResolver(resolver).Configure();

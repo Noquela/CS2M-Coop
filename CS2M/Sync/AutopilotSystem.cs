@@ -415,7 +415,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 22) { return; }
+            if (_testStep > 23) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -443,7 +443,8 @@ namespace CS2M.Sync
                 case 19: VerifyResume(); ActDevTree(); break;
                 case 20: VerifyDevTree(); ActEnvAndNativeDelete(); break;
                 case 21: VerifyEnvAndNativeDelete(); ActTile(); break;
-                case 22: VerifyTile(); Summary(); break;
+                case 22: VerifyTile(); ActRoute(); break;
+                case 23: VerifyRoute(); Summary(); break;
             }
 
             _testStep++;
@@ -1322,6 +1323,99 @@ namespace CS2M.Sync
             if (_lockedTile == Entity.Null) { return; }
             bool owned = !EntityManager.HasComponent<Game.Common.Native>(_lockedTile);
             Result("tile", owned, owned ? "tile unlocked (Native removed)" : "tile still locked");
+        }
+
+        // ------- v49: transport line -------
+
+        private ulong _routeSyncId;
+
+        private void ActRoute()
+        {
+            _routeSyncId = 0;
+            Entity linePrefab = Entity.Null;
+            string prefabTypeName = null, prefabName = null;
+            EntityQuery prefabs = GetEntityQuery(
+                ComponentType.ReadOnly<Game.Prefabs.RouteData>(),
+                ComponentType.ReadOnly<Game.Prefabs.TransportLineData>());
+            NativeArray<Entity> ents = prefabs.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity p in ents)
+                {
+                    if (_prefabSystem.TryGetPrefab(p, out PrefabBase pb) && pb != null
+                        && pb.name.Contains("Bus"))
+                    {
+                        linePrefab = p;
+                        prefabTypeName = pb.GetType().Name;
+                        prefabName = pb.name;
+                        break;
+                    }
+                }
+
+                if (linePrefab == Entity.Null && ents.Length > 0
+                    && _prefabSystem.TryGetPrefab(ents[0], out PrefabBase first) && first != null)
+                {
+                    linePrefab = ents[0];
+                    prefabTypeName = first.GetType().Name;
+                    prefabName = first.name;
+                }
+            }
+            finally { ents.Dispose(); }
+
+            if (linePrefab == Entity.Null)
+            {
+                Result("route", false, "no transport line prefab found");
+                return;
+            }
+
+            if (!TryAnchor(out float3 a))
+            {
+                Result("route", false, "no anchor");
+                return;
+            }
+
+            _routeSyncId = CS2M_SyncIdSystem.Allocate();
+            L($"[Auto] TEST route INJECT prefab={prefabName} id={_routeSyncId}");
+            RouteSync.EnqueueCreate(new CS2M.Commands.Data.Game.RouteCreateCommand
+            {
+                SyncId = _routeSyncId,
+                PrefabType = prefabTypeName,
+                PrefabName = prefabName,
+                Complete = false,
+                ColorR = 255, ColorG = 64, ColorB = 32, ColorA = 255,
+                Number = 77,
+                WpX = new[] { a.x + 10f, a.x + 90f, a.x + 170f },
+                WpY = new[] { a.y, a.y, a.y },
+                WpZ = new[] { a.z + 10f, a.z + 40f, a.z + 10f },
+                WpHasConn = new byte[3],
+                WpConnId = new ulong[3],
+                WpConnX = new float[3],
+                WpConnZ = new float[3],
+            });
+        }
+
+        private void VerifyRoute()
+        {
+            if (_routeSyncId == 0) { return; }
+            if (!CS2M_SyncIdSystem.Map.TryGetValue(_routeSyncId, out Entity route)
+                || !EntityManager.Exists(route) || !EntityManager.HasComponent<Game.Routes.Route>(route))
+            {
+                Result("route", false, "route entity not created");
+                return;
+            }
+
+            int wps = EntityManager.HasBuffer<Game.Routes.RouteWaypoint>(route)
+                ? EntityManager.GetBuffer<Game.Routes.RouteWaypoint>(route, true).Length
+                : -1;
+            int segs = EntityManager.HasBuffer<Game.Routes.RouteSegment>(route)
+                ? EntityManager.GetBuffer<Game.Routes.RouteSegment>(route, true).Length
+                : -1;
+            int number = EntityManager.HasComponent<Game.Routes.RouteNumber>(route)
+                ? EntityManager.GetComponentData<Game.Routes.RouteNumber>(route).m_Number
+                : -1;
+
+            bool ok = wps == 3 && segs == 2 && number == 77;
+            Result("route", ok, $"wps={wps} segs={segs} number={number} (line built from archetypes, game systems wired it)");
         }
 
         private void Summary()

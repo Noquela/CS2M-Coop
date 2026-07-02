@@ -191,6 +191,12 @@ namespace CS2M
             updateSystem.UpdateBefore<AreaEditDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<AreaEditApplySystem>(SystemUpdatePhase.Modification1);
 
+            // Transport-line sync (create/re-route/color; delete rides DeleteCommand, schedule /
+            // out-of-service / vehicle count / ticket price ride the policy sync, names ride the
+            // rename sync). Apply CREATES entities → must run before Modification1 (creation law).
+            updateSystem.UpdateBefore<RouteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<RouteApplySystem>(SystemUpdatePhase.Modification1);
+
             // EXPERIMENTAL: host-authoritative growables (CS2M_GROWABLE_SYNC=0 disables).
             // Host detects sim spawns before ModificationEnd; clients suppress their zone spawning.
             updateSystem.UpdateBefore<GrowableDetectorSystem>(SystemUpdatePhase.ModificationEnd);

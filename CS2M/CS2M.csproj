@@ -7,9 +7,9 @@
 
         <!-- CS2M multiplayer build version. Bump the third number for each build
              (v3 = 1.0.3.0). Both players must be on the same version to connect. -->
-        <AssemblyVersion>1.0.48.0</AssemblyVersion>
-        <FileVersion>1.0.48.0</FileVersion>
-        <Version>1.0.48.0</Version>
+        <AssemblyVersion>1.0.49.0</AssemblyVersion>
+        <FileVersion>1.0.49.0</FileVersion>
+        <Version>1.0.49.0</Version>
 
         <!--The file where mod information which is required for publishing mod on PDX mods are stored-->
         <PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
@@ -99,7 +99,7 @@
         <PackageReference Include="LiteNetLib" Version="1.3.1"/>
         <PackageReference Include="MessagePack" Version="3.1.3"/>
         <PackageReference Include="MessagePack.Attributeless" Version="1.0.1"/>
-        <PackageReference Include="MessagePack.UnityShims" Version="3.1.3"/>
+        <PackageReference Include="MessagePack.UnityShims" Version="3.1.3" Aliases="msgpackshims"/>
         <PackageReference Include="Lib.Harmony" Version="2.2.2"/>
     </ItemGroup>
 

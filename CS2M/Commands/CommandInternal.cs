@@ -1,4 +1,9 @@
-﻿using System;
+﻿// MessagePack.UnityShims is referenced under an alias so its UnityEngine.* shim types can't
+// collide with the game's real UnityEngine.CoreModule (Color32 etc.) — only this file needs
+// the shims' resolvers.
+extern alias msgpackshims;
+
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,8 +18,8 @@ using CS2M.Util;
 using MessagePack;
 using MessagePack.Attributeless;
 using MessagePack.Resolvers;
-using MessagePack.Unity;
-using MessagePack.Unity.Extension;
+using msgpackshims::MessagePack.Unity;
+using msgpackshims::MessagePack.Unity.Extension;
 
 namespace CS2M.Commands
 {

@@ -1,0 +1,859 @@
+using System.Collections.Generic;
+using CS2M.API.Commands;
+using CS2M.API.Networking;
+using CS2M.Commands.Data.Game;
+using CS2M.Networking;
+using Game;
+using Game.Common;
+using Game.Prefabs;
+using Game.Routes;
+using Game.Tools;
+using Unity.Collections;
+using Unity.Entities;
+using Unity.Mathematics;
+
+namespace CS2M.Sync
+{
+    /// <summary>
+    ///     Mailboxes + waypoint-hash snapshot for transport-line sync. The snapshot (SyncId → hash of
+    ///     the waypoint list) is the echo guard for re-route detection: the apply stores the hash it
+    ///     just built, so the detector's next scan sees "unchanged" and stays quiet.
+    /// </summary>
+    public static class RouteSync
+    {
+        private static readonly Queue<RouteCreateCommand> Creates = new Queue<RouteCreateCommand>();
+        private static readonly Queue<RouteColorCommand> Colors = new Queue<RouteColorCommand>();
+        private static readonly object Lock = new object();
+
+        public static readonly Dictionary<ulong, ulong> Snapshot = new Dictionary<ulong, ulong>();
+
+        public static void EnqueueCreate(RouteCreateCommand cmd)
+        {
+            lock (Lock) { Creates.Enqueue(cmd); }
+        }
+
+        public static bool TryDequeueCreate(out RouteCreateCommand cmd)
+        {
+            lock (Lock)
+            {
+                if (Creates.Count > 0) { cmd = Creates.Dequeue(); return true; }
+                cmd = null;
+                return false;
+            }
+        }
+
+        public static void EnqueueColor(RouteColorCommand cmd)
+        {
+            lock (Lock) { Colors.Enqueue(cmd); }
+        }
+
+        public static bool TryDequeueColor(out RouteColorCommand cmd)
+        {
+            lock (Lock)
+            {
+                if (Colors.Count > 0) { cmd = Colors.Dequeue(); return true; }
+                cmd = null;
+                return false;
+            }
+        }
+
+        // Echo guard for deletes: remote-applied line deletions register a key here so the local
+        // detector doesn't send them back (the RemotePlaced tag can't be the guard — lines created
+        // remotely carry it forever, and deleting a friend's line MUST sync).
+        private static readonly HashSet<string> DeleteEcho = new HashSet<string>();
+
+        public static string DeleteKey(ulong syncId, string prefabName, int number)
+        {
+            return syncId != 0 ? syncId.ToString() : prefabName + "#" + number;
+        }
+
+        public static void MarkDeleteEcho(string key)
+        {
+            lock (Lock) { DeleteEcho.Add(key); }
+        }
+
+        public static bool ConsumeDeleteEcho(string key)
+        {
+            lock (Lock) { return DeleteEcho.Remove(key); }
+        }
+
+        public static void Clear()
+        {
+            lock (Lock)
+            {
+                Creates.Clear();
+                Colors.Clear();
+                DeleteEcho.Clear();
+            }
+
+            Snapshot.Clear();
+        }
+
+        /// <summary>FNV-1a over rounded waypoint positions + stop flags (+ Complete).</summary>
+        public static ulong Hash(RouteCreateCommand cmd)
+        {
+            ulong h = 14695981039346656037UL;
+            void Mix(long v)
+            {
+                for (int b = 0; b < 8; b++)
+                {
+                    h = (h ^ (ulong)((v >> (b * 8)) & 0xFF)) * 1099511628211UL;
+                }
+            }
+
+            int n = cmd.WpX?.Length ?? 0;
+            Mix(n);
+            Mix(cmd.Complete ? 1 : 0);
+            for (int i = 0; i < n; i++)
+            {
+                Mix((long)math.round(cmd.WpX[i] * 4f));
+                Mix((long)math.round(cmd.WpZ[i] * 4f));
+                Mix(cmd.WpHasConn != null && cmd.WpHasConn[i] != 0 ? 1 : 0);
+            }
+
+            return h;
+        }
+    }
+
+    /// <summary>Resolves a transport line: SyncId first, else prefab name + RouteNumber (identical on
+    /// every PC for save-loaded lines, and synced for lines created in-session).</summary>
+    public static class RouteResolver
+    {
+        public static Entity Resolve(EntityManager em, EntityQuery routes,
+            Game.Prefabs.PrefabSystem prefabSystem, ulong syncId, string prefabName, int number)
+        {
+            if (syncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(syncId, out Entity byId)
+                && em.Exists(byId) && !em.HasComponent<Deleted>(byId))
+            {
+                return byId;
+            }
+
+            if (string.IsNullOrEmpty(prefabName) || number == 0)
+            {
+                return Entity.Null;
+            }
+
+            NativeArray<Entity> ents = routes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    if (em.GetComponentData<RouteNumber>(cand).m_Number != number)
+                    {
+                        continue;
+                    }
+
+                    if (prefabSystem.TryGetPrefab(em.GetComponentData<PrefabRef>(cand).m_Prefab,
+                            out PrefabBase pb) && pb != null && pb.name == prefabName)
+                    {
+                        return cand;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return Entity.Null;
+        }
+    }
+
+    /// <summary>
+    ///     Detects locally created / re-routed transport lines and color changes.
+    ///     Creation surfaces as <c>Created</c>+<c>Route</c>+<c>TransportLine</c> (the route tool applies
+    ///     on every click, so extending a line arrives here as <c>Updated</c> re-routes — sent as
+    ///     Replace commands, gated by the waypoint hash). Color changes surface as the UI's own
+    ///     <c>Event</c>+<c>ColorUpdated</c> entities (apply-created events carry
+    ///     <c>CS2M_RemotePlaced</c> → skipped).
+    /// </summary>
+    public partial class RouteDetectorSystem : GameSystemBase
+    {
+        private Game.Prefabs.PrefabSystem _prefabSystem;
+        private EntityQuery _createdRoutes;
+        private EntityQuery _updatedRoutes;
+        private EntityQuery _colorEvents;
+        private readonly HashSet<Entity> _sentEvents = new HashSet<Entity>();
+        private int _eventClear;
+
+        protected override void OnCreate()
+        {
+            base.OnCreate();
+            _prefabSystem = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
+            _createdRoutes = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Route>(),
+                    ComponentType.ReadOnly<TransportLine>(),
+                    ComponentType.ReadOnly<RouteWaypoint>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Created>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                    ComponentType.ReadOnly<CS2M_SyncId>(),
+                },
+            });
+            _updatedRoutes = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Route>(),
+                    ComponentType.ReadOnly<TransportLine>(),
+                    ComponentType.ReadOnly<RouteWaypoint>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Updated>(),
+                    ComponentType.ReadOnly<CS2M_SyncId>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Created>(),
+                },
+            });
+            _colorEvents = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Event>(),
+                    ComponentType.ReadOnly<ColorUpdated>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+            });
+            CS2M.Log.Info("[Route] RouteDetectorSystem created");
+        }
+
+        protected override void OnUpdate()
+        {
+            if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
+            {
+                return;
+            }
+
+            if (++_eventClear >= 120)
+            {
+                _eventClear = 0;
+                _sentEvents.Clear();
+            }
+
+            DetectCreated();
+            DetectRerouted();
+            DetectColorChanges();
+        }
+
+        private void DetectCreated()
+        {
+            if (_createdRoutes.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> ents = _createdRoutes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    RouteCreateCommand cmd = BuildCommand(e, 0, replace: false);
+                    if (cmd == null)
+                    {
+                        continue;
+                    }
+
+                    ulong id = CS2M_SyncIdSystem.Allocate();
+                    cmd.SyncId = id;
+                    CS2M_SyncIdSystem.Register(EntityManager, e, id);
+                    RouteSync.Snapshot[id] = RouteSync.Hash(cmd);
+                    Command.SendToAll?.Invoke(cmd);
+                    CS2M.Log.Info($"[Route] DETECT+SEND create id={id} prefab={cmd.PrefabName} " +
+                                  $"wps={cmd.WpX.Length} number={cmd.Number} complete={cmd.Complete}");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+        }
+
+        private void DetectRerouted()
+        {
+            if (_updatedRoutes.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> ents = _updatedRoutes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    ulong id = EntityManager.GetComponentData<CS2M_SyncId>(e).m_Id;
+                    if (id == 0)
+                    {
+                        continue;
+                    }
+
+                    RouteCreateCommand cmd = BuildCommand(e, id, replace: true);
+                    if (cmd == null)
+                    {
+                        continue;
+                    }
+
+                    ulong hash = RouteSync.Hash(cmd);
+                    if (RouteSync.Snapshot.TryGetValue(id, out ulong prev) && prev == hash)
+                    {
+                        continue; // Updated for some other reason (or our own apply's echo)
+                    }
+
+                    RouteSync.Snapshot[id] = hash;
+                    Command.SendToAll?.Invoke(cmd);
+                    CS2M.Log.Info($"[Route] DETECT+SEND reroute id={id} wps={cmd.WpX.Length} complete={cmd.Complete}");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+        }
+
+        private void DetectColorChanges()
+        {
+            if (_colorEvents.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> events = _colorEvents.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity ev in events)
+                {
+                    if (!_sentEvents.Add(ev))
+                    {
+                        continue;
+                    }
+
+                    Entity route = EntityManager.GetComponentData<ColorUpdated>(ev).m_Route;
+                    if (route == Entity.Null || !EntityManager.Exists(route)
+                        || !EntityManager.HasComponent<Game.Routes.Color>(route)
+                        || !EntityManager.HasComponent<Route>(route))
+                    {
+                        continue;
+                    }
+
+                    GetIdentity(route, out ulong id, out string prefabName, out int number);
+                    if (id == 0 && number == 0)
+                    {
+                        continue; // unresolvable on the other side
+                    }
+
+                    var c = EntityManager.GetComponentData<Game.Routes.Color>(route).m_Color;
+                    Command.SendToAll?.Invoke(new RouteColorCommand
+                    {
+                        SyncId = id,
+                        PrefabName = prefabName,
+                        Number = number,
+                        ColorR = c.r, ColorG = c.g, ColorB = c.b, ColorA = c.a,
+                    });
+                    CS2M.Log.Info($"[Route] DETECT+SEND color id={id} number={number} rgb=({c.r},{c.g},{c.b})");
+                }
+            }
+            finally
+            {
+                events.Dispose();
+            }
+        }
+
+        private void GetIdentity(Entity route, out ulong id, out string prefabName, out int number)
+        {
+            id = EntityManager.HasComponent<CS2M_SyncId>(route)
+                ? EntityManager.GetComponentData<CS2M_SyncId>(route).m_Id
+                : 0;
+            number = EntityManager.HasComponent<RouteNumber>(route)
+                ? EntityManager.GetComponentData<RouteNumber>(route).m_Number
+                : 0;
+            prefabName = null;
+            if (_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(route).m_Prefab,
+                    out PrefabBase pb) && pb != null)
+            {
+                prefabName = pb.name;
+            }
+        }
+
+        /// <summary>Snapshot the route's prefab/color/flags/waypoints into a wire command.</summary>
+        private RouteCreateCommand BuildCommand(Entity route, ulong id, bool replace)
+        {
+            if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(route).m_Prefab,
+                    out PrefabBase prefab) || prefab == null)
+            {
+                return null;
+            }
+
+            DynamicBuffer<RouteWaypoint> wps = EntityManager.GetBuffer<RouteWaypoint>(route, true);
+            int n = wps.Length;
+            if (n == 0)
+            {
+                return null;
+            }
+
+            var cmd = new RouteCreateCommand
+            {
+                SyncId = id,
+                Replace = replace,
+                PrefabType = prefab.GetType().Name,
+                PrefabName = prefab.name,
+                Complete = (EntityManager.GetComponentData<Route>(route).m_Flags & RouteFlags.Complete) != 0,
+                Number = EntityManager.HasComponent<RouteNumber>(route)
+                    ? EntityManager.GetComponentData<RouteNumber>(route).m_Number
+                    : 0,
+                WpX = new float[n], WpY = new float[n], WpZ = new float[n],
+                WpHasConn = new byte[n],
+                WpConnId = new ulong[n],
+                WpConnX = new float[n], WpConnZ = new float[n],
+            };
+
+            var color = EntityManager.GetComponentData<Game.Routes.Color>(route).m_Color;
+            cmd.ColorR = color.r;
+            cmd.ColorG = color.g;
+            cmd.ColorB = color.b;
+            cmd.ColorA = color.a;
+
+            for (int i = 0; i < n; i++)
+            {
+                Entity wp = wps[i].m_Waypoint;
+                if (wp == Entity.Null || !EntityManager.HasComponent<Position>(wp))
+                {
+                    return null; // buffer mid-rebuild; the next Updated pass will retry
+                }
+
+                float3 p = EntityManager.GetComponentData<Position>(wp).m_Position;
+                cmd.WpX[i] = p.x;
+                cmd.WpY[i] = p.y;
+                cmd.WpZ[i] = p.z;
+
+                if (!EntityManager.HasComponent<Connected>(wp))
+                {
+                    continue;
+                }
+
+                Entity conn = EntityManager.GetComponentData<Connected>(wp).m_Connected;
+                if (conn == Entity.Null || !EntityManager.Exists(conn))
+                {
+                    continue;
+                }
+
+                cmd.WpHasConn[i] = 1;
+                if (EntityManager.HasComponent<CS2M_SyncId>(conn))
+                {
+                    cmd.WpConnId[i] = EntityManager.GetComponentData<CS2M_SyncId>(conn).m_Id;
+                }
+
+                if (EntityManager.HasComponent<Game.Objects.Transform>(conn))
+                {
+                    float3 cp = EntityManager.GetComponentData<Game.Objects.Transform>(conn).m_Position;
+                    cmd.WpConnX[i] = cp.x;
+                    cmd.WpConnZ[i] = cp.z;
+                }
+                else
+                {
+                    cmd.WpConnX[i] = p.x;
+                    cmd.WpConnZ[i] = p.z;
+                }
+            }
+
+            return cmd;
+        }
+    }
+
+    /// <summary>
+    ///     Applies remote transport-line commands by building REAL entities from the route prefab's
+    ///     baked archetypes (which already include <c>Created</c>+<c>Updated</c>), mirroring what
+    ///     GenerateWaypoints/GenerateRoutes + ApplyRoutes produce for a fresh line. The game's own
+    ///     systems then take over: ReferencesSystem wires Owner, WaypointConnectionSystem finds lanes
+    ///     and maintains the stops' ConnectedRoute buffers, RoutePathSystem paths the segments and
+    ///     TransportLineSystem dispatches vehicles. Runs before Modification1 (creation-phase law).
+    /// </summary>
+    public partial class RouteApplySystem : GameSystemBase
+    {
+        private Game.Prefabs.PrefabSystem _prefabSystem;
+        private EntityQuery _routesByNumber;
+        private EntityQuery _stops;
+        private readonly List<PendingNumber> _pendingNumbers = new List<PendingNumber>();
+
+        private struct PendingNumber
+        {
+            public Entity Route;
+            public int Number;
+            public int Delay;
+        }
+
+        protected override void OnCreate()
+        {
+            base.OnCreate();
+            _prefabSystem = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
+            _routesByNumber = GetEntityQuery(
+                ComponentType.ReadOnly<Route>(),
+                ComponentType.ReadOnly<RouteNumber>(),
+                ComponentType.ReadOnly<PrefabRef>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
+            // Anything a waypoint can connect to keeps a ConnectedRoute buffer (stops, platforms).
+            _stops = GetEntityQuery(
+                ComponentType.ReadOnly<ConnectedRoute>(),
+                ComponentType.ReadOnly<Game.Objects.Transform>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
+            CS2M.Log.Info("[Route] RouteApplySystem created");
+        }
+
+        protected override void OnUpdate()
+        {
+            if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
+            {
+                return;
+            }
+
+            ProcessPendingNumbers();
+
+            while (RouteSync.TryDequeueCreate(out RouteCreateCommand cmd))
+            {
+                try { ApplyCreate(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] route create apply failed: {ex.Message}"); }
+            }
+
+            while (RouteSync.TryDequeueColor(out RouteColorCommand cmd))
+            {
+                try { ApplyColor(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] route color apply failed: {ex.Message}"); }
+            }
+        }
+
+        /// <summary>The game's InitializeSystem numbers Created routes this same frame — writing the
+        /// sender's number a couple frames later wins without racing it.</summary>
+        private void ProcessPendingNumbers()
+        {
+            for (int i = _pendingNumbers.Count - 1; i >= 0; i--)
+            {
+                PendingNumber pn = _pendingNumbers[i];
+                if (--pn.Delay > 0)
+                {
+                    _pendingNumbers[i] = pn;
+                    continue;
+                }
+
+                _pendingNumbers.RemoveAt(i);
+                if (pn.Number > 0 && EntityManager.Exists(pn.Route)
+                    && EntityManager.HasComponent<RouteNumber>(pn.Route)
+                    && !EntityManager.HasComponent<Deleted>(pn.Route))
+                {
+                    EntityManager.SetComponentData(pn.Route, new RouteNumber { m_Number = pn.Number });
+                    CS2M.Log.Verbose($"[Route] number set entity={pn.Route.Index} number={pn.Number}");
+                }
+            }
+        }
+
+        private void ApplyCreate(RouteCreateCommand cmd)
+        {
+            int n = cmd.WpX?.Length ?? 0;
+            if (n == 0)
+            {
+                return;
+            }
+
+            if (cmd.Replace)
+            {
+                Entity existing = RouteResolver.Resolve(EntityManager, _routesByNumber, _prefabSystem,
+                    cmd.SyncId, cmd.PrefabName, cmd.Number);
+                if (existing != Entity.Null)
+                {
+                    Rebuild(existing, cmd);
+                    return;
+                }
+
+                CS2M.Log.Info($"[Route] reroute target missing id={cmd.SyncId} — creating fresh");
+            }
+            else if (cmd.SyncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(cmd.SyncId, out Entity dup)
+                     && EntityManager.Exists(dup))
+            {
+                CS2M.Log.Info($"[Route] SKIP duplicate id={cmd.SyncId}");
+                return;
+            }
+
+            if (!TryGetRouteData(cmd, out Entity prefabEntity, out RouteData rd))
+            {
+                return;
+            }
+
+            Entity route = EntityManager.CreateEntity();
+            EntityManager.SetArchetype(route, rd.m_RouteArchetype);
+            SetOrAdd(route, new Route { m_Flags = cmd.Complete ? RouteFlags.Complete : (RouteFlags)0 });
+            SetOrAdd(route, new PrefabRef(prefabEntity));
+            SetOrAdd(route, new Game.Routes.Color(new UnityEngine.Color32(cmd.ColorR, cmd.ColorG, cmd.ColorB, cmd.ColorA)));
+            if (EntityManager.HasComponent<TransportLineData>(prefabEntity))
+            {
+                SetOrAdd(route, new TransportLine(EntityManager.GetComponentData<TransportLineData>(prefabEntity)));
+            }
+
+            BuildElements(route, prefabEntity, rd, cmd);
+
+            if (!EntityManager.HasComponent<Applied>(route))
+            {
+                EntityManager.AddComponent<Applied>(route);
+            }
+
+            EntityManager.AddComponent<CS2M_RemotePlaced>(route);
+            if (cmd.SyncId != 0)
+            {
+                CS2M_SyncIdSystem.Register(EntityManager, route, cmd.SyncId);
+                RouteSync.Snapshot[cmd.SyncId] = RouteSync.Hash(cmd);
+            }
+
+            _pendingNumbers.Add(new PendingNumber { Route = route, Number = cmd.Number, Delay = 3 });
+            CS2M.Log.Info($"[Route] APPLIED create id={cmd.SyncId} prefab={cmd.PrefabName} wps={n} entity={route.Index}");
+        }
+
+        /// <summary>Replace path: mark the old elements Deleted, build the new set, rewrite the
+        /// buffers in place (what the game's ApplyRoutes.Update does for a modified line).</summary>
+        private void Rebuild(Entity route, RouteCreateCommand cmd)
+        {
+            if (!TryGetRouteData(cmd, out Entity prefabEntity, out RouteData rd))
+            {
+                return;
+            }
+
+            var old = new List<Entity>();
+            DynamicBuffer<RouteWaypoint> wpsBuf = EntityManager.GetBuffer<RouteWaypoint>(route, true);
+            for (int i = 0; i < wpsBuf.Length; i++)
+            {
+                if (wpsBuf[i].m_Waypoint != Entity.Null) { old.Add(wpsBuf[i].m_Waypoint); }
+            }
+
+            DynamicBuffer<RouteSegment> segsBuf = EntityManager.GetBuffer<RouteSegment>(route, true);
+            for (int i = 0; i < segsBuf.Length; i++)
+            {
+                if (segsBuf[i].m_Segment != Entity.Null) { old.Add(segsBuf[i].m_Segment); }
+            }
+
+            foreach (Entity e in old)
+            {
+                if (EntityManager.Exists(e) && !EntityManager.HasComponent<Deleted>(e))
+                {
+                    EntityManager.AddComponent<Deleted>(e);
+                }
+            }
+
+            BuildElements(route, prefabEntity, rd, cmd);
+
+            Route r = EntityManager.GetComponentData<Route>(route);
+            r.m_Flags = cmd.Complete ? (r.m_Flags | RouteFlags.Complete) : (r.m_Flags & ~RouteFlags.Complete);
+            EntityManager.SetComponentData(route, r);
+
+            if (!EntityManager.HasComponent<Updated>(route))
+            {
+                EntityManager.AddComponent<Updated>(route);
+            }
+
+            if (cmd.SyncId != 0)
+            {
+                RouteSync.Snapshot[cmd.SyncId] = RouteSync.Hash(cmd);
+            }
+
+            CS2M.Log.Info($"[Route] APPLIED reroute id={cmd.SyncId} wps={cmd.WpX.Length} entity={route.Index}");
+        }
+
+        /// <summary>Creates the waypoint/segment entities and rewrites the route's buffers.
+        /// Owner is set explicitly (the game's ReferencesSystem only wires Created routes).</summary>
+        private void BuildElements(Entity route, Entity prefabEntity, RouteData rd, RouteCreateCommand cmd)
+        {
+            int n = cmd.WpX.Length;
+            var wpEntities = new Entity[n];
+            for (int i = 0; i < n; i++)
+            {
+                bool wantConn = cmd.WpHasConn != null && cmd.WpHasConn[i] != 0;
+                Entity conn = Entity.Null;
+                if (wantConn)
+                {
+                    conn = ResolveConnection(cmd.WpConnId[i], cmd.WpConnX[i], cmd.WpConnZ[i]);
+                    if (conn == Entity.Null)
+                    {
+                        CS2M.Log.Info($"[Route] WARN stop connection unresolved wp={i} " +
+                                      $"at=({cmd.WpConnX[i]:F0},{cmd.WpConnZ[i]:F0}) — creating plain waypoint");
+                    }
+                }
+
+                Entity wp = EntityManager.CreateEntity();
+                EntityManager.SetArchetype(wp, conn != Entity.Null ? rd.m_ConnectedArchetype : rd.m_WaypointArchetype);
+                SetOrAdd(wp, new Waypoint(i));
+                SetOrAdd(wp, new Position(new float3(cmd.WpX[i], cmd.WpY[i], cmd.WpZ[i])));
+                SetOrAdd(wp, new PrefabRef(prefabEntity));
+                SetOrAdd(wp, new Owner(route));
+                if (conn != Entity.Null)
+                {
+                    SetOrAdd(wp, new Connected(conn));
+                }
+
+                if (!EntityManager.HasComponent<Applied>(wp))
+                {
+                    EntityManager.AddComponent<Applied>(wp);
+                }
+
+                EntityManager.AddComponent<CS2M_RemotePlaced>(wp);
+                wpEntities[i] = wp;
+            }
+
+            int segCount = cmd.Complete ? n : n - 1;
+            if (n < 2)
+            {
+                segCount = 0;
+            }
+
+            var segEntities = new Entity[segCount < 0 ? 0 : segCount];
+            for (int i = 0; i < segEntities.Length; i++)
+            {
+                Entity seg = EntityManager.CreateEntity();
+                EntityManager.SetArchetype(seg, rd.m_SegmentArchetype);
+                SetOrAdd(seg, new Segment(i));
+                SetOrAdd(seg, new PrefabRef(prefabEntity));
+                SetOrAdd(seg, new Owner(route));
+                if (!EntityManager.HasComponent<Applied>(seg))
+                {
+                    EntityManager.AddComponent<Applied>(seg);
+                }
+
+                EntityManager.AddComponent<CS2M_RemotePlaced>(seg);
+                segEntities[i] = seg;
+            }
+
+            DynamicBuffer<RouteWaypoint> wps = EntityManager.GetBuffer<RouteWaypoint>(route);
+            wps.ResizeUninitialized(n);
+            for (int i = 0; i < n; i++)
+            {
+                wps[i] = new RouteWaypoint(wpEntities[i]);
+            }
+
+            DynamicBuffer<RouteSegment> segs = EntityManager.GetBuffer<RouteSegment>(route);
+            segs.ResizeUninitialized(segEntities.Length);
+            for (int i = 0; i < segEntities.Length; i++)
+            {
+                segs[i] = new RouteSegment(segEntities[i]);
+            }
+        }
+
+        private void ApplyColor(RouteColorCommand cmd)
+        {
+            Entity route = RouteResolver.Resolve(EntityManager, _routesByNumber, _prefabSystem,
+                cmd.SyncId, cmd.PrefabName, cmd.Number);
+            if (route == Entity.Null || !EntityManager.HasComponent<Game.Routes.Color>(route))
+            {
+                CS2M.Log.Info($"[Route] SKIP color noTarget id={cmd.SyncId} number={cmd.Number}");
+                return;
+            }
+
+            var color = new UnityEngine.Color32(cmd.ColorR, cmd.ColorG, cmd.ColorB, cmd.ColorA);
+            EntityManager.SetComponentData(route, new Game.Routes.Color(color));
+
+            // Vehicles carry their own Color copy (what the ColorSection UI does).
+            if (EntityManager.HasBuffer<RouteVehicle>(route))
+            {
+                DynamicBuffer<RouteVehicle> vehicles = EntityManager.GetBuffer<RouteVehicle>(route, true);
+                var list = new List<Entity>();
+                for (int i = 0; i < vehicles.Length; i++)
+                {
+                    if (vehicles[i].m_Vehicle != Entity.Null && EntityManager.Exists(vehicles[i].m_Vehicle))
+                    {
+                        list.Add(vehicles[i].m_Vehicle);
+                    }
+                }
+
+                foreach (Entity v in list)
+                {
+                    SetOrAdd(v, new Game.Routes.Color(color));
+                }
+            }
+
+            // Same notification event the UI raises so the renderer refreshes; tagged so our own
+            // detector never echoes it back.
+            Entity ev = EntityManager.CreateEntity();
+            EntityManager.AddComponent<Event>(ev);
+            EntityManager.AddComponentData(ev, new ColorUpdated(route));
+            EntityManager.AddComponent<CS2M_RemotePlaced>(ev);
+
+            CS2M.Log.Info($"[Route] APPLIED color id={cmd.SyncId} number={cmd.Number} rgb=({cmd.ColorR},{cmd.ColorG},{cmd.ColorB})");
+        }
+
+        private bool TryGetRouteData(RouteCreateCommand cmd, out Entity prefabEntity, out RouteData rd)
+        {
+            prefabEntity = Entity.Null;
+            rd = default(RouteData);
+            var prefabId = new PrefabID(cmd.PrefabType, cmd.PrefabName, default(Colossal.Hash128));
+            if (!_prefabSystem.TryGetPrefab(prefabId, out PrefabBase prefab) || prefab == null
+                || !_prefabSystem.TryGetEntity(prefab, out prefabEntity))
+            {
+                CS2M.Log.Info($"[Route] RESOLVE-FAIL prefab type={cmd.PrefabType} name={cmd.PrefabName}");
+                return false;
+            }
+
+            if (!EntityManager.HasComponent<RouteData>(prefabEntity))
+            {
+                CS2M.Log.Info($"[Route] RESOLVE-FAIL no RouteData name={cmd.PrefabName}");
+                return false;
+            }
+
+            rd = EntityManager.GetComponentData<RouteData>(prefabEntity);
+            return rd.m_RouteArchetype.Valid && rd.m_WaypointArchetype.Valid && rd.m_SegmentArchetype.Valid;
+        }
+
+        /// <summary>Stop connections: SyncId when the stop is a synced object, else the nearest
+        /// entity holding a ConnectedRoute buffer (stops/platforms) within ~2.5 m.</summary>
+        private Entity ResolveConnection(ulong syncId, float x, float z)
+        {
+            if (syncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(syncId, out Entity byId)
+                && EntityManager.Exists(byId) && !EntityManager.HasComponent<Deleted>(byId))
+            {
+                return byId;
+            }
+
+            Entity best = Entity.Null;
+            float bestD = 6.25f; // squared meters
+            NativeArray<Entity> ents = _stops.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(cand).m_Position;
+                    float dx = p.x - x;
+                    float dz = p.z - z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = cand;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return best;
+        }
+
+        private void SetOrAdd<T>(Entity e, T data) where T : unmanaged, IComponentData
+        {
+            if (EntityManager.HasComponent<T>(e))
+            {
+                EntityManager.SetComponentData(e, data);
+            }
+            else
+            {
+                EntityManager.AddComponentData(e, data);
+            }
+        }
+    }
+}

@@ -153,6 +153,7 @@ namespace CS2M.Sync
                     byte kind;
                     float tx = 0f, tz = 0f;
                     ulong syncId = 0;
+                    string targetName = null;
                     if (EntityManager.HasComponent<Game.Areas.District>(m.m_Entity)
                         && EntityManager.HasComponent<Game.Areas.Geometry>(m.m_Entity))
                     {
@@ -160,6 +161,35 @@ namespace CS2M.Sync
                         var c = EntityManager.GetComponentData<Game.Areas.Geometry>(m.m_Entity).m_CenterPosition;
                         tx = c.x;
                         tz = c.z;
+                    }
+                    else if (EntityManager.HasComponent<Game.Routes.Route>(m.m_Entity))
+                    {
+                        // v49: transport lines — schedule (day/night), out-of-service, vehicle count
+                        // and ticket price all arrive here as route policies. RouteNumber rides in
+                        // TargetX as the save-loaded-line fallback.
+                        kind = 3;
+                        if (EntityManager.HasComponent<CS2M_SyncId>(m.m_Entity))
+                        {
+                            syncId = EntityManager.GetComponentData<CS2M_SyncId>(m.m_Entity).m_Id;
+                        }
+
+                        if (EntityManager.HasComponent<Game.Routes.RouteNumber>(m.m_Entity))
+                        {
+                            tx = EntityManager.GetComponentData<Game.Routes.RouteNumber>(m.m_Entity).m_Number;
+                        }
+
+                        if (EntityManager.HasComponent<PrefabRef>(m.m_Entity)
+                            && _prefabSystem.TryGetPrefab(
+                                EntityManager.GetComponentData<PrefabRef>(m.m_Entity).m_Prefab,
+                                out PrefabBase routePb) && routePb != null)
+                        {
+                            targetName = routePb.name;
+                        }
+
+                        if (syncId == 0 && tx == 0f)
+                        {
+                            continue; // unresolvable on the other side
+                        }
                     }
                     else if (EntityManager.HasComponent<Game.Buildings.Building>(m.m_Entity)
                              && EntityManager.HasComponent<Game.Objects.Transform>(m.m_Entity))
@@ -189,6 +219,7 @@ namespace CS2M.Sync
                         TargetSyncId = syncId,
                         TargetX = tx,
                         TargetZ = tz,
+                        TargetName = targetName,
                     });
                     CS2M.Log.Info($"[Policy] DETECT+SEND scoped name={policyPrefab.name} kind={kind} active={active}");
                 }
