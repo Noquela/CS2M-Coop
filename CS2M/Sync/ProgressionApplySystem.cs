@@ -49,7 +49,13 @@ namespace CS2M.Sync
             xp.m_XPRewardRecord = (XPRewardFlags) cmd.XpRewardRecord;
             EntityManager.SetComponentData(city, xp);
 
-            CS2M.Log.Info($"[Prog] APPLIED xp={cmd.Xp} milestone(host)={cmd.AchievedMilestone}");
+            // Log the LOCAL milestone too so the field logs prove whether the client's own
+            // MilestoneSystem is advancing from the synced XP (reported as "not syncing" once,
+            // but that session ran a stale build with dead XP sync).
+            int localMilestone = EntityManager.HasComponent<MilestoneLevel>(city)
+                ? EntityManager.GetComponentData<MilestoneLevel>(city).m_AchievedMilestone
+                : -1;
+            CS2M.Log.Info($"[Prog] APPLIED xp={cmd.Xp} milestone(host)={cmd.AchievedMilestone} milestone(local)={localMilestone}");
         }
     }
 }

@@ -111,7 +111,8 @@ namespace CS2M
 
             // District sync (paint a district area — boundary polygon via AreaData archetype).
             updateSystem.UpdateBefore<DistrictDetectorSystem>(SystemUpdatePhase.ModificationEnd);
-            updateSystem.UpdateAt<DistrictApplySystem>(SystemUpdatePhase.Modification5);
+            // v41: BEFORE Modification1 so the area consumers (triangulation/labels) see Created/Updated.
+            updateSystem.UpdateBefore<DistrictApplySystem>(SystemUpdatePhase.Modification1);
 
             // Water-source sync (WaterSourceData entities — the game's WaterSystem simulates from them).
             updateSystem.UpdateBefore<WaterDetectorSystem>(SystemUpdatePhase.ModificationEnd);
@@ -124,7 +125,10 @@ namespace CS2M
             // Delete/move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);
-            updateSystem.UpdateAt<RemoteEditApplySystem>(SystemUpdatePhase.Modification5);
+            // v41: BEFORE Modification1 (was Modification5). Deleted/Updated added at Mod5 were never
+            // seen by the cleanup consumers (References/SubObjects/etc. run Mod2B-4) but CleanUp still
+            // destroyed the entity at end of frame -> dangling references -> delayed NATIVE crashes.
+            updateSystem.UpdateBefore<RemoteEditApplySystem>(SystemUpdatePhase.Modification1);
 
             // Net sync (roads/rails/pipes/power/fences — one pipeline).
             updateSystem.UpdateBefore<NetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
@@ -137,11 +141,19 @@ namespace CS2M
             // Net bulldoze + upgrade sync (delete / composition flags, edges addressed by position).
             updateSystem.UpdateBefore<NetEditDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<NetUpgradeDetectorSystem>(SystemUpdatePhase.ModificationEnd);
-            updateSystem.UpdateAt<NetEditApplySystem>(SystemUpdatePhase.Modification5);
+            // v41 CRASH FIX: BEFORE Modification1 (was Modification5). A Deleted edge marked at Mod5
+            // was destroyed at end of frame WITHOUT References/Lane/Block/search-tree cleanup ever
+            // seeing the tag (those run Mod2B-4) -> dangling edge references -> native crash moments
+            // later ("random" crashes when bulldozing roads). Same phase lesson as edge creation.
+            updateSystem.UpdateBefore<NetEditApplySystem>(SystemUpdatePhase.Modification1);
 
             // Progression sync (host broadcasts XP; clients advance milestones from it).
             updateSystem.UpdateBefore<ProgressionSenderSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<ProgressionApplySystem>(SystemUpdatePhase.Modification5);
+
+            // Dev-tree purchase sync ("skill tree" — Unlock event by node prefab name).
+            updateSystem.UpdateBefore<DevTreeDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<DevTreeApplySystem>(SystemUpdatePhase.Modification5);
 
             // Zoning sync (paint/dezone by ZonePrefab id over a world rect).
             updateSystem.UpdateBefore<ZoneDetectorSystem>(SystemUpdatePhase.ModificationEnd);
