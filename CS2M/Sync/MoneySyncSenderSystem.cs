@@ -20,6 +20,7 @@ namespace CS2M.Sync
         private CitySystem _citySystem;
         private int _lastSent = int.MinValue;
         private int _frame;
+        private bool _activeLogged;
 
         protected override void OnCreate()
         {
@@ -35,10 +36,18 @@ namespace CS2M.Sync
                 return;
             }
 
-            // Only the host is authoritative over money.
-            if (Command.CurrentRole != MultiplayerRole.Server)
+            // Only the host is authoritative over money. Gate on the network-layer PlayerType (the
+            // reliable source) — the old Command.CurrentRole gate silently killed this sender for
+            // the entire first 2-PC session because CurrentRole was never assigned.
+            if (NetworkInterface.Instance.LocalPlayer.PlayerType != PlayerType.SERVER)
             {
                 return;
+            }
+
+            if (!_activeLogged)
+            {
+                _activeLogged = true;
+                CS2M.Log.Info("[Money] sender active (host)");
             }
 
             if (++_frame < SendEveryNFrames)

@@ -48,6 +48,9 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Temp>(),
                     ComponentType.ReadOnly<Deleted>(),
                     ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                    // Building sub-nets (Owner = the building) are generated deterministically from
+                    // the prefab on BOTH PCs by the placement apply — syncing them would duplicate.
+                    ComponentType.ReadOnly<Owner>(),
                 },
             });
             RequireForUpdate(_appliedEdges);

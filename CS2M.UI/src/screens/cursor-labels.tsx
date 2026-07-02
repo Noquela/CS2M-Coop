@@ -1,4 +1,5 @@
-import {bindValue, useValue} from "cs2/api";
+import {bindValue, trigger, useValue} from "cs2/api";
+import {useEffect, useRef} from "react";
 import mod from "../../mod.json";
 
 // JSON pushed by the C# PlayerCursorSystem every frame:
@@ -13,8 +14,15 @@ interface CursorLabel {
     c: string;
 }
 
+// cohtml (the game's UI engine) does NOT honor position:fixed stretched by offsets, and the
+// GameBottomRight slot lives inside a non-positioned 46rem strip — both together collapsed the
+// old label layer invisibly. This version mounts in the fullscreen 'Game' slot and uses the
+// vanilla overlay pattern: absolute + width/height 100%. Units are rem (CS2 design px), not vh.
+let ackCounter = 0;
+
 export const CursorLabels = () => {
     const json = useValue(cursorLabels$);
+    const firstRef = useRef<HTMLDivElement | null>(null);
 
     let labels: CursorLabel[] = [];
     try {
@@ -23,30 +31,39 @@ export const CursorLabels = () => {
         labels = [];
     }
 
+    // Render-ack: report the first label's real layouted rect back to C# (throttled) so the log
+    // can prove the UI engine actually drew it (w/h > 0) — validated in the selftest.
+    useEffect(() => {
+        if (labels.length > 0 && firstRef.current && (ackCounter++ % 60) === 0) {
+            const r = firstRef.current.getBoundingClientRect();
+            trigger(mod.id, "CursorLabelsRendered",
+                JSON.stringify({n: labels.length, x: r.left, y: r.top, w: r.width, h: r.height}));
+        }
+    }, [json]);
+
     if (!labels || labels.length === 0) {
         return null;
     }
 
     return (
-        <div style={{position: "fixed", left: "0", top: "0", right: "0", bottom: "0", pointerEvents: "none", zIndex: "1000"}}>
+        <div style={{position: "absolute", left: "0", top: "0", width: "100%", height: "100%", pointerEvents: "none", zIndex: 100}}>
             {labels.map((l, i) => (
                 <div
                     key={i}
+                    ref={i === 0 ? firstRef : undefined}
                     style={{
                         position: "absolute",
                         left: `${(l.x * 100).toFixed(3)}%`,
                         top: `${((1 - l.y) * 100).toFixed(3)}%`,
                         transform: "translate(-50%, -160%)",
-                        background: l.c,
+                        backgroundColor: l.c,
                         color: "#ffffff",
-                        padding: "0.25vh 0.7vh",
-                        borderRadius: "0.5vh",
-                        fontSize: "1.35vh",
-                        fontWeight: "600",
-                        lineHeight: "1.4vh",
+                        border: "1rem solid rgba(0,0,0,0.6)",
+                        borderRadius: "4rem",
+                        padding: "2rem 8rem",
+                        fontSize: "14rem",
+                        fontWeight: "bold",
                         whiteSpace: "nowrap",
-                        textShadow: "0 0.1vh 0.2vh rgba(0,0,0,0.8)",
-                        boxShadow: "0 0.2vh 0.6vh rgba(0,0,0,0.5)",
                         pointerEvents: "none",
                     }}
                 >

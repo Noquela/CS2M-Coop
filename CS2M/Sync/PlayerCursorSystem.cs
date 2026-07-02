@@ -54,6 +54,8 @@ namespace CS2M.Sync
         // Last local raycast state, kept only for the diagnostic log line.
         private bool _lastValid;
         private float3 _lastPos;
+        private bool _sentValid; // last state we actually sent (send one "hide" on valid→invalid)
+        private int _lastLabelCount;
 
         protected override void OnCreate()
         {
@@ -81,7 +83,7 @@ namespace CS2M.Sync
                 int remote = RemotePlayerCursors.Snapshot().Count;
                 CS2M.Log.Info(
                     $"[Cursor] raycastValid={_lastValid} pos=({_lastPos.x:F0},{_lastPos.y:F0},{_lastPos.z:F0}) " +
-                    $"remoteCursors={remote} drawn={drawn}");
+                    $"remoteCursors={remote} drawn={drawn} labels={_lastLabelCount}");
             }
         }
 
@@ -111,6 +113,15 @@ namespace CS2M.Sync
 
             _lastValid = valid;
             _lastPos = pos;
+
+            // Don't spam 20 Hz invalid packets while the mouse sits on the UI: send exactly one
+            // "hide" packet on the valid→invalid transition, then stay quiet until valid again.
+            if (!valid && !_sentValid)
+            {
+                return;
+            }
+
+            _sentValid = valid;
 
             string username = NetworkInterface.Instance.LocalPlayer.Username;
             if (string.IsNullOrEmpty(username))
@@ -149,10 +160,14 @@ namespace CS2M.Sync
             // PlayerId, so every SenderId is 0; a self-skip would wrongly drop the only
             // remote cursor. A player never receives its own cursor packet anyway.
             int drawn = 0;
+            int labelCount = 0;
+            System.DateTime nowUtc = System.DateTime.UtcNow;
             foreach (var kv in cursors)
             {
-                if (!kv.Value.Visible)
+                // Hidden (remote mouse on UI) or stale (peer frozen/silent >3 s) cursors don't draw.
+                if (!kv.Value.Visible || (nowUtc - kv.Value.LastValidUtc).TotalSeconds > 3.0)
                 {
+                    _rendered.Remove(kv.Key);
                     continue;
                 }
 
@@ -175,6 +190,7 @@ namespace CS2M.Sync
                     }
 
                     firstLabel = false;
+                    labelCount++;
                     _json.Append("{\"x\":").Append(nx.ToString("F4", CultureInfo.InvariantCulture))
                         .Append(",\"y\":").Append(ny.ToString("F4", CultureInfo.InvariantCulture))
                         .Append(",\"n\":\"").Append(JsonEscape(kv.Value.Username))
@@ -183,6 +199,7 @@ namespace CS2M.Sync
             }
 
             _json.Append(']');
+            _lastLabelCount = labelCount;
             PushLabels(_json.ToString());
 
             CleanupRendered(cursors);

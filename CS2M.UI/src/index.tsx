@@ -13,7 +13,9 @@ const register: ModRegistrar = (moduleRegistry) => {
     moduleRegistry.extend('game-ui/common/animations/transition-group-coordinator.tsx', 'TransitionGroupCoordinator', MenuUIExtensions);
 
     moduleRegistry.append('GameBottomRight', ChatIcon);
-    moduleRegistry.append('GameBottomRight', CursorLabels);
+    // 'Game' is the fullscreen slot (direct child of the 100%x100% game screen) — the labels layer
+    // needs viewport-anchored coordinates; GameBottomRight is a narrow non-positioned strip.
+    moduleRegistry.append('Game', CursorLabels);
     getModule('game-ui/game/components/game-panel-renderer.tsx', 'gamePanelComponents')['CS2M.UI.ChatPanel'] = ChatPanel;
 }
 

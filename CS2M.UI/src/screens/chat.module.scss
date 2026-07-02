@@ -30,7 +30,10 @@
     transition-duration: 0.4s, 0.4s;
     transition-property: height, opacity;
     transition-timing-function: ease, ease;
-    width: max-content;
+    /* cohtml can't parse max-content (logs "Unable to parse declaration"); auto +
+       flex-start alignment gives the same shrink-to-fit for the bubbles. */
+    width: auto;
+    align-self: flex-start;
 }
 
 .chatBubble-right {
@@ -66,7 +69,10 @@
     transition-duration: 0.4s, 0.4s;
     transition-property: height, opacity;
     transition-timing-function: ease, ease;
-    width: max-content;
+    /* cohtml can't parse max-content (logs "Unable to parse declaration"); auto +
+       flex-start alignment gives the same shrink-to-fit for the bubbles. */
+    width: auto;
+    align-self: flex-start;
 }
 
 .content {

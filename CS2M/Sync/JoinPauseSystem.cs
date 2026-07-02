@@ -28,22 +28,39 @@ namespace CS2M.Sync
         {
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
+                _pausedByUs = false; // drop stale state if we leave the session mid-join
                 return;
             }
 
             bool anyJoining = RemoteJoinState.AnyJoining;
 
-            if (anyJoining && !_pausedByUs)
+            if (anyJoining)
             {
-                _savedSpeed = _sim.selectedSpeed;
-                _sim.selectedSpeed = 0f;
-                _pausedByUs = true;
-                CS2M.Log.Info($"[Join] PAUSED (saved speed={_savedSpeed})");
+                if (!_pausedByUs)
+                {
+                    float cur = _sim.selectedSpeed;
+                    if (cur > 0f)
+                    {
+                        _savedSpeed = cur; // never save 0 (focus auto-pause etc.)
+                    }
+
+                    _pausedByUs = true;
+                    CS2M.Log.Info($"[Join] PAUSED (saved speed={_savedSpeed})");
+                }
+
+                // Enforce EVERY frame, exactly like the vanilla forced-pause (TimeUISystem rewrites
+                // selectedSpeed=0 per frame while its pause barrier is active). A one-shot write loses
+                // to the game's UI: SPACE / speed keys / focus-restore all rewrite selectedSpeed, which
+                // is why the host's game visibly kept running in the first real 2-PC session.
+                if (_sim.selectedSpeed != 0f)
+                {
+                    _sim.selectedSpeed = 0f;
+                }
             }
-            else if (!anyJoining && _pausedByUs)
+            else if (_pausedByUs)
             {
-                _sim.selectedSpeed = _savedSpeed > 0f ? _savedSpeed : 1f;
                 _pausedByUs = false;
+                _sim.selectedSpeed = _savedSpeed > 0f ? _savedSpeed : 1f;
                 CS2M.Log.Info($"[Join] RESUMED (speed={_sim.selectedSpeed})");
             }
         }

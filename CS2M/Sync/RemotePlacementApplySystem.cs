@@ -1,10 +1,15 @@
+using System.Collections.Generic;
+using Colossal.Mathematics;
 using CS2M.API.Networking;
 using CS2M.Commands.Data.Game;
 using CS2M.Networking;
 using Game;
+using Game.City;
 using Game.Common;
 using Game.Objects;
 using Game.Prefabs;
+using Game.Simulation;
+using Game.Tools;
 using Unity.Entities;
 using Unity.Mathematics;
 
@@ -13,34 +18,52 @@ namespace CS2M.Sync
     /// <summary>
     ///     Materializes objects placed by remote players.
     ///
-    ///     v10+ approach ("Option B" — direct archetype instantiation): instead of
-    ///     handing a definition entity to <c>GenerateObjectsSystem</c> and hoping it
-    ///     consumes it before our cleanup (which failed in the first 2-PC test:
-    ///     <c>COMMIT-DEF</c> logged but the object never appeared → <c>APPEARED-MISS</c>,
-    ///     a frame-ordering problem), we create the real entity ourselves from the
-    ///     prefab's baked <c>ObjectData.m_Archetype</c> and set the same components the
-    ///     vanilla <c>GenerateObjectsSystem.CreateObject</c> sets (Transform, PrefabRef,
-    ///     PseudoRandomSeed, Elevation). The archetype already contains <c>Created</c> +
-    ///     <c>Updated</c>, so all downstream systems (search index, meshes, sub-objects,
-    ///     zoning, effects) pick it up. This is fully synchronous — no timing/duplicate
-    ///     risk — and we get the created entity immediately so we can tag it as remote.
+    ///     v10+ approach ("Option B" — direct archetype instantiation): we create the real entity from
+    ///     the prefab's baked <c>ObjectData.m_Archetype</c> and set the same components the vanilla
+    ///     <c>GenerateObjectsSystem.CreateObject</c> sets (Transform, PrefabRef, PseudoRandomSeed,
+    ///     Elevation). The archetype already contains <c>Created</c> + <c>Updated</c>.
     ///
-    ///     Every step logs under <c>[Place]</c> so the in-game debug session can see
-    ///     exactly what happened.
+    ///     v38: this system now runs BEFORE Modification1 (it used to run at Modification5, after the
+    ///     consumers — sub-objects never spawned because SubObjectSystem@Mod2B never saw Created).
+    ///     Building SUB-NETS (e.g. a transformer's invisible road path) are not created by any system
+    ///     reacting to Created; the vanilla path is definition-based, so we replicate
+    ///     Game.Simulation.BuildingConstructionSystem.CreateNets: one CreationDefinition(Permanent,
+    ///     m_Owner=building) + NetCourse per prefab SubNet entry. Each PC generates its own sub-nets
+    ///     deterministically from the prefab — they are never synced over the wire.
+    ///
+    ///     v38 economy: on the HOST, remote placements are charged their construction cost. The
+    ///     builder's own local charge gets overwritten by the ~1 Hz host money sync, so without this
+    ///     the client would effectively build for free.
     /// </summary>
     public partial class RemotePlacementApplySystem : GameSystemBase
     {
         private PrefabSystem _prefabSystem;
+        private CitySystem _citySystem;
+        private CityConfigurationSystem _cityConfigSystem;
+        private readonly List<Entity> _pendingDefinitions = new List<Entity>();
 
         protected override void OnCreate()
         {
             base.OnCreate();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            _citySystem = World.GetOrCreateSystemManaged<CitySystem>();
+            _cityConfigSystem = World.GetOrCreateSystemManaged<CityConfigurationSystem>();
             CS2M.Log.Info("[Place] RemotePlacementApplySystem created (direct-archetype mode)");
         }
 
         protected override void OnUpdate()
         {
+            // Sub-net definitions injected last frame were consumed by GenerateNodes/Edges — clean up.
+            for (int i = 0; i < _pendingDefinitions.Count; i++)
+            {
+                if (EntityManager.Exists(_pendingDefinitions[i]))
+                {
+                    EntityManager.DestroyEntity(_pendingDefinitions[i]);
+                }
+            }
+
+            _pendingDefinitions.Clear();
+
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
                 return;
@@ -146,6 +169,176 @@ namespace CS2M.Sync
                 $"pos=({position.x:F1},{position.y:F1},{position.z:F1}) seed={cmd.RandomSeed} " +
                 $"hasTransform={EntityManager.HasComponent<Game.Objects.Transform>(obj)} " +
                 $"hasBuilding={EntityManager.HasComponent<Game.Buildings.Building>(obj)}");
+
+            // 4. Building sub-nets (invisible road paths, power connections…) — definition-injected,
+            //    consumed by GenerateNodes/Edges this same frame (we run before Modification1).
+            CreateSubNets(prefabEntity, obj, new Game.Objects.Transform(position, rotation), cmd.RandomSeed, cmd.PrefabName);
+
+            // 5. Host-authoritative economy: debit the construction cost for remote builds.
+            if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
+            {
+                ChargeConstructionCost(prefabEntity, cmd.PrefabName);
+            }
+        }
+
+        /// <summary>
+        ///     Replicates <c>Game.Simulation.BuildingConstructionSystem.CreateNets</c>: average shared
+        ///     node positions per <c>m_NodeIndex</c>, then one Permanent definition per SubNet entry.
+        /// </summary>
+        private void CreateSubNets(Entity prefabEntity, Entity owner, Game.Objects.Transform transform,
+            int randomSeed, string prefabName)
+        {
+            if (!EntityManager.HasBuffer<Game.Prefabs.SubNet>(prefabEntity))
+            {
+                return;
+            }
+
+            DynamicBuffer<Game.Prefabs.SubNet> subNets = EntityManager.GetBuffer<Game.Prefabs.SubNet>(prefabEntity);
+            if (subNets.Length == 0)
+            {
+                return;
+            }
+
+            // Average the endpoints that share a node index (vanilla CreateNets does exactly this).
+            var nodePositions = new List<float4>();
+            for (int i = 0; i < subNets.Length; i++)
+            {
+                Game.Prefabs.SubNet subNet = subNets[i];
+                if (subNet.m_NodeIndex.x >= 0)
+                {
+                    while (nodePositions.Count <= subNet.m_NodeIndex.x)
+                    {
+                        nodePositions.Add(default);
+                    }
+
+                    nodePositions[subNet.m_NodeIndex.x] += new float4(subNet.m_Curve.a, 1f);
+                }
+
+                if (subNet.m_NodeIndex.y >= 0)
+                {
+                    while (nodePositions.Count <= subNet.m_NodeIndex.y)
+                    {
+                        nodePositions.Add(default);
+                    }
+
+                    nodePositions[subNet.m_NodeIndex.y] += new float4(subNet.m_Curve.d, 1f);
+                }
+            }
+
+            for (int j = 0; j < nodePositions.Count; j++)
+            {
+                nodePositions[j] /= math.max(1f, nodePositions[j].w);
+            }
+
+            ComponentLookup<NetGeometryData> netGeometryData = GetComponentLookup<NetGeometryData>(true);
+            bool lefthand = _cityConfigSystem.leftHandTraffic;
+            int created = 0;
+
+            for (int k = 0; k < subNets.Length; k++)
+            {
+                Game.Prefabs.SubNet subNet = Game.Net.NetUtils.GetSubNet(subNets, k, lefthand, ref netGeometryData);
+                if (subNet.m_Prefab == Entity.Null)
+                {
+                    continue;
+                }
+
+                Entity def = EntityManager.CreateEntity();
+                EntityManager.AddComponentData(def, new CreationDefinition
+                {
+                    m_Prefab = subNet.m_Prefab,
+                    m_Owner = owner,
+                    // Deterministic per-PC: derive from the synced building seed + index.
+                    m_RandomSeed = randomSeed * 31 + k,
+                    m_Flags = CreationFlags.Permanent,
+                });
+
+                NetCourse course = default;
+                course.m_Curve = ObjectUtils.LocalToWorld(transform.m_Position, transform.m_Rotation, subNet.m_Curve);
+                course.m_StartPosition.m_Position = course.m_Curve.a;
+                course.m_StartPosition.m_Rotation =
+                    Game.Net.NetUtils.GetNodeRotation(MathUtils.StartTangent(course.m_Curve), transform.m_Rotation);
+                course.m_StartPosition.m_CourseDelta = 0f;
+                course.m_StartPosition.m_Elevation = subNet.m_Curve.a.y;
+                course.m_StartPosition.m_ParentMesh = subNet.m_ParentMesh.x;
+                if (subNet.m_NodeIndex.x >= 0)
+                {
+                    course.m_StartPosition.m_Position = ObjectUtils.LocalToWorld(
+                        transform.m_Position, transform.m_Rotation, nodePositions[subNet.m_NodeIndex.x].xyz);
+                }
+
+                course.m_EndPosition.m_Position = course.m_Curve.d;
+                course.m_EndPosition.m_Rotation =
+                    Game.Net.NetUtils.GetNodeRotation(MathUtils.EndTangent(course.m_Curve), transform.m_Rotation);
+                course.m_EndPosition.m_CourseDelta = 1f;
+                course.m_EndPosition.m_Elevation = subNet.m_Curve.d.y;
+                course.m_EndPosition.m_ParentMesh = subNet.m_ParentMesh.y;
+                if (subNet.m_NodeIndex.y >= 0)
+                {
+                    course.m_EndPosition.m_Position = ObjectUtils.LocalToWorld(
+                        transform.m_Position, transform.m_Rotation, nodePositions[subNet.m_NodeIndex.y].xyz);
+                }
+
+                course.m_Length = MathUtils.Length(course.m_Curve);
+                course.m_FixedIndex = -1;
+                course.m_StartPosition.m_Flags |= CoursePosFlags.IsFirst | CoursePosFlags.DisableMerge;
+                course.m_EndPosition.m_Flags |= CoursePosFlags.IsLast | CoursePosFlags.DisableMerge;
+                if (course.m_StartPosition.m_Position.Equals(course.m_EndPosition.m_Position))
+                {
+                    course.m_StartPosition.m_Flags |= CoursePosFlags.IsLast;
+                    course.m_EndPosition.m_Flags |= CoursePosFlags.IsFirst;
+                }
+
+                EntityManager.AddComponentData(def, course);
+
+                if (subNet.m_Upgrades != default(CompositionFlags))
+                {
+                    EntityManager.AddComponentData(def, new Game.Net.Upgraded { m_Flags = subNet.m_Upgrades });
+                }
+
+                EntityManager.AddComponent<Updated>(def);
+                _pendingDefinitions.Add(def);
+                created++;
+            }
+
+            if (created > 0)
+            {
+                CS2M.Log.Info($"[Place] SUBNETS name={prefabName} defs={created}");
+            }
+        }
+
+        /// <summary>
+        ///     Mirrors <c>Game.Tools.ToolApplySystem.ApplyJob</c>: sum of Temp.m_Cost →
+        ///     <c>PlayerMoney.Subtract</c> on the city entity. Remote applies bypass the tool flow, so
+        ///     the host debits explicitly; the ~1 Hz money sync then propagates the corrected balance.
+        /// </summary>
+        private void ChargeConstructionCost(Entity prefabEntity, string prefabName)
+        {
+            if (!EntityManager.HasComponent<PlaceableObjectData>(prefabEntity))
+            {
+                return; // not purchasable (decorative props) — free is vanilla-correct
+            }
+
+            int cost = (int) EntityManager.GetComponentData<PlaceableObjectData>(prefabEntity).m_ConstructionCost;
+            if (cost <= 0)
+            {
+                return;
+            }
+
+            Entity city = _citySystem.City;
+            if (city == Entity.Null || !EntityManager.HasComponent<PlayerMoney>(city))
+            {
+                return;
+            }
+
+            PlayerMoney pm = EntityManager.GetComponentData<PlayerMoney>(city);
+            if (pm.m_Unlimited)
+            {
+                return;
+            }
+
+            pm.Subtract(cost); // clamps at ±2e9, same as vanilla
+            EntityManager.SetComponentData(city, pm);
+            CS2M.Log.Info($"[Place] CHARGED cost={cost} prefab={prefabName} cash={pm.money}");
         }
 
         private void SetOrAdd<T>(Entity e, T data) where T : unmanaged, IComponentData

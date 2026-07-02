@@ -93,6 +93,10 @@ namespace CS2M.UI
             // screen coords (0..1), updated every frame by PlayerCursorSystem.
             AddBinding(_cursorLabels = new ValueBinding<string>(Mod.Name, "CursorLabels", "[]"));
 
+            // Render-ack from the UI: the label component reports its real layouted rect
+            // (getBoundingClientRect) so the log can prove cohtml actually drew it (w/h > 0).
+            AddBinding(new TriggerBinding<string>(Mod.Name, "CursorLabelsRendered", OnCursorLabelsRendered));
+
             RegisterChatPanelBindings();
 
             NetworkInterface.Instance.LocalPlayer.PlayerStatusChangedEvent += (_, status) =>
@@ -103,6 +107,20 @@ namespace CS2M.UI
                     _joinMenuVisible.Update(false);
                 }
             };
+        }
+
+        private long _lastCursorAckLog;
+
+        private void OnCursorLabelsRendered(string rectJson)
+        {
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (now - _lastCursorAckLog < System.Diagnostics.Stopwatch.Frequency * 2)
+            {
+                return; // throttle ~2 s
+            }
+
+            _lastCursorAckLog = now;
+            CS2M.Log.Info($"[Cursor] UI rendered label rect: {rectJson}");
         }
 
         private void RefreshModSupport()

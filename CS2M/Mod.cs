@@ -86,7 +86,10 @@ namespace CS2M
             // Cross-PC entity id service (must exist before apply/detect systems resolve ids).
             updateSystem.UpdateAt<CS2M_SyncIdSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateBefore<PlacementDetectorSystem>(SystemUpdatePhase.ModificationEnd);
-            updateSystem.UpdateAt<RemotePlacementApplySystem>(SystemUpdatePhase.Modification5);
+            // v38: BEFORE Modification1 (was Modification5). Created/Updated must survive into the
+            // consumers — SubObjectSystem@Mod2B spawns sub-objects, and the sub-net definitions we
+            // inject are consumed by GenerateNodes/Edges@Mod1/2 — all within this same frame.
+            updateSystem.UpdateBefore<RemotePlacementApplySystem>(SystemUpdatePhase.Modification1);
 
             // Money sync (host broadcasts authoritative cash; clients snap to it).
             updateSystem.UpdateBefore<MoneySyncSenderSystem>(SystemUpdatePhase.ModificationEnd);
@@ -125,7 +128,11 @@ namespace CS2M
 
             // Net sync (roads/rails/pipes/power/fences — one pipeline).
             updateSystem.UpdateBefore<NetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
-            updateSystem.UpdateAt<NetPlaceApplySystem>(SystemUpdatePhase.Modification5);
+            // v38: BEFORE Modification1 (was Modification5 — a dead zone: every net consumer had
+            // already run and CleanUpSystem stripped Updated the same frame, leaving hollow edges
+            // with no geometry/mesh/zone blocks). The injected Permanent definitions are consumed by
+            // GenerateNodesSystem@Mod1/GenerateEdgesSystem@Mod2 and the full pipeline runs this frame.
+            updateSystem.UpdateBefore<NetPlaceApplySystem>(SystemUpdatePhase.Modification1);
 
             // Net bulldoze + upgrade sync (delete / composition flags, edges addressed by position).
             updateSystem.UpdateBefore<NetEditDetectorSystem>(SystemUpdatePhase.ModificationEnd);

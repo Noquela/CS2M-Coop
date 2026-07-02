@@ -356,6 +356,7 @@ namespace CS2M.Networking
             Sync.RemoteProgressionQueue.Clear();
             Sync.RemoteZoneQueue.Clear();
             Sync.ZoneSync.Clear();
+            Sync.ZoneEcho.Clear();
             Sync.RemoteJoinState.Clear();
 
             // Fork features: drop their queues + shared snapshots so a reconnect starts clean.
@@ -475,6 +476,25 @@ namespace CS2M.Networking
         public void PlayerTypeChanged(PlayerType oldPlayerType, PlayerType newPlayerType)
         {
             Log.Debug($"LocalPlayer: changed player type from {oldPlayerType} to {newPlayerType}");
+
+            // Keep the command-layer role in lockstep with the network-layer type. This was never
+            // set before, so CurrentRole stayed None forever and every host-authoritative sender
+            // (Money/Speed/Progression) plus ResyncAll silently gated itself off — confirmed in the
+            // first real 2-PC session (zero [Money]/[Speed] SEND lines on a live host).
+            if (newPlayerType == PlayerType.SERVER)
+            {
+                API.Commands.Command.CurrentRole = API.Commands.MultiplayerRole.Server;
+            }
+            else if (newPlayerType == PlayerType.CLIENT)
+            {
+                API.Commands.Command.CurrentRole = API.Commands.MultiplayerRole.Client;
+            }
+            else
+            {
+                API.Commands.Command.CurrentRole = API.Commands.MultiplayerRole.None;
+            }
+
+            Log.Info($"[Role] CurrentRole={API.Commands.Command.CurrentRole}");
         }
     }
 }

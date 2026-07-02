@@ -25,6 +25,9 @@ namespace CS2M.Sync
 
             /// <summary>Display name of the remote player.</summary>
             public string Username;
+
+            /// <summary>When the last VALID position arrived (stale cursors get hidden).</summary>
+            public System.DateTime LastValidUtc;
         }
 
         private static readonly Dictionary<int, CursorState> Cursors = new Dictionary<int, CursorState>();
@@ -39,6 +42,12 @@ namespace CS2M.Sync
                 {
                     state.Target = new float3(x, y, z);
                     state.Visible = true;
+                    state.LastValidUtc = System.DateTime.UtcNow;
+                }
+                else
+                {
+                    // Explicit "hide" packet: the remote mouse left the world (hovering UI, alt-tab).
+                    state.Visible = false;
                 }
 
                 if (!string.IsNullOrEmpty(username))
@@ -46,7 +55,6 @@ namespace CS2M.Sync
                     state.Username = username;
                 }
 
-                // When invalid we keep the previous target/visibility unchanged.
                 Cursors[playerId] = state;
             }
         }

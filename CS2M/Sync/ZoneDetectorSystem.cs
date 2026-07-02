@@ -48,6 +48,8 @@ namespace CS2M.Sync
 
         protected override void OnUpdate()
         {
+            ZoneEcho.Tick();
+
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
                 return;
@@ -71,6 +73,15 @@ namespace CS2M.Sync
                     if (!ZoneSync.Snapshot.TryGetValue(e, out ushort[] prev) || prev.Length != n)
                     {
                         ZoneSync.Snapshot[e] = cur; // first sight: cache baseline, don't send
+                        continue;
+                    }
+
+                    // Echo guard: this block was just remote-applied. The game recomputes its cells
+                    // over the next frames (CellCheckSystem overlap sharing), so absorb the REAL state
+                    // into the snapshot instead of diffing — otherwise we ping-pong the paint back.
+                    if (ZoneEcho.IsMarked(e))
+                    {
+                        ZoneSync.Snapshot[e] = cur;
                         continue;
                     }
 

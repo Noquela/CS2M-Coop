@@ -96,6 +96,9 @@ namespace CS2M.Sync
         private Entity _policyEntity;
         private float _policyExpectedAdj = float.NaN;
         private float _speedBeforePause;
+        private uint _frameIndexAtPause;
+        private uint _frameIndexAtSabotage;
+        private uint _frameIndexAtResume;
         private bool _forceRun = true; // keep the sim ticking (game auto-pauses when unfocused)
         private readonly List<string> _results = new List<string>();
 
@@ -262,6 +265,16 @@ namespace CS2M.Sync
                 NetworkInterface.Instance.StartServer(new ConnectionConfig(_port));
                 _hosting = true;
                 L($"[Auto] StartServer on :{_port} status={Status()}");
+                if (_selftest)
+                {
+                    // Non-circular: reads the effect of the real StartServer transition. The first
+                    // 2-PC session shipped with CurrentRole permanently None (never assigned), which
+                    // silently killed every host-authoritative sender.
+                    Result("role",
+                        CS2M.API.Commands.Command.CurrentRole == CS2M.API.Commands.MultiplayerRole.Server,
+                        $"CurrentRole={CS2M.API.Commands.Command.CurrentRole} (expect Server after StartServer)");
+                }
+
                 return;
             }
 
@@ -300,6 +313,14 @@ namespace CS2M.Sync
                     _sim.selectedSpeed = 3f;
                 }
 
+                // Fake remote cursor: exercises the REAL label pipeline (PlayerCursorSystem →
+                // camera projection → JSON binding → cohtml layout → render-ack log line).
+                if (TryAnchor(out float3 cursorAnchor))
+                {
+                    RemotePlayerCursors.Update(1, cursorAnchor.x + 30f, cursorAnchor.y, cursorAnchor.z + 30f,
+                        true, "FakeFriend");
+                }
+
                 LogCounts(Status());
             }
         }
@@ -308,7 +329,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 18) { return; }
+            if (_testStep > 19) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -331,8 +352,9 @@ namespace CS2M.Sync
                 case 14: VerifyWater(); ActTerrain(); break;
                 case 15: VerifyTerrain(); ActPolicy(); break;
                 case 16: VerifyPolicy(); ActPause(); break;
-                case 17: VerifyPause(); ActResume(); break;
-                case 18: VerifyResume(); Summary(); break;
+                case 17: VerifyPauseFrozen(); SabotagePause(); break;
+                case 18: VerifyPauseEnforced(); ActResume(); break;
+                case 19: VerifyResume(); Summary(); break;
             }
 
             _testStep++;
@@ -573,8 +595,64 @@ namespace CS2M.Sync
 
         private void VerifyNet()
         {
+            // Entity count alone is NOT proof — the v37 direct-archetype path grew the count with a
+            // hollow edge that never got composition/geometry/zone blocks (invisible in real play).
+            // Find the injected edge by XZ endpoints (the game re-snaps Y to terrain) and assert the
+            // real pipeline ran: References@Mod2B, CompositionSelect@Mod3, BlockSystem@Mod4.
             int edges = _allEdgesQuery.CalculateEntityCount();
-            Result("net", edges > _edgesBeforeNet, $"edges {_edgesBeforeNet}->{edges}");
+            Entity found = Entity.Null;
+            NativeArray<Entity> ents = _allEdgesQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!EntityManager.HasComponent<Game.Net.Curve>(e)) { continue; }
+                    Colossal.Mathematics.Bezier4x3 bz = EntityManager.GetComponentData<Game.Net.Curve>(e).m_Bezier;
+                    bool fwd = NearXZ(bz.a, _netStart) && NearXZ(bz.d, _netEnd);
+                    bool rev = NearXZ(bz.a, _netEnd) && NearXZ(bz.d, _netStart);
+                    if (fwd || rev) { found = e; break; }
+                }
+            }
+            finally { ents.Dispose(); }
+
+            if (found == Entity.Null)
+            {
+                Result("net", false, $"edges {_edgesBeforeNet}->{edges} but injected edge NOT found by endpoints");
+                return;
+            }
+
+            bool composed = EntityManager.HasComponent<Game.Net.Composition>(found)
+                            && EntityManager.GetComponentData<Game.Net.Composition>(found).m_Edge != Entity.Null;
+
+            int subBlocks = -1; // -1 = prefab is not zoneable (no SubBlock buffer) — not required
+            if (EntityManager.HasBuffer<Game.Zones.SubBlock>(found))
+            {
+                subBlocks = EntityManager.GetBuffer<Game.Zones.SubBlock>(found).Length;
+            }
+
+            bool connected = false;
+            Game.Net.Edge edgeData = EntityManager.GetComponentData<Game.Net.Edge>(found);
+            if (EntityManager.HasBuffer<Game.Net.ConnectedEdge>(edgeData.m_Start))
+            {
+                DynamicBuffer<Game.Net.ConnectedEdge> ce =
+                    EntityManager.GetBuffer<Game.Net.ConnectedEdge>(edgeData.m_Start);
+                for (int i = 0; i < ce.Length; i++)
+                {
+                    if (ce[i].m_Edge == found) { connected = true; break; }
+                }
+            }
+
+            bool ok = composed && connected && subBlocks != 0;
+            Result("net", ok,
+                $"edges {_edgesBeforeNet}->{edges} composition={composed} nodeConnected={connected} " +
+                $"zoneBlocks={(subBlocks < 0 ? "n/a" : subBlocks.ToString())} (real build, not a hollow edge)");
+        }
+
+        private static bool NearXZ(float3 a, float3 b)
+        {
+            float dx = a.x - b.x;
+            float dz = a.z - b.z;
+            return dx * dx + dz * dz < 2.25f; // 1.5 m
         }
 
         private void ActDelete()
@@ -906,26 +984,52 @@ namespace CS2M.Sync
         {
             _forceRun = false; // stop forcing the sim to run so the pause test can actually pause
             _speedBeforePause = _sim.selectedSpeed;
-            L($"[Auto] TEST pause INJECT joining=true (speedBefore={_speedBeforePause})");
+            _frameIndexAtPause = _sim.frameIndex;
+            L($"[Auto] TEST pause INJECT joining=true (speedBefore={_speedBeforePause} fi={_frameIndexAtPause})");
             RemoteJoinState.Update("TestJoiner", true);
         }
 
-        private void VerifyPause()
+        // Non-circular: frameIndex only advances when the GameSimulation phase actually runs, so a
+        // frozen frameIndex is the real-world effect of the pause (reading selectedSpeed back would
+        // just echo the value we wrote — the old test passed while the live game kept running).
+        private void VerifyPauseFrozen()
         {
-            float speed = _sim.selectedSpeed;
-            Result("pause", speed == 0f, $"selectedSpeed={speed} (expected 0 while joining)");
+            uint fi = _sim.frameIndex;
+            Result("pause", fi - _frameIndexAtPause <= 2,
+                $"frameIndex {_frameIndexAtPause}->{fi} (sim must freeze while joining)");
+        }
+
+        // Emulates exactly what the vanilla TimeUISystem does on SPACE / speed keys: an adversarial
+        // one-shot selectedSpeed write. The per-frame enforcement in JoinPauseSystem must win.
+        private void SabotagePause()
+        {
+            _sim.selectedSpeed = 1f;
+            _frameIndexAtSabotage = _sim.frameIndex;
+            L("[Auto] TEST pause SABOTAGE selectedSpeed=1 (emulating the pause-button/SPACE rewrite)");
+        }
+
+        private void VerifyPauseEnforced()
+        {
+            uint fi = _sim.frameIndex;
+            Result("pause-enforce", fi - _frameIndexAtSabotage <= 2,
+                $"frameIndex {_frameIndexAtSabotage}->{fi} (must stay frozen despite adversarial speed write)");
         }
 
         private void ActResume()
         {
             L("[Auto] TEST pause INJECT joining=false (resume)");
             RemoteJoinState.Update("TestJoiner", false);
+            // Re-arm the force-run: in a headless/unfocused window the game auto-pauses, which made
+            // the old resume check a guaranteed false FAIL. frameIndex advancing is the real signal.
+            _forceRun = true;
+            _frameIndexAtResume = _sim.frameIndex;
         }
 
         private void VerifyResume()
         {
-            float speed = _sim.selectedSpeed;
-            Result("resume", speed > 0f, $"selectedSpeed={speed} (expected >0 after resume)");
+            uint fi = _sim.frameIndex;
+            Result("resume", fi > _frameIndexAtResume,
+                $"frameIndex {_frameIndexAtResume}->{fi} (sim must tick again after resume)");
         }
 
         private void Summary()

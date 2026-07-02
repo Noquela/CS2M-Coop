@@ -15,6 +15,7 @@ namespace CS2M.Sync
     public partial class SpeedSyncApplySystem : GameSystemBase
     {
         private SimulationSystem _sim;
+        private float _hostSpeed = float.NaN;
 
         protected override void OnCreate()
         {
@@ -27,22 +28,26 @@ namespace CS2M.Sync
         {
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
+                _hostSpeed = float.NaN;
                 return;
             }
 
-            if (Command.CurrentRole == MultiplayerRole.Server)
+            if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
             {
                 return; // host is authoritative; it doesn't take remote speed
             }
 
-            if (!RemoteSpeedQueue.TryTake(out float speed))
+            if (RemoteSpeedQueue.TryTake(out float speed))
             {
-                return;
+                _hostSpeed = speed;
             }
 
-            if (_sim.selectedSpeed != speed)
+            // Enforce the host's last speed EVERY frame (not only when a command arrives) — the local
+            // TimeUISystem rewrites selectedSpeed on SPACE/speed keys/focus loss, and a one-shot write
+            // would let the client sim drift away from the host's.
+            if (!float.IsNaN(_hostSpeed) && _sim.selectedSpeed != _hostSpeed)
             {
-                _sim.selectedSpeed = speed;
+                _sim.selectedSpeed = _hostSpeed;
             }
         }
     }

@@ -34,7 +34,8 @@ namespace CS2M.Sync
                 return;
             }
 
-            if (Command.CurrentRole != MultiplayerRole.Server)
+            // Network-layer PlayerType is the reliable role source (see MoneySyncSenderSystem).
+            if (NetworkInterface.Instance.LocalPlayer.PlayerType != PlayerType.SERVER)
             {
                 return; // only the host is authoritative over speed
             }

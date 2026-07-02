@@ -73,6 +73,15 @@ namespace CS2M.Sync
                 return;
             }
 
+            // STRUCTURAL CHANGE FIRST: AddComponent moves the entity to another chunk and invalidates
+            // any DynamicBuffer handle taken before it. The old order (GetBuffer → write → AddComponent
+            // → re-read the STALE handle for the snapshot) silently read another block's inline cells,
+            // corrupting the echo snapshot — the zone ping-pong from the first 2-PC session.
+            if (!EntityManager.HasComponent<Updated>(target))
+            {
+                EntityManager.AddComponent<Updated>(target);
+            }
+
             DynamicBuffer<Cell> cells = EntityManager.GetBuffer<Cell>(target);
             int applied = 0;
             int count = System.Math.Min(cmd.CellIndices.Length, cmd.ZoneNames.Length);
@@ -90,12 +99,8 @@ namespace CS2M.Sync
                 applied++;
             }
 
-            if (!EntityManager.HasComponent<Updated>(target))
-            {
-                EntityManager.AddComponent<Updated>(target);
-            }
-
-            // Refresh snapshot so our detector doesn't echo the change we just made.
+            // Refresh snapshot (handle still valid: no structural change since GetBuffer) and mark the
+            // echo TTL so the detector absorbs the game's own cell recompute instead of re-sending.
             int n = cells.Length;
             var cur = new ushort[n];
             for (int i = 0; i < n; i++)
@@ -104,6 +109,7 @@ namespace CS2M.Sync
             }
 
             ZoneSync.Snapshot[target] = cur;
+            ZoneEcho.Mark(target);
 
             CS2M.Log.Info($"[Zone] APPLIED block=({cmd.BlockX:F0},{cmd.BlockZ:F0}) cells={applied} entity={target.Index}");
         }
