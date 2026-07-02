@@ -131,10 +131,7 @@ namespace CS2M.Sync
             }
 
             string toolId = _toolSystem.activeTool != null ? _toolSystem.activeTool.toolID : null;
-            if (toolId == null || !toolId.Contains("Bulldoze"))
-            {
-                return;
-            }
+            bool bulldozing = toolId != null && toolId.Contains("Bulldoze");
 
             NativeArray<Entity> ents = _deletedNativeQuery.ToEntityArray(Allocator.Temp);
             try
@@ -146,8 +143,19 @@ namespace CS2M.Sync
                         continue;
                     }
 
-                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(e).m_Prefab,
-                            out PrefabBase prefab) || prefab == null)
+                    Entity prefabEntity = EntityManager.GetComponentData<PrefabRef>(e).m_Prefab;
+
+                    // v46.1: growables (SpawnableBuildingData prefabs) churn constantly under the sim
+                    // (level-ups, condemned) — only sync those while the player is actively bulldozing.
+                    // Everything else (service buildings, trees, props) is a player action from ANY
+                    // path, including the info-panel delete button (no bulldozer in hand).
+                    bool growable = EntityManager.HasComponent<SpawnableBuildingData>(prefabEntity);
+                    if (growable && !bulldozing)
+                    {
+                        continue;
+                    }
+
+                    if (!_prefabSystem.TryGetPrefab(prefabEntity, out PrefabBase prefab) || prefab == null)
                     {
                         continue;
                     }
