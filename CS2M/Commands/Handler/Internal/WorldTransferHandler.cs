@@ -6,6 +6,11 @@ namespace CS2M.Commands.Handler.Internal
 {
     public class WorldTransferHandler : CommandHandler<WorldTransferCommand>
     {
+        public WorldTransferHandler()
+        {
+            RelayOnServer = false; // per-peer stream, never rebroadcast
+        }
+
         protected override void Handle(WorldTransferCommand command)
         {
             NetworkInterface.Instance.LocalPlayer.SliceReceived(command);

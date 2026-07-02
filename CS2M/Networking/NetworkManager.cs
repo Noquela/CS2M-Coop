@@ -215,6 +215,29 @@ namespace CS2M.Networking
 
             //TODO: Check that only the relevant command could be sent in connected, not joined state
 
+            if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
+            {
+                // v43: stamp a stable per-connection identity (0 = the host itself). Without this
+                // every remote player was SenderId 0 — with 3+ players their cursors/identities
+                // collided. Stamped BEFORE the relay so all clients agree on who did what.
+                command.SenderId = peer.Id + 1;
+
+                // v43: the missing star-topology relay. Clients only talk to the host, so the host
+                // must rebroadcast gameplay commands to every OTHER client — with only 2 players
+                // this was invisible, with 3+ nothing a client did ever reached the other clients.
+                if (handler.RelayOnServer)
+                {
+                    byte[] relayBytes = CommandInternal.Instance.Serialize(command);
+                    foreach (NetPeer other in _netManager.ConnectedPeerList)
+                    {
+                        if (other != peer)
+                        {
+                            other.Send(relayBytes, DeliveryMethod.ReliableOrdered);
+                        }
+                    }
+                }
+            }
+
             handler.Parse(command);
         }
 

@@ -9,6 +9,7 @@ namespace CS2M.Commands.Handler.Game
         public ResyncHandler()
         {
             TransactionCmd = false;
+            RelayOnServer = false;
         }
 
         protected override void Handle(ResyncCommand command)

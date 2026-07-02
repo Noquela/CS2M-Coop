@@ -14,6 +14,7 @@ namespace CS2M.Commands.Handler.Internal
         public PreconditionsCheckHandler()
         {
             TransactionCmd = false;
+            RelayOnServer = false;
         }
 
         protected override void Handle(PreconditionsCheckCommand command)
