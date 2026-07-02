@@ -29,6 +29,13 @@ edita a própria cidade sozinho**: nada do que um faz aparece pro outro. Este fo
 | **Território** | Distritos (pintar a área) | archetype de `AreaData` + polígono de nós |
 | | Fontes de água (nascente/dreno) | `WaterSourceData` + posição |
 | | Terraformação (best-effort) | replay do brush via `TerrainSystem.ApplyBrush` |
+| | **Compra de tiles do mapa** | centro do tile → `RemoveComponent<Native>` (espelho do vanilla) |
+| **Progressão** | Compras da dev tree ("skill tree") | nome do nó → evento `Unlock` + débito de pontos |
+| | Extensões de prédios de serviço | prefab + dono (`SyncId`/posição) → `ServiceUpgradeSystem` fia o resto |
+| | **Growables (EXPERIMENTAL)** | host-autoritativo: spawns do sim do host sincam; clientes suprimem o próprio `ZoneSpawnSystem` (level-up = delete-por-id + spawn). `CS2M_GROWABLE_SYNC=0` desliga |
+| | Delete de objetos nativos | prefab + posição (gate: só com o bulldozer ativo) |
+| **Ambiente** | Clima (chuva/nuvens/temperatura) | overrides do `ClimateSystem` (~0,5 Hz) |
+| | Relógio/data compartilhados | realinhamento do `TimeData.m_FirstFrame` |
 | **Economia/cidade** | Dinheiro (caixa da cidade) | valor autoritativo do host (~1 Hz) |
 | | Custo de construção remota | **o host debita** o custo do que o cliente constrói |
 | | Impostos (todas as alíquotas) | array de `TaxSystem.GetTaxRates()` |
@@ -40,9 +47,13 @@ edita a própria cidade sozinho**: nada do que um faz aparece pro outro. Este fo
 | | Pause-on-join (+ aviso no chat) | estado de "entrando", reforçado por frame |
 | | `/resync` no chat | host re-transmite o mundo inteiro sob demanda |
 
-**Lacunas conhecidas** (ver seção *Limites*): linhas de transporte, clima/hora do dia, e toda a
-**simulação emergente** (população, tráfego, cidadãos, economia por tick) — que é um problema
-fundamentalmente diferente.
+**3+ jogadores** são suportados desde a v43: o host retransmite os comandos de cada cliente aos
+demais (topologia estrela) e carimba a identidade de cada conexão. Um **detector de divergência**
+compara contagens do mundo a cada 10 s e sugere `/resync` no chat quando algo escapa.
+
+**Lacunas conhecidas** (ver seção *Limites*): linhas de transporte, renomear coisas, políticas de
+distrito, e a **simulação emergente por-PC** (cidadãos, tráfego, economia por tick) — mitigada pelos
+growables host-autoritativos + `/resync`.
 
 ---
 
