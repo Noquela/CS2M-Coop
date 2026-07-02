@@ -179,6 +179,10 @@ namespace CS2M
             updateSystem.UpdateBefore<TileDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<TileApplySystem>(SystemUpdatePhase.Modification5);
 
+            // Work-area edit sync (farm fields, mine dig zones — building-owned Areas).
+            updateSystem.UpdateBefore<AreaEditDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<AreaEditApplySystem>(SystemUpdatePhase.Modification1);
+
             // EXPERIMENTAL: host-authoritative growables (CS2M_GROWABLE_SYNC=0 disables).
             // Host detects sim spawns before ModificationEnd; clients suppress their zone spawning.
             updateSystem.UpdateBefore<GrowableDetectorSystem>(SystemUpdatePhase.ModificationEnd);

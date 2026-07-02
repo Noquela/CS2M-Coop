@@ -206,10 +206,92 @@ namespace CS2M.Sync
             //    consumed by GenerateNodes/Edges this same frame (we run before Modification1).
             CreateSubNets(prefabEntity, obj, new Game.Objects.Transform(position, rotation), cmd.RandomSeed, cmd.PrefabName);
 
+            // 4b. v45: building sub-AREAS (a farm's field, a mine's dig area…) — same definition
+            //     pattern, replicating BuildingConstructionSystem.CreateAreas. Without this a remote
+            //     farm arrived with no working area at all.
+            CreateSubAreas(prefabEntity, obj, new Game.Objects.Transform(position, rotation), cmd.RandomSeed, cmd.PrefabName);
+
             // 5. Host-authoritative economy: debit the construction cost for remote builds.
             if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
             {
                 ChargeConstructionCost(prefabEntity, cmd.PrefabName);
+            }
+        }
+
+        /// <summary>
+        ///     Replicates <c>BuildingConstructionSystem.CreateAreas</c>: one Permanent definition per
+        ///     prefab SubArea entry, with the polygon transformed to world space. Placeholder entries
+        ///     (random area selection) are skipped — not used by extractor/service defaults.
+        /// </summary>
+        private void CreateSubAreas(Entity prefabEntity, Entity owner, Game.Objects.Transform transform,
+            int randomSeed, string prefabName)
+        {
+            if (!EntityManager.HasBuffer<Game.Prefabs.SubArea>(prefabEntity)
+                || !EntityManager.HasBuffer<Game.Prefabs.SubAreaNode>(prefabEntity))
+            {
+                return;
+            }
+
+            DynamicBuffer<Game.Prefabs.SubArea> subAreas =
+                EntityManager.GetBuffer<Game.Prefabs.SubArea>(prefabEntity);
+            DynamicBuffer<Game.Prefabs.SubAreaNode> subAreaNodes =
+                EntityManager.GetBuffer<Game.Prefabs.SubAreaNode>(prefabEntity);
+            if (subAreas.Length == 0)
+            {
+                return;
+            }
+
+            int created = 0;
+            for (int i = 0; i < subAreas.Length; i++)
+            {
+                Game.Prefabs.SubArea subArea = subAreas[i];
+                if (subArea.m_Prefab == Entity.Null
+                    || EntityManager.HasBuffer<Game.Prefabs.PlaceholderObjectElement>(subArea.m_Prefab))
+                {
+                    continue; // placeholder = random pick; defaults we care about are direct prefabs
+                }
+
+                int count = subArea.m_NodeRange.y - subArea.m_NodeRange.x + 1;
+                if (count <= 0)
+                {
+                    continue;
+                }
+
+                Entity def = EntityManager.CreateEntity();
+                EntityManager.AddComponentData(def, new CreationDefinition
+                {
+                    m_Prefab = subArea.m_Prefab,
+                    m_Owner = owner,
+                    m_RandomSeed = randomSeed * 17 + i,
+                    m_Flags = CreationFlags.Permanent,
+                });
+                EntityManager.AddComponent<Updated>(def);
+
+                DynamicBuffer<Game.Areas.Node> nodes = EntityManager.AddBuffer<Game.Areas.Node>(def);
+                nodes.ResizeUninitialized(count);
+                int src = Game.Tools.ObjectToolBaseSystem.GetFirstNodeIndex(subAreaNodes, subArea.m_NodeRange);
+                int dst = 0;
+                for (int j = subArea.m_NodeRange.x; j <= subArea.m_NodeRange.y; j++)
+                {
+                    float3 local = subAreaNodes[src].m_Position;
+                    float3 world = ObjectUtils.LocalToWorld(transform, local);
+                    int parentMesh = subAreaNodes[src].m_ParentMesh;
+                    float elevation = math.select(float.MinValue, local.y, parentMesh >= 0);
+                    nodes[dst] = new Game.Areas.Node(world, elevation);
+                    dst++;
+                    if (++src == subArea.m_NodeRange.y)
+                    {
+                        src = subArea.m_NodeRange.x;
+                    }
+                }
+
+                _pendingDefinitions.Add(def);
+                created++;
+            }
+
+            if (created > 0)
+            {
+                CS2M.Log.Info($"[Place] SUBAREAS name={prefabName} defs={created}");
             }
         }
 
