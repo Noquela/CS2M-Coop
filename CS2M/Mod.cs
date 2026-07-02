@@ -167,6 +167,14 @@ namespace CS2M
             updateSystem.UpdateAt<SpeedSyncSenderSystem>(SystemUpdatePhase.Rendering);
             updateSystem.UpdateAt<SpeedSyncApplySystem>(SystemUpdatePhase.Rendering);
 
+            // Environment sync (weather overrides + shared clock) — host-authoritative scalars.
+            updateSystem.UpdateAt<EnvSyncSenderSystem>(SystemUpdatePhase.Rendering);
+            updateSystem.UpdateAt<EnvSyncApplySystem>(SystemUpdatePhase.Rendering);
+
+            // World-fingerprint drift detector (host broadcasts counts; clients suggest /resync).
+            updateSystem.UpdateAt<StateHashSenderSystem>(SystemUpdatePhase.Rendering);
+            updateSystem.UpdateAt<StateHashApplySystem>(SystemUpdatePhase.Rendering);
+
             // Headless self-test driver. Completely inert unless CS2M_AUTOPILOT is set, so the
             // normal build is unaffected. Runs at UIUpdate (same group as UISystem) so the client
             // half can auto-connect from the main menu; the host half auto-hosts + runs a scripted
