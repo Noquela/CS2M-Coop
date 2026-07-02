@@ -8,9 +8,10 @@ O upstream conecta dois mundos, transfere o save inicial e tem chat — mas **de
 edita a própria cidade sozinho**: nada do que um faz aparece pro outro. Este fork sincroniza as
 **ações dos jogadores** de verdade, validado dentro do jogo.
 
-> **14 features validadas no jogo real** (não só "compila"): cada uma foi testada com um harness que roda
-> o jogo e confere o estado do mundo antes/depois. Veja [COOP_SYNC.md](COOP_SYNC.md) para a matriz de
-> validação e o guia de debug.
+> **17 features validadas no jogo real** (não só "compila"): cada uma foi testada com um harness que roda
+> o jogo e confere o estado do mundo antes/depois — e o mod já passou por **sessões reais de 2 PCs**
+> (host + cliente via VPN), que expuseram e corrigiram os bugs que só rede de verdade mostra (v38).
+> Veja [COOP_SYNC.md](COOP_SYNC.md) para a matriz de validação e o guia de debug.
 
 ---
 
@@ -25,15 +26,21 @@ edita a própria cidade sozinho**: nada do que um faz aparece pro outro. Este fo
 | | Mover / realocar objeto | `CS2M_SyncId` |
 | | Deletar rede (bulldoze) | posição dos nós da ponta |
 | | Upgrade de rede (calçada/árvores/etc.) | posição dos nós + `CompositionFlags` |
-| **Economia/cidade** | Dinheiro (caixa da cidade) | valor autoritativo do host |
+| **Território** | Distritos (pintar a área) | archetype de `AreaData` + polígono de nós |
+| | Fontes de água (nascente/dreno) | `WaterSourceData` + posição |
+| | Terraformação (best-effort) | replay do brush via `TerrainSystem.ApplyBrush` |
+| **Economia/cidade** | Dinheiro (caixa da cidade) | valor autoritativo do host (~1 Hz) |
+| | Custo de construção remota | **o host debita** o custo do que o cliente constrói |
 | | Impostos (todas as alíquotas) | array de `TaxSystem.GetTaxRates()` |
 | | Orçamento de serviços (sliders) | prefab do serviço + porcentagem |
 | | Políticas da cidade | prefab da política + flags/ajuste |
 | | Milestones / XP / desbloqueios | XP autoritativo do host |
-| **Sessão** | Cursor + nome de cada jogador | overlay + UI |
-| | Pause-on-join (+ aviso no chat) | estado de "entrando" |
+| **Sessão** | Cursor + nome de cada jogador | overlay (círculo) + label na UI |
+| | Velocidade da simulação | autoritativa do host, reforçada por frame |
+| | Pause-on-join (+ aviso no chat) | estado de "entrando", reforçado por frame |
+| | `/resync` no chat | host re-transmite o mundo inteiro sob demanda |
 
-**Lacunas conhecidas** (ver seção *Limites*): terraformação, linhas de transporte, distritos, e toda a
+**Lacunas conhecidas** (ver seção *Limites*): linhas de transporte, clima/hora do dia, e toda a
 **simulação emergente** (população, tráfego, cidadãos, economia por tick) — que é um problema
 fundamentalmente diferente.
 
@@ -58,7 +65,7 @@ A sincronização segue **um padrão único** para (quase) toda feature:
    CommandHandler<T>  (auto-descoberto)  ◄────────────────────────────────────┘
             │  enfileira numa fila thread-safe
             ▼
-   Apply System  (roda em Modification5; drena a fila no main thread e altera o ECS)
+   Apply System  (drena a fila no main thread e altera o ECS, na fase certa do frame)
             │
    [ a mesma coisa aparece no mundo do jogador B ]
 ```
@@ -81,8 +88,10 @@ A sincronização segue **um padrão único** para (quase) toda feature:
    comando numa fila estática thread-safe (a rede roda em outra thread; o ECS só pode ser tocado no main
    thread).
 
-4. **Apply** — um `GameSystemBase` em `UpdateAt<T>(Modification5)` que drena a fila **no main thread** e
-   aplica a mudança no ECS.
+4. **Apply** — um `GameSystemBase` que drena a fila **no main thread** e aplica a mudança no ECS.
+   A **fase importa** (lição da v38): quem *cria coisas* (objetos/redes) roda **antes de
+   `Modification1`**, para que `Created`/`Updated` sobrevivam até os consumidores nativos do mesmo
+   frame; os demais applies rodam em `Modification5` (política em `Modification3`).
 
 ### Identidade entre PCs (o problema difícil)
 
@@ -96,30 +105,53 @@ Como índices de entidade diferem entre máquinas, cada feature usa a chave est�
 - **Nome de prefab** (zonas, políticas, orçamento): o índice/entidade do prefab difere por PC, mas o
   **nome do asset** é igual — resolve-se `nome → prefab local` no receptor.
 
-### Materialização direta ("Option B")
+### Materialização — dois caminhos, uma regra de ouro
 
-O jeito "oficial" de criar coisas no CS2 é injetar uma **definição** (`CreationDefinition`+`NetCourse`/…)
-e deixar o tool do jogo construir. **Isso não funciona quando injetado por fora do fluxo do tool** (o
-consumidor vive no `ToolOutputBarrier`, com entidades `Temp` recriadas por frame). Então o apply
-**cria a entidade real direto do archetype pré-compilado do prefab**:
+A regra de ouro (descoberta a caro na v38): **os consumidores nativos de rede rodam em
+Modification2B–4, e o jogo apaga `Created`/`Updated` no fim do MESMO frame**. Qualquer coisa criada em
+Modification5 vira uma "casca" que nenhum sistema nativo vê — foi exatamente o bug da primeira sessão
+real de 2 PCs (edge criado, contagem subiu, mas **sem malha, sem composição, sem blocos de zona**).
+Por isso os applies de criação rodam **antes de `Modification1`**.
 
-- objetos: `ObjectData.m_Archetype`;
-- redes: `NetData.m_NodeArchetype` (2 nós) + `NetData.m_EdgeArchetype` (1 edge) com `Curve`/`Edge`/
-  `PrefabRef` + `Updated`.
-
-É **síncrono, num frame só, sem timing de barrier** — e os sistemas nativos de geometria/lanes do jogo
-constroem o visual a partir dali. (Mesma abordagem que já funcionava pros objetos, estendida pras redes.)
+- **Objetos** (prédios/props/árvores): criação direta do archetype pré-compilado
+  (`ObjectData.m_Archetype`) + `Transform`/`PrefabRef`/`PseudoRandomSeed` — síncrono, entidade
+  conhecida na hora (necessário pra carimbar o `CS2M_SyncId`). Rodando antes de Mod1, o
+  `SubObjectSystem` (Mod2B) gera os sub-objetos no mesmo frame.
+- **Sub-nets do prédio** (ex.: o caminho invisível de um transformador): **não nascem sozinhas** — o
+  apply replica o `BuildingConstructionSystem.CreateNets` do próprio jogo, injetando uma
+  `CreationDefinition(Permanent, m_Owner=prédio)` + `NetCourse` por entrada do buffer `SubNet` do
+  prefab. Cada PC gera as suas deterministicamente — **sub-nets nunca cruzam a rede**.
+- **Redes** (estradas/trilhos/canos/energia/cercas): **injeção de definição vanilla** —
+  `CreationDefinition` com `CreationFlags.Permanent` + `NetCourse` + `Updated`, o mesmo caminho
+  programático que o jogo usa pra construir prédios spawnados. Com `Permanent` não há `Temp`, e o
+  `GenerateNodes/EdgesSystem` (Mod1/2) constrói a rede REAL: ajuste ao terreno, merge/reuso de nós
+  (as pontas snapam em nós existentes num raio de 0,5 m — conexão cross-PC), composição, geometria,
+  lanes, **blocos de zoneamento** e malha, tudo no mesmo frame. Guard de idempotência: se já existe um
+  edge do mesmo prefab ligando os mesmos dois nós, o comando duplicado é ignorado.
 
 ### Casos que fogem do padrão
 
-- **Dinheiro / XP**: são **autoritativos do host** — o host transmite o valor (~1 Hz e na mudança), os
-  clientes convergem. Dinheiro usa **delta-`Add`** (nunca `new PlayerMoney`, pra não zerar o modo
-  "unlimited").
+- **Dinheiro / XP / velocidade**: são **autoritativos do host** — o host transmite o valor (~1 Hz e na
+  mudança), os clientes convergem. Dinheiro usa **delta-`Add`** (nunca `new PlayerMoney`, pra não zerar
+  o modo "unlimited"). O papel de host é derivado do `PlayerType` da camada de rede e espelhado em
+  `Command.CurrentRole` na transição (na v37 o `CurrentRole` nunca era atribuído — todos os senders
+  host-autoritativos morriam em silêncio; bug achado na primeira sessão real).
+- **Economia coerente**: quando o **cliente** constrói, o débito local dele seria sobrescrito pelo sync
+  de dinheiro do host — então **o host debita o custo de construção ao aplicar** o comando remoto
+  (espelho do `ToolApplySystem` vanilla), e o caixa corrigido se propaga a todos.
+- **Pause-on-join / velocidade**: a UI do jogo **reescreve** `selectedSpeed` a qualquer interação
+  (espaço, teclas 1/2/3, foco) — um write único perde. Igual ao forced-pause vanilla, o
+  `JoinPauseSystem` (e o apply de velocidade no cliente) **reforçam o valor todo frame** na fase
+  Rendering (que tica mesmo com a sim pausada).
 - **Políticas**: em vez de escrever o buffer na mão, o apply **levanta o mesmo evento que a UI do jogo
   levanta** (`Event`+`Modify`) — e roda em **Modification3**, *antes* do `Game.Policies.ModifiedSystem`
   (Modification4) que consome o evento, pra ser processado no mesmo frame.
 - **Impostos / orçamento**: usam a **API pública do próprio jogo** (`TaxSystem.GetTaxRates()` — array
   vivo; `CityServiceBudgetSystem.SetServiceBudget(prefab, %)`).
+- **Nome sobre o cursor**: o motor de UI do CS2 (cohtml 1.64) tem CSS parcial — nada de `max-content`
+  nem `position:fixed` esticado por offsets. O label vive no slot fullscreen `Game` com
+  `position:absolute` + `width/height:100%`, unidades `rem`, e reporta o retângulo renderizado de volta
+  ao C# (render-ack) pra ser validável por log.
 
 ---
 
@@ -156,21 +188,28 @@ ECS é sempre o Apply System, no main thread**. Isso evita corrida de dados e tr
 Sem proteção, uma mudança recebida seria **re-detectada e re-enviada** — um loop infinito que entupiria a
 rede. Cada feature tem um guard:
 - tag `CS2M_RemotePlaced` nas entidades criadas remotamente (o detector as exclui);
-- `RemoteNetEcho` (hash de segmento quantizado) para redes/delete/upgrade;
-- refresh de **snapshot** no apply para impostos/orçamento/políticas/zona (o diff seguinte não acusa
-  diferença).
+- `RemoteNetEcho` (hash de segmento quantizado **só em XZ** — o jogo re-ajusta o Y ao terreno) para
+  redes/delete/upgrade;
+- `ZoneEcho` (TTL por bloco): depois de aplicar zona remota, o detector **absorve** por alguns frames o
+  estado real recalculado pelo jogo (células compartilhadas entre blocos vizinhos) em vez de re-enviar —
+  mata o ping-pong visto na primeira sessão real;
+- refresh de **snapshot** no apply para impostos/orçamento/políticas (o diff seguinte não acusa
+  diferença);
+- sub-nets com `Owner` (pertencem a um prédio) são **excluídas do detector de redes** — cada PC gera as
+  suas a partir do prefab.
 
-### 6. Criação direta = sem retry, sem frame perdido
+### 6. Criação num frame só, sem retry
 
-A materialização por archetype ("Option B") é **um `CreateEntity` + `SetArchetype` síncrono**. Não
-depende de barrier/definição/pathfinding, então não há tentativa-e-erro por timing nem sistemas extras
-rodando todo frame.
+Objetos são **um `CreateEntity` + `SetArchetype` síncronos**; redes são **uma definição consumida no
+mesmo frame** pelo pipeline nativo. Não há tentativa-e-erro por timing nem sistemas extras varrendo o
+mundo todo frame.
 
 ### 7. Fase certa
 
-Cada apply roda na fase que casa com o sistema nativo correspondente (ex.: objetos/redes em
-Modification5, política em Modification3 antes do `ModifiedSystem`). Isso evita processamento repetido e
-o custo de "esperar o próximo frame".
+Cada apply roda na fase que casa com o sistema nativo correspondente: **criação antes de
+`Modification1`** (o pipeline inteiro — geometria, lanes, blocos, malha — completa no mesmo frame),
+política em `Modification3` (antes do `ModifiedSystem`), o resto em `Modification5`. Isso evita
+processamento repetido e o custo de "esperar o próximo frame".
 
 **Resumo:** o custo por frame é ~o de algumas `EntityQuery` vazias; o custo de rede é ~o tamanho da ação
 que o jogador acabou de fazer. Não há varredura do mundo nem estado periódico.
@@ -186,22 +225,37 @@ máquina. A solução:
   então o build normal é idêntico). No modo `selftest` ele: sobe um servidor local (o que já coloca o
   jogo em `PLAYING` sem precisar de cliente), **injeta os mesmos comandos que os detectores emitiriam**
   direto nas filas de apply, e **lê o mundo de volta** pra conferir cada feature — tudo numa instância só.
-- **`tools/autotest/`** — o launcher e o roteiro. Cada rodada (~2 min) imprime uma matriz
-  `RESULT <feature>: PASS/FAIL` com a evidência (ex.: `edges 482→483`, `adj 10→27`).
+- **`tools/autotest/`** — o launcher e o roteiro (20 passos). Cada rodada imprime uma matriz
+  `RESULT <feature>: PASS/FAIL` com a evidência.
+- **Validações anti-mentira** (endurecidas na v38, depois que a 1ª sessão real desmentiu dois PASS):
+  rede só passa se a **construção real** aconteceu (composição selecionada + nó conectado + blocos de
+  zona, não só contagem de entidades); pause é validado pelo **`frameIndex` congelado** — inclusive sob
+  um write adversário de velocidade no meio (emulando a tecla espaço) — e não lendo de volta o valor que
+  nós mesmos escrevemos; o papel de host (`CurrentRole`) é conferido após o `StartServer` real; e um
+  cursor remoto falso ("FakeFriend") atravessa o pipeline inteiro do label até o **render-ack** do motor
+  de UI (retângulo com `w/h > 0`).
+- **Cuidado ao lançar**: não inicie o `Cities2.exe` com o diretório de trabalho dentro de uma pasta que
+  contenha DLLs do mod (o Mono sonda o CWD e o registro de mods do jogo quebra com
+  `NotSupportedException`). O launcher do autotest usa a pasta do jogo como CWD.
 
-É isso que permitiu afirmar **"14/14 validado no jogo"** em vez de só "compila".
+O selftest valida a camada de apply + detectores; **as sessões reais de 2 PCs** (host + cliente via VPN)
+validaram o caminho completo com rede, latência e dois mundos vivos.
 
 ---
 
 ## Limites (v2 / não sincronizado)
 
 - **Simulação emergente** — população, cidadãos, veículos, tráfego, tick de economia, level-up de
-  prédios, felicidade/poluição, clima/hora. A simulação do CS2 **não é determinística** entre máquinas;
+  prédios, felicidade/poluição. A simulação do CS2 **não é determinística** entre máquinas;
   sincronizar isso exigiria lockstep determinístico (o jogo não tem) ou stream de estado autoritativo
-  (muita banda). O mod alinha o que **as ações + dinheiro + XP** conseguem alinhar.
-- **Pendentes** (código difícil de RE): terraformação de terreno (heightmap via compute shader),
-  linhas de transporte (recriar rota exige dirigir o pathfinding do tool), distritos, água.
-- **Redes**: cross-PC snapping/split em nós existentes é aproximado (pontas coincidentes auto-mergeiam).
+  (muita banda). O mod alinha o que **as ações + dinheiro + XP + velocidade** conseguem alinhar — e o
+  **`/resync`** reconcilia qualquer divergência acumulada re-transmitindo o mundo do host.
+- **Pendentes (v2)**: linhas de transporte (recriar rota exige dirigir o pathfinding do tool);
+  clima/hora do dia (escalares baratos, mesmo padrão host-autoritativo); nome de distrito (UI-managed);
+  **split** de rede cross-PC (ponta no MEIO de um edge existente — snap em nós existentes já funciona);
+  edição de objetos nativos/growables (não têm `CS2M_SyncId`).
+- **Terraformação** é best-effort: o delta por frame do brush depende de frame-time, então o replay é
+  aproximado; o `/resync` corrige o drift de terreno.
 
 ---
 
@@ -213,6 +267,9 @@ Com as env vars `CSII_*` do toolchain de modding configuradas:
 dotnet build CS2M/CS2M.csproj -c Release \
   -p:AssemblyVersion=1.0.N.0 -p:FileVersion=1.0.N.0 -p:Version=1.0.N.0
 # copie CS2M.dll / CS2M.API.dll / CS2M.BaseGame.dll para  …/Mods/CS2M/
+
+# UI (label do cursor, chat, menus) — sai direto em …/Mods/CS2M/CS2M.mjs + .css:
+cd CS2M.UI && npm run build
 ```
 
 Rodar o autoteste in-game (uma instância):
