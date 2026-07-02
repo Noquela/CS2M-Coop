@@ -179,6 +179,14 @@ namespace CS2M
             updateSystem.UpdateBefore<TileDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<TileApplySystem>(SystemUpdatePhase.Modification5);
 
+            // City-loan sync (take/repay mirrors on every PC; host reconciles the money delta).
+            updateSystem.UpdateBefore<LoanDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<LoanApplySystem>(SystemUpdatePhase.Modification5);
+
+            // Rename sync (buildings + districts, via the game's own NameSystem).
+            updateSystem.UpdateBefore<RenameDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<RenameApplySystem>(SystemUpdatePhase.Modification5);
+
             // Work-area edit sync (farm fields, mine dig zones — building-owned Areas).
             updateSystem.UpdateBefore<AreaEditDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<AreaEditApplySystem>(SystemUpdatePhase.Modification1);

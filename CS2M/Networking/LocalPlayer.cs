@@ -377,6 +377,8 @@ namespace CS2M.Networking
             Sync.RemoteEnvQueue.Clear();
             Sync.TileSync.Clear();
             Sync.RemoteAreaQueue.Clear();
+            Sync.LoanSync.Clear();
+            Sync.RenameSync.Clear();
             Sync.RemoteStateHashQueue.Clear();
 
             PlayerStatus = PlayerStatus.INACTIVE;

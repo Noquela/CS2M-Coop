@@ -151,10 +151,26 @@ namespace CS2M.Sync
 
         private void ApplyMove(MoveCommand cmd)
         {
-            if (!_idSystem.TryResolve(cmd.SyncId, out Entity e) || !EntityManager.Exists(e))
+            Entity e;
+            bool nativeFirstTouch = false;
+            if (!_idSystem.TryResolve(cmd.SyncId, out e) || !EntityManager.Exists(e))
             {
-                CS2M.Log.Info($"[Move] SKIP unresolved id={cmd.SyncId}");
-                return;
+                // v48: native relocation — find the twin by prefab + OLD position.
+                if (!string.IsNullOrEmpty(cmd.PrefabName))
+                {
+                    e = FindNative(new DeleteCommand
+                    {
+                        PrefabName = cmd.PrefabName,
+                        PosX = cmd.OldX, PosY = cmd.OldY, PosZ = cmd.OldZ,
+                    });
+                    nativeFirstTouch = e != Entity.Null;
+                }
+
+                if (e == Entity.Null)
+                {
+                    CS2M.Log.Info($"[Move] SKIP unresolved id={cmd.SyncId} name={cmd.PrefabName}");
+                    return;
+                }
             }
 
             if (!EntityManager.HasComponent<Game.Objects.Transform>(e))
@@ -183,7 +199,15 @@ namespace CS2M.Sync
                 EntityManager.AddComponent<BatchesUpdated>(e);
             }
 
-            CS2M.Log.Info($"[Move] APPLIED id={cmd.SyncId} pos=({cmd.PosX:F1},{cmd.PosY:F1},{cmd.PosZ:F1}) entity={e.Index}");
+            // First-touch identity: the sender allocated this id for the native — register it here
+            // too so both sides address this building by id from now on.
+            if (nativeFirstTouch && cmd.SyncId != 0)
+            {
+                CS2M_SyncIdSystem.Register(EntityManager, e, cmd.SyncId);
+            }
+
+            CS2M.Log.Info($"[Move] APPLIED id={cmd.SyncId} pos=({cmd.PosX:F1},{cmd.PosY:F1},{cmd.PosZ:F1}) entity={e.Index}" +
+                          (nativeFirstTouch ? " (native first-touch)" : ""));
         }
     }
 }

@@ -28,13 +28,23 @@ namespace CS2M.Sync
     {
         private const float MoveEpsilon = 0.1f;
 
+        private Game.Prefabs.PrefabSystem _prefabSystem;
         private EntityQuery _movedQuery;
+        private EntityQuery _moveTemps;
+        private EntityQuery _movedNativeQuery;
         private readonly Dictionary<Entity, float3> _lastPos = new Dictionary<Entity, float3>();
+
+        // v48: while the move tool drags, the Temp copy points at the original via Temp.m_Original —
+        // and the ORIGINAL still holds its pre-move transform. Caching it solves the "old position"
+        // problem for natives (only entities in this cache are considered player-relocated).
+        private readonly Dictionary<Entity, Game.Objects.Transform> _preMove =
+            new Dictionary<Entity, Game.Objects.Transform>();
         private int _clearCounter;
 
         protected override void OnCreate()
         {
             base.OnCreate();
+            _prefabSystem = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
             _movedQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -56,7 +66,37 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<CS2M_RemotePlaced>(),
                 },
             });
-            RequireForUpdate(_movedQuery);
+            // Temp copies the move tool creates while dragging (point at the original entity).
+            _moveTemps = GetEntityQuery(
+                ComponentType.ReadOnly<Temp>(),
+                ComponentType.ReadOnly<Game.Objects.Transform>());
+
+            // Natives that just got Updated with a transform change (only trusted when the entity
+            // is in the pre-move cache — i.e. a move-tool drag actually targeted it).
+            _movedNativeQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Updated>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                    ComponentType.ReadOnly<Game.Prefabs.PrefabRef>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<Static>(),
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Created>(),
+                    ComponentType.ReadOnly<Owner>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                    ComponentType.ReadOnly<CS2M_SyncId>(),
+                },
+            });
+
+            RequireAnyForUpdate(_movedQuery, _moveTemps, _movedNativeQuery);
             CS2M.Log.Info("[Move] MoveDetectorSystem created");
         }
 
@@ -72,7 +112,10 @@ namespace CS2M.Sync
             {
                 _clearCounter = 0;
                 _lastPos.Clear();
+                _preMove.Clear();
             }
+
+            CachePreMoveOriginals();
 
             NativeArray<Entity> ents = _movedQuery.ToEntityArray(Allocator.Temp);
             try
@@ -110,6 +153,96 @@ namespace CS2M.Sync
                         RotW = tf.m_Rotation.value.w,
                     });
                     CS2M.Log.Info($"[Move] DETECT+SEND id={id} pos=({tf.m_Position.x:F1},{tf.m_Position.y:F1},{tf.m_Position.z:F1})");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            DetectNativeMoves();
+        }
+
+        /// <summary>While the move tool drags, remember each original's still-unchanged transform.</summary>
+        private void CachePreMoveOriginals()
+        {
+            if (_moveTemps.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> temps = _moveTemps.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity t in temps)
+                {
+                    Entity original = EntityManager.GetComponentData<Temp>(t).m_Original;
+                    if (original == Entity.Null || _preMove.ContainsKey(original)
+                        || !EntityManager.HasComponent<Game.Objects.Transform>(original)
+                        || EntityManager.HasComponent<CS2M_SyncId>(original))
+                    {
+                        continue; // synced entities use the id path; only natives need the cache
+                    }
+
+                    _preMove[original] =
+                        EntityManager.GetComponentData<Game.Objects.Transform>(original);
+                }
+            }
+            finally
+            {
+                temps.Dispose();
+            }
+        }
+
+        /// <summary>v48: a native the move tool touched just changed position — ship old+new, stamp
+        /// a fresh SyncId locally and in the command so both sides share the identity from now on.</summary>
+        private void DetectNativeMoves()
+        {
+            if (_movedNativeQuery.IsEmptyIgnoreFilter || _preMove.Count == 0)
+            {
+                return;
+            }
+
+            NativeArray<Entity> ents = _movedNativeQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!_preMove.TryGetValue(e, out Game.Objects.Transform oldTf))
+                    {
+                        continue; // game-driven Updated, not a player relocation
+                    }
+
+                    Game.Objects.Transform tf = EntityManager.GetComponentData<Game.Objects.Transform>(e);
+                    if (math.distance(oldTf.m_Position, tf.m_Position) <= MoveEpsilon)
+                    {
+                        continue; // drag still in progress (or cancelled)
+                    }
+
+                    _preMove.Remove(e);
+                    if (!_prefabSystem.TryGetPrefab(
+                            EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(e).m_Prefab,
+                            out Game.Prefabs.PrefabBase prefab) || prefab == null)
+                    {
+                        continue;
+                    }
+
+                    ulong id = CS2M_SyncIdSystem.Allocate();
+                    CS2M_SyncIdSystem.Register(EntityManager, e, id);
+                    _lastPos[e] = tf.m_Position; // it now has an id — feed the id-based baseline
+
+                    Command.SendToAll?.Invoke(new MoveCommand
+                    {
+                        SyncId = id,
+                        PosX = tf.m_Position.x, PosY = tf.m_Position.y, PosZ = tf.m_Position.z,
+                        RotX = tf.m_Rotation.value.x, RotY = tf.m_Rotation.value.y,
+                        RotZ = tf.m_Rotation.value.z, RotW = tf.m_Rotation.value.w,
+                        PrefabType = prefab.GetType().Name,
+                        PrefabName = prefab.name,
+                        OldX = oldTf.m_Position.x, OldY = oldTf.m_Position.y, OldZ = oldTf.m_Position.z,
+                    });
+                    CS2M.Log.Info($"[Move] DETECT+SEND native name={prefab.name} " +
+                                  $"old=({oldTf.m_Position.x:F1},{oldTf.m_Position.z:F1}) new=({tf.m_Position.x:F1},{tf.m_Position.z:F1}) id={id}");
                 }
             }
             finally
