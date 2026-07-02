@@ -26,6 +26,7 @@ namespace CS2M.Sync
         private ToolSystem _toolSystem;
         private PrefabSystem _prefabSystem;
         private EntityQuery _appliedEdges;
+        private EntityQuery _deletedEdges;
         private readonly HashSet<Entity> _recentlySent = new HashSet<Entity>();
         private int _clearCounter;
 
@@ -53,6 +54,19 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Owner>(),
                 },
             });
+            _deletedEdges = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Edge>(),
+                    ComponentType.ReadOnly<Curve>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                },
+            });
             RequireForUpdate(_appliedEdges);
             CS2M.Log.Info("[Net] NetDetectorSystem created");
         }
@@ -74,6 +88,27 @@ namespace CS2M.Sync
 
             string toolId = _toolSystem.activeTool != null ? _toolSystem.activeTool.toolID : null;
 
+            // Same-frame deleted curves: an Applied edge whose endpoints lie on one of these is a
+            // split piece (the game cut an existing road under a new crossing) — a DERIVED event.
+            // The other PC performs the same split itself when the causal road arrives; re-syncing
+            // the pieces duplicates segments (seen in the first v38 2-PC session).
+            var deletedCurves = new List<Curve>();
+            if (!_deletedEdges.IsEmptyIgnoreFilter)
+            {
+                NativeArray<Entity> del = _deletedEdges.ToEntityArray(Allocator.Temp);
+                try
+                {
+                    foreach (Entity d in del)
+                    {
+                        deletedCurves.Add(EntityManager.GetComponentData<Curve>(d));
+                    }
+                }
+                finally
+                {
+                    del.Dispose();
+                }
+            }
+
             NativeArray<Entity> edges = _appliedEdges.ToEntityArray(Allocator.Temp);
             try
             {
@@ -90,8 +125,25 @@ namespace CS2M.Sync
                         continue;
                     }
 
-                    Bezier4x3 bezier = EntityManager.GetComponentData<Curve>(e).m_Bezier;
+                    Curve curveData = EntityManager.GetComponentData<Curve>(e);
+                    Bezier4x3 bezier = curveData.m_Bezier;
                     string name = prefab.name;
+
+                    bool isSplitPiece = false;
+                    foreach (Curve original in deletedCurves)
+                    {
+                        if (NetSplitUtil.IsSplitPiece(bezier, curveData.m_Length, original.m_Bezier, original.m_Length))
+                        {
+                            isSplitPiece = true;
+                            break;
+                        }
+                    }
+
+                    if (isSplitPiece)
+                    {
+                        CS2M.Log.Info($"[Net] SKIP reason=split name={name} edge={e.Index} (derived, remote splits on its own)");
+                        continue;
+                    }
 
                     int segHash = RemoteNetEcho.SegHash(bezier.a, bezier.d, name);
                     if (RemoteNetEcho.IsRecent(segHash))

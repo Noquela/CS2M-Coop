@@ -21,6 +21,21 @@ namespace CS2M.Sync
     {
         private const float MatchEpsilonSq = 4f; // 2 m
 
+        // v39: zones painted along a just-synced road can arrive before (or slightly offset from)
+        // the receiver's freshly generated blocks — the first 2-PC sessions dropped them with
+        // "SKIP noBlock". Instead of discarding, park the command and retry for a while.
+        private const int RetryTtlFrames = 900; // ~15 s at 60 fps
+        private const int RetryEveryNFrames = 30; // ~2 attempts/s
+
+        private struct PendingZone
+        {
+            public ZonePaintCommand Cmd;
+            public int FramesLeft;
+        }
+
+        private readonly System.Collections.Generic.List<PendingZone> _pending =
+            new System.Collections.Generic.List<PendingZone>();
+
         private PrefabSystem _prefabSystem;
         private EntityQuery _allBlocks;
 
@@ -48,6 +63,7 @@ namespace CS2M.Sync
         {
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
+                _pending.Clear();
                 return;
             }
 
@@ -55,22 +71,58 @@ namespace CS2M.Sync
 
             while (RemoteZoneQueue.TryDequeue(out ZonePaintCommand cmd))
             {
-                ApplyOne(cmd);
+                ApplyOne(cmd, true);
+            }
+
+            RetryPending();
+        }
+
+        private void RetryPending()
+        {
+            for (int i = _pending.Count - 1; i >= 0; i--)
+            {
+                PendingZone p = _pending[i];
+                p.FramesLeft--;
+
+                if (p.FramesLeft % RetryEveryNFrames == 0 && ApplyOne(p.Cmd, false))
+                {
+                    _pending.RemoveAt(i);
+                    continue;
+                }
+
+                if (p.FramesLeft <= 0)
+                {
+                    CS2M.Log.Info($"[Zone] DROP noBlock at=({p.Cmd.BlockX:F0},{p.Cmd.BlockZ:F0}) after retries " +
+                                  "(block never appeared — /resync reconciles)");
+                    _pending.RemoveAt(i);
+                    continue;
+                }
+
+                _pending[i] = p;
             }
         }
 
-        private void ApplyOne(ZonePaintCommand cmd)
+        /// <summary>Returns true when handled (applied or invalid); false only when retryable (no block yet).</summary>
+        private bool ApplyOne(ZonePaintCommand cmd, bool firstTry)
         {
             if (cmd.CellIndices == null || cmd.ZoneNames == null)
             {
-                return;
+                return true;
             }
 
-            Entity target = FindBlock(cmd);
+            // Retries use a wider match (rebuilt road geometry can shift block centers a few meters);
+            // the SizeX/SizeY equality filter keeps a wrong-block match unlikely.
+            Entity target = FindBlock(cmd, firstTry ? MatchEpsilonSq : 16f);
             if (target == Entity.Null)
             {
-                CS2M.Log.Info($"[Zone] SKIP noBlock at=({cmd.BlockX:F0},{cmd.BlockZ:F0}) (road not synced yet?)");
-                return;
+                if (firstTry)
+                {
+                    CS2M.Log.Info($"[Zone] RETRY noBlock at=({cmd.BlockX:F0},{cmd.BlockZ:F0}) " +
+                                  $"(block not generated yet — retrying ~{RetryTtlFrames / 60}s)");
+                    _pending.Add(new PendingZone { Cmd = cmd, FramesLeft = RetryTtlFrames });
+                }
+
+                return false;
             }
 
             // STRUCTURAL CHANGE FIRST: AddComponent moves the entity to another chunk and invalidates
@@ -111,16 +163,18 @@ namespace CS2M.Sync
             ZoneSync.Snapshot[target] = cur;
             ZoneEcho.Mark(target);
 
-            CS2M.Log.Info($"[Zone] APPLIED block=({cmd.BlockX:F0},{cmd.BlockZ:F0}) cells={applied} entity={target.Index}");
+            CS2M.Log.Info($"[Zone] APPLIED block=({cmd.BlockX:F0},{cmd.BlockZ:F0}) cells={applied} entity={target.Index}" +
+                          (firstTry ? "" : " (after retry)"));
+            return true;
         }
 
-        private Entity FindBlock(ZonePaintCommand cmd)
+        private Entity FindBlock(ZonePaintCommand cmd, float epsilonSq)
         {
             NativeArray<Entity> blocks = _allBlocks.ToEntityArray(Allocator.Temp);
             try
             {
                 Entity best = Entity.Null;
-                float bestD = MatchEpsilonSq;
+                float bestD = epsilonSq;
                 foreach (Entity e in blocks)
                 {
                     Block b = EntityManager.GetComponentData<Block>(e);

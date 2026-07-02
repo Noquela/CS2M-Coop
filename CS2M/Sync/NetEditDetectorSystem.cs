@@ -22,6 +22,7 @@ namespace CS2M.Sync
     public partial class NetEditDetectorSystem : GameSystemBase
     {
         private EntityQuery _deletedEdges;
+        private EntityQuery _appliedEdges;
         private readonly HashSet<Entity> _sent = new HashSet<Entity>();
         private int _clearCounter;
 
@@ -31,6 +32,15 @@ namespace CS2M.Sync
             _deletedEdges = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Deleted>() },
+                None = new[] { ComponentType.ReadOnly<Temp>() },
+            });
+            _appliedEdges = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Curve>(),
+                    ComponentType.ReadOnly<Applied>(),
+                },
                 None = new[] { ComponentType.ReadOnly<Temp>() },
             });
             RequireForUpdate(_deletedEdges);
@@ -48,6 +58,27 @@ namespace CS2M.Sync
             {
                 _clearCounter = 0;
                 _sent.Clear();
+            }
+
+            // Same-frame applied pieces: if a deleted edge is covered by shorter Applied pieces, the
+            // deletion came from the game SPLITTING it under a new crossing road — a derived event.
+            // The other PC splits its own copy when the causal road arrives; syncing this delete would
+            // remove a segment the remote game still needs (seen as "SKIP noMatch" noise in v38).
+            var appliedCurves = new List<Curve>();
+            if (!_appliedEdges.IsEmptyIgnoreFilter)
+            {
+                NativeArray<Entity> applied = _appliedEdges.ToEntityArray(Allocator.Temp);
+                try
+                {
+                    foreach (Entity a in applied)
+                    {
+                        appliedCurves.Add(EntityManager.GetComponentData<Curve>(a));
+                    }
+                }
+                finally
+                {
+                    applied.Dispose();
+                }
             }
 
             NativeArray<Entity> edges = _deletedEdges.ToEntityArray(Allocator.Temp);
@@ -72,6 +103,27 @@ namespace CS2M.Sync
                     if (RemoteNetEcho.IsRecent(RemoteNetEcho.SegHash(s, en, "del")))
                     {
                         continue; // echo of a delete we just applied
+                    }
+
+                    if (appliedCurves.Count > 0 && EntityManager.HasComponent<Curve>(e))
+                    {
+                        Curve original = EntityManager.GetComponentData<Curve>(e);
+                        bool splitDeletion = false;
+                        foreach (Curve piece in appliedCurves)
+                        {
+                            if (NetSplitUtil.IsSplitPiece(piece.m_Bezier, piece.m_Length,
+                                    original.m_Bezier, original.m_Length))
+                            {
+                                splitDeletion = true;
+                                break;
+                            }
+                        }
+
+                        if (splitDeletion)
+                        {
+                            CS2M.Log.Info($"[NetEdit] SKIP delete reason=split edge={e.Index} (derived, remote splits on its own)");
+                            continue;
+                        }
                     }
 
                     Command.SendToAll?.Invoke(new NetDeleteCommand
