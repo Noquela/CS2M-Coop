@@ -32,7 +32,15 @@ namespace CS2M.Sync
             _deletedEdges = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Deleted>() },
-                None = new[] { ComponentType.ReadOnly<Temp>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    // v50.2 FIELD FIX: building sub-nets (Owner = the building) cascade with their
+                    // building on BOTH PCs. The host's sim demolishing abandoned buildings re-sent
+                    // every sub-net as a standalone "road delete" (297 in one session), and the
+                    // endpoint-addressed applies tore up REAL roads and pipes on the other PCs.
+                    ComponentType.ReadOnly<Owner>(),
+                },
             });
             _appliedEdges = GetEntityQuery(new EntityQueryDesc
             {

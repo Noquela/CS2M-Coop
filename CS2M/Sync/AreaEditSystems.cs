@@ -276,6 +276,22 @@ namespace CS2M.Sync
                         continue;
                     }
 
+                    // v50.2 FIELD FIX: an owned area whose owner is dying is CASCADE, not a player
+                    // action — the building delete already syncs and cascades the same sub-areas on
+                    // every PC. Re-sending them (734 in one session, from the host's sim demolishing
+                    // abandoned buildings) deleted walking areas and FARM FIELDS under living
+                    // buildings on the other PCs. An owned area deleted while its owner LIVES is a
+                    // real edit (clearing a work area) and still syncs.
+                    if (EntityManager.HasComponent<Owner>(area))
+                    {
+                        Entity areaOwner = EntityManager.GetComponentData<Owner>(area).m_Owner;
+                        if (!EntityManager.Exists(areaOwner)
+                            || EntityManager.HasComponent<Deleted>(areaOwner))
+                        {
+                            continue;
+                        }
+                    }
+
                     if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
                             out PrefabBase prefab) || prefab == null)
                     {

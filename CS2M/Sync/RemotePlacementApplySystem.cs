@@ -159,14 +159,16 @@ namespace CS2M.Sync
             // in its find-parent job (the tool resolves those), so we resolve the edge from the
             // shipped point-on-curve hint; AttachSystem's reference job then registers the
             // SubObject on the edge because the entity is Updated.
+            // v50.2 FIELD FIX: attach ONLY when the sender shipped an explicit point-on-curve hint —
+            // the detector fills it exclusively for objects that WERE attached on its side. Growables
+            // share the RoadSide placement flag with stop objects, and the flag-based gate attached
+            // 30 houses/shops to roads in one session (demolishing the road would demolish them).
             if (string.IsNullOrEmpty(cmd.OwnerPrefabName) && cmd.OwnerSyncId == 0
+                && cmd.Source != 1
+                && (cmd.OwnerX != 0f || cmd.OwnerZ != 0f)
                 && NeedsEdgeAttach(prefabEntity))
             {
                 var hint = new float3(cmd.OwnerX, cmd.OwnerY, cmd.OwnerZ);
-                if (hint.x == 0f && hint.z == 0f)
-                {
-                    hint = position; // old-version sender: fall back to the stop's own position
-                }
 
                 if (FindNearestEdge(hint, out Entity edge, out float curvePos, out float dist))
                 {

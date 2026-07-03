@@ -124,6 +124,18 @@ namespace CS2M.Sync
                 return;
             }
 
+            // v50.2 FIELD FIX ("roads on top of roads"): intersection rebuilds re-send derived
+            // pieces the v39 split filter can't always recognize, and this PC has usually already
+            // produced the identical piece itself when the CAUSAL road arrived. If an existing
+            // same-prefab edge's curve already covers this segment (start, mid and end all within
+            // ~1.5 m of it), building it again would stack a phantom road on top.
+            if (CoveredByExistingEdge(bezier, netPrefab))
+            {
+                CS2M.Log.Info($"[Net] SKIP covered name={cmd.PrefabName} " +
+                              $"start=({bezier.a.x:F1},{bezier.a.z:F1}) end=({bezier.d.x:F1},{bezier.d.z:F1})");
+                return;
+            }
+
             // Mark the echo hash BEFORE the edge exists so our detector skips it when it appears.
             // SegHash is XZ-only by design: GenerateEdge re-snaps Y to the local terrain.
             int segHash = RemoteNetEcho.SegHash(bezier.a, bezier.d, cmd.PrefabName);
@@ -196,6 +208,82 @@ namespace CS2M.Sync
             {
                 nodes.Dispose();
             }
+        }
+
+        /// <summary>True when a live same-prefab edge's curve passes within ~1.5 m (XZ) of the new
+        /// segment's start, midpoint AND end — i.e. the segment already exists here (a derived
+        /// intersection-rebuild piece this PC produced on its own). A legitimate parallel
+        /// bypass shares endpoints but NOT the midpoint, so it still builds.</summary>
+        private bool CoveredByExistingEdge(Bezier4x3 bezier, Entity netPrefab)
+        {
+            const float tolSq = 2.25f; // 1.5 m
+            float3 mid = MathUtils.Position(bezier, 0.5f);
+
+            EntityQuery edges = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Edge>(),
+                    ComponentType.ReadOnly<Curve>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
+            });
+
+            Unity.Collections.NativeArray<Entity> ents = edges.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    if (EntityManager.GetComponentData<PrefabRef>(cand).m_Prefab != netPrefab)
+                    {
+                        continue;
+                    }
+
+                    Bezier4x3 c = EntityManager.GetComponentData<Curve>(cand).m_Bezier;
+                    // Cheap reject by distance to the candidate's own midpoint.
+                    float3 cmid = MathUtils.Position(c, 0.5f);
+                    float dxm = cmid.x - mid.x, dzm = cmid.z - mid.z;
+                    float reach = MathUtils.Length(c) + 3f;
+                    if (dxm * dxm + dzm * dzm > reach * reach)
+                    {
+                        continue;
+                    }
+
+                    if (DistSqXZ(c, bezier.a) < tolSq && DistSqXZ(c, mid) < tolSq && DistSqXZ(c, bezier.d) < tolSq)
+                    {
+                        return true;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return false;
+        }
+
+        private static float DistSqXZ(Bezier4x3 curve, float3 p)
+        {
+            float best = float.MaxValue;
+            for (int i = 0; i <= 16; i++)
+            {
+                float3 c = MathUtils.Position(curve, i / 16f);
+                float dx = c.x - p.x;
+                float dz = c.z - p.z;
+                float d = dx * dx + dz * dz;
+                if (d < best)
+                {
+                    best = d;
+                }
+            }
+
+            return best;
         }
 
         private bool EdgeExists(Entity startNode, Entity endNode, Entity netPrefab)

@@ -117,6 +117,19 @@ growables host-auth + `/resync`. Rádio/foto/câmera são locais.
     Sempre checar o Player.log por "CRITICAL" além do CS2M.log.
 12. **Alvos de teste do selftest**: prédio plopado em solo sem zona é CONDENADO e demolido pela
     sim ~40-60 s depois — testes tardios (fire) usam prédios NATIVOS do save.
+13. **Sub-elementos NUNCA re-sincam a própria morte** (campo v50.2): quando um prédio morre, suas
+    sub-nets e sub-áreas cascateiam `Deleted` — detectores de delete DEVEM excluir `Owner` (nets)
+    ou exigir owner VIVO (áreas: delete de work-area com owner vivo é edição real e sinca). Sem
+    isso, a sim do host demolindo abandonados re-enviou 297 "deletes de rua" + 734 de área
+    endereçados por posição, que rasgaram ruas/canos/campos REAIS nos outros PCs (espiral: água
+    quebrada → mais abandono → mais demolição).
+14. **Rebuilds de interseção duplicam** (campo v50.2): o vanilla deleta+recria edges vizinhos ao
+    mexer num nó; a supressão v39 não pega todos → o receptor tem guard `CoveredByExistingEdge`
+    (início+meio+fim do novo sobre curva existente do mesmo prefab ≤1,5 m → SKIP covered).
+15. **Attach só com hint explícito** (campo v50.2): growables compartilham a flag RoadSide com
+    paradas — o gate por flag attachou 30 casas/lojas a ruas (demolir a rua demoliria o prédio).
+    O detector só preenche OwnerX/Z quando o original TINHA `Attached`; o apply só attacha quando
+    o hint veio (e nunca em Source==1/growable).
 
 ---
 
