@@ -15,6 +15,22 @@ edita a própria cidade sozinho**: nada do que um faz aparece pro outro. Este fo
 
 ---
 
+## Documentação e diagnóstico
+
+| Arquivo | Para quê |
+|---|---|
+| [COOP_SYNC.md](COOP_SYNC.md) | Arquitetura do MOD: matriz de features, as leis de sync, build/validação. **Ler antes de mexer.** |
+| [GAME_SYSTEMS.md](GAME_SYSTEMS.md) | Referência dos sistemas ECS **vanilla** do jogo (componentes/fase/jeito certo) + estudo da fonte do MoveIt + auditoria dos apply-paths. |
+| [FIELD_TEST.md](FIELD_TEST.md) | Roteiro do teste de campo dos 3 jogadores: ligar os radares, reproduzir bugs, como reportar com prova. |
+| [tools/wiretap-diff/](tools/wiretap-diff/) | Cruza as gravações `CS2M_wiretap_*.jsonl` dos jogadores e aponta o comando perdido (onde o mundo divergiu). |
+
+**Radares de bug de sync (v52):** com `CS2M_WIRETAP=1` o jogo grava todo comando; o
+`StateHashSystems` compara os mundos por hash de conteúdo e loga `[Hash] DRIFT categoria` quando
+divergem de verdade; o `InvariantCheckSystem` loga `[Invariant] VIOLATION` em anomalia estrutural.
+Juntos localizam qualquer desync residual em campo. Detalhes em GAME_SYSTEMS.md §11.
+
+---
+
 ## O que sincroniza
 
 | Categoria | Feature | Como é endereçado entre PCs |
