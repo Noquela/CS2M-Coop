@@ -33,8 +33,9 @@ metadados seq/tempo/direção). A assinatura é idêntica entre máquinas para o
 então comparar os conjuntos de assinaturas por arquivo revela o que faltou em quem. Presença (viu ao
 menos uma vez) importa mais que contagem — floods idempotentes colapsam numa assinatura.
 
-## Limitação (v52)
-O wiretap v52 não dumpa conteúdo de arrays (aparecem como `System.Int32[]`), então comandos
-distinguidos SÓ por array (ex.: duas pinturas no MESMO bloco que diferem só nas células) colapsam
-numa assinatura. Ainda pega "o comando daquele bloco/rota se perdeu". Precisão por-célula exigiria
-dump de array no `WireTap.cs` (mudança no mod → nova versão para os 3).
+## Precisão de arrays
+A partir do **v53** o wiretap dumpa o conteúdo dos arrays (ex.: `CellIndices:[0,5,11,23]`,
+`ZoneNames:["EU Residential Low",...]`), então comandos distinguidos por array — pintura de zona
+célula-a-célula, waypoints de rota — têm assinatura precisa e o diff distingue duas pinturas no
+mesmo bloco. Gravações do **v52** mostram arrays como `System.Int32[]` (opacos): o diff ainda pega
+"o comando daquele bloco/rota se perdeu", só não distingue variações no conteúdo do array.

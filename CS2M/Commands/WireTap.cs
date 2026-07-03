@@ -185,6 +185,43 @@ namespace CS2M.Commands
                     return Convert.ToString(v, CultureInfo.InvariantCulture);
             }
 
+            if (v is string str)
+            {
+                if (str.Length > 80)
+                {
+                    str = str.Substring(0, 80);
+                }
+
+                return Quote(str);
+            }
+
+            // v53: dump array/collection contents (capped) instead of "System.Int32[]" — makes the
+            // wiretap-diff analyzer able to tell array-carrying commands apart (zone paints, routes).
+            if (v is System.Collections.IEnumerable seq)
+            {
+                var arr = new StringBuilder("[");
+                int n = 0;
+                foreach (object item in seq)
+                {
+                    if (n >= 48)
+                    {
+                        arr.Append(",\"...\"");
+                        break;
+                    }
+
+                    if (n > 0)
+                    {
+                        arr.Append(',');
+                    }
+
+                    arr.Append(JsonVal(item));
+                    n++;
+                }
+
+                arr.Append(']');
+                return arr.ToString();
+            }
+
             string s = v.ToString();
             if (s.Length > 80)
             {
