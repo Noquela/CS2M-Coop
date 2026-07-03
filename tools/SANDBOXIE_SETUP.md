@@ -36,18 +36,29 @@ Este é o único "não sei". Alguns cracks/anti-tamper não gostam de sandbox.
 
 ## Passo 3 — automação (eu monto os scripts)
 
-Com os dois abrindo, o teste automático fica assim (eu escrevo o runner):
+**Topologia (pedido do Bruno): host + sandbox + bot = 3 "players", 2 sims reais.**
 1. **Host** (crack normal): `CS2M_AUTOPILOT=host CS2M_AP_TEST=0 CS2M_WIRETAP=1 CS2M_STATEHASH=1`
-   → sobe hospedando em :1111.
+   → sobe hospedando em :1111. **Sim real nº1** (dá pra screenshot).
 2. **Cliente** (crack sandboxed): `CS2M_AUTOPILOT=client CS2M_AP_IP=127.0.0.1 CS2M_AP_PORT=1111
-   CS2M_WIRETAP=1 CS2M_STATEHASH=1` → conecta sozinho, baixa o mundo, vira cliente real.
-   - No Sandboxie dá pra setar env vars por box (Box Options → ou via um `.bat` que faz `set` e
-     lança), então isso automatiza.
-3. **Driver das ações**: o **bot hunter** conecta como 3º e martela os cenários (T/X, sobreposição,
-   rajada). Host E cliente aplicam tudo.
-4. **Detecção automática**: o StateHash do cliente compara o mundo dele com o do host e loga
-   `[Hash] DRIFT categoria` se divergirem; o wiretap dos dois + o `wiretap-diff` acham o comando
-   perdido. **Bug de duas-sims aparece sozinho, com a categoria e o comando.**
+   CS2M_WIRETAP=1 CS2M_STATEHASH=1` → conecta sozinho, vira cliente real. **Sim real nº2** (screenshot).
+   - Env vars por box no Sandboxie via um `.bat` que faz `set` e lança.
+3. **Bot** (headless normal) como **3º player** → testa o relay estrela (star) e serve de ator extra.
+
+**Detecção em 3 camadas:**
+- **StateHash**: o cliente compara o mundo dele com o do host → `[Hash] DRIFT categoria`.
+- **Wiretap + diff** nos três → acha o comando perdido.
+- **Screenshots (pedido do Bruno — fecha o buraco do bug VISUAL):** capturar a janela do host e a do
+  sandbox (via PowerShell `PrintWindow`/`CopyFromScreen`; o Claude lê PNG e inspeciona/compara). Pega
+  o caso "colocou torto na tela mas o estado ECS bate", que o hash não vê. Requisitos: rodar em
+  **janela/borderless** (fullscreen exclusivo não captura bem) e **sincronizar a câmera** das duas
+  instâncias no mesmo ponto (via comando/autopilot) pra a comparação ser 1:1.
+
+**Cenários CONCORRENTES (pedido do Bruno — o que mais importa):** não é um driver sequencial; são
+ações SIMULTÂNEAS conflitantes, que é onde mora a race condition. Ex.: **player A desenha uma rua e,
+no mesmo instante, o player B tenta desenhar EM CIMA** — testa echo guard, dedup, ordenação e
+resolução de conflito ao mesmo tempo. Faço host-autopilot + bot(s) dispararem ações com timing
+sobreposto (mesmas coords, quase juntos), depois screenshot + StateHash + wiretap-diff conferem se os
+três convergiram pro MESMO resultado.
 
 Isso é o caça-bug de fidelidade máxima, rodando sem ninguém. O único gargalo é o Passo 2.
 
