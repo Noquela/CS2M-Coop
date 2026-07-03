@@ -570,6 +570,34 @@ namespace CS2MBot
             Pump(3500);
             if (!Alive("re-colocacao apos delete")) { return Done(false); }
 
+            // 12. TERRENO em rajada: 20 strokes rapidos no mesmo lugar — estressa o cap de 3/frame +
+            // o descarte de backlog (v50.1). O bug da "torre de terreno" era acumulacao sob carga.
+            Log("[12] terreno: 20 strokes rapidos (cap/acumulacao)");
+            for (int i = 0; i < 20; i++)
+            {
+                Send(new TerrainCommand
+                {
+                    Type = 0, PosX = 300f + (i % 3) * 12f, PosY = 480f, PosZ = 300f,
+                    Size = 40f, Strength = 2000f,
+                });
+                Pump(80);
+            }
+            Pump(3000);
+            if (!Alive("terreno em rajada")) { return Done(false); }
+
+            // 13. UPGRADE de rua: coloca uma rua e adiciona arvores na esquerda (Left=0x1000).
+            Log("[13] upgrade: rua + arvores");
+            Road(sb | (ulong)++step, 800, 700, 860, 700);
+            Pump(2500);
+            Send(new NetUpgradeCommand
+            {
+                StartX = 800f, StartY = 480f, StartZ = 700f,
+                EndX = 860f, EndY = 480f, EndZ = 700f,
+                General = 0, Left = 0x1000u, Right = 0,
+            });
+            Pump(3000);
+            if (!Alive("upgrade de rua (arvores)")) { return Done(false); }
+
             Send(new ChatMessageCommand { Username = _username, Message = "bot hunt done" });
             Log("aguardando o InvariantCheck do host varrer pos-cenarios (25s)...");
             Pump(25000);
