@@ -129,6 +129,7 @@ namespace CS2MBot
 
         private static volatile bool _preconditionsOk;
         private static volatile bool _worldDone;
+        private static volatile bool _hostGone; // set if the host peer drops — a crash during a scenario
         private static PreconditionsErrorCommand _lastError;
         private static long _worldBytes;
         private static int _recvMoney, _recvSpeed, _recvProg, _recvChat, _recvCursor, _recvOther;
@@ -286,7 +287,7 @@ namespace CS2MBot
                 try { OnCommand(MessagePackSerializer.Deserialize<CommandBase>(bytes, _model)); }
                 catch (Exception ex) { Log($"DESERIALIZE-FAIL {bytes.Length}B: {ex.Message}"); }
             };
-            listener.PeerDisconnectedEvent += (peer, info) => Log($"disconnected: {info.Reason}");
+            listener.PeerDisconnectedEvent += (peer, info) => { _hostGone = true; Log($"disconnected: {info.Reason}"); };
 
             _net.Start();
             _net.Connect(_ip, _port, "CSM");
@@ -371,6 +372,11 @@ namespace CS2MBot
                 return RunListenSession();
             }
 
+            if (_mode == "hunt")
+            {
+                return RunHuntSession();
+            }
+
             Log("=== PLAYING (from the host's perspective) — running remote-friend script ===");
             Pump(3000);
 
@@ -440,6 +446,107 @@ namespace CS2MBot
 
             _net.Stop();
             return relayed && identified ? 0 : 1;
+        }
+
+        /// <summary>Bug HUNTER: drives the host through the exact operations that broke in real field
+        /// sessions (T/X junctions, overlapping roads, place/delete storms) so the host's own radars
+        /// (InvariantCheck / [Guard] / not crashing) surface the bug — no friends, no second game.
+        /// The bot can't see the host's world, so the harness greps the host log for the verdict; the
+        /// bot itself reports whether the host survived each scenario (a drop mid-scenario = a crash).</summary>
+        private static int RunHuntSession()
+        {
+            Log("=== HUNT: martelando os cenarios que bugam em campo ===");
+            Pump(3000);
+            Send(new ChatMessageCommand { Username = _username, Message = "bot hunt online" });
+            Pump(1000);
+
+            ulong sb = (ulong)new Random().Next(1 << 20) << 40;
+            int step = 0;
+
+            bool Alive(string what)
+            {
+                if (_hostGone) { Log($"*** HOST CAIU durante '{what}' <-- BUG (crash) ***"); return false; }
+                Log($"[ok] host vivo apos: {what}");
+                return true;
+            }
+
+            // 1. rua reta (baseline — mesma do run de validacao que ja funcionava)
+            Road(sb | (ulong)++step, 200, 200, 296, 200);
+            Log("[1] rua reta A (200,200)->(296,200)"); Pump(2500);
+            if (!Alive("rua reta")) { return Done(false); }
+
+            // 2. juncao T: rua B termina no MEIO da A (o caso que so o receptor precisa dividir)
+            Road(sb | (ulong)++step, 248, 168, 248, 200);
+            Log("[2] juncao T: B (248,168)->(248,200) encosta no meio de A"); Pump(3000);
+            if (!Alive("juncao T")) { return Done(false); }
+
+            // 3. cruzamento X: rua C cruza a A no meio
+            Road(sb | (ulong)++step, 224, 232, 272, 168);
+            Log("[3] cruzamento X: C cruza A"); Pump(3000);
+            if (!Alive("cruzamento X")) { return Done(false); }
+
+            // 4. duplicata: repete a A exata (deve ser ignorada pelo CoveredByExistingEdge)
+            Road(sb | (ulong)++step, 200, 200, 296, 200);
+            Log("[4] duplicata: repete A (guard deve ignorar)"); Pump(3000);
+            if (!Alive("duplicata")) { return Done(false); }
+
+            // 5. rajada place/delete (estressa a fila de aplicacao e o cleanup)
+            Log("[5] rajada: 8 ruas + delete de todas");
+            var ids = new List<ulong>();
+            for (int i = 0; i < 8; i++)
+            {
+                ulong id = sb | (ulong)++step; ids.Add(id);
+                Road(id, 150 + i * 18, 260, 150 + i * 18, 300); Pump(300);
+            }
+            Pump(1500);
+            foreach (ulong id in ids) { Send(new DeleteCommand { SyncId = id }); Pump(200); }
+            Pump(3000);
+            if (!Alive("rajada place/delete")) { return Done(false); }
+
+            // 6. objeto: planta uma arvore (caminho de objeto + owner)
+            Send(new ObjectPlaceCommand
+            {
+                SyncId = sb | (ulong)++step, PrefabType = "StaticObjectPrefab", PrefabName = "EU_AlderTree01",
+                PosX = 160f, PosY = 480f, PosZ = 160f, RotW = 1f, RandomSeed = 99,
+            });
+            Log("[6] objeto: arvore"); Pump(2000);
+            if (!Alive("objeto")) { return Done(false); }
+
+            Send(new ChatMessageCommand { Username = _username, Message = "bot hunt done" });
+            Log("aguardando o InvariantCheck do host varrer pos-cenarios (25s)...");
+            Pump(25000);
+            return Done(!_hostGone);
+        }
+
+        private static int Done(bool alive)
+        {
+            Log("=== HUNT FIM ===");
+            Log($"host vivo={alive}  recv(money={_recvMoney} netPlace={_recvNetPlace} delete={_recvDelete} other={_recvOther})");
+            // com so o bot conectado, o host NAO deve devolver os comandos do bot (nao ha outro cliente).
+            if (_recvNetPlace > 0)
+            {
+                Log($"ATENCAO: recebi {_recvNetPlace} netPlace de volta — possivel eco/relay indevido (sem outro cliente nao devia)");
+            }
+
+            Log(alive
+                ? "BOT-RESULT hunt: PASS (host sobreviveu a todos os cenarios) — ver host log por [Invariant]/[Guard]"
+                : "BOT-RESULT hunt: FAIL (host caiu num cenario — bug reproduzido)");
+            _net.Stop();
+            return alive ? 0 : 1;
+        }
+
+        /// <summary>Send a straight Small Road A->D (b,c interpolated at 1/3, 2/3).</summary>
+        private static void Road(ulong id, float ax, float az, float dx, float dz)
+        {
+            float bx = ax + (dx - ax) / 3f, bz = az + (dz - az) / 3f;
+            float cx = ax + 2f * (dx - ax) / 3f, cz = az + 2f * (dz - az) / 3f;
+            Send(new NetPlaceCommand
+            {
+                SyncId = id, PrefabType = "RoadPrefab", PrefabName = "Small Road",
+                Ax = ax, Ay = 480f, Az = az, Bx = bx, By = 480f, Bz = bz,
+                Cx = cx, Cy = 480f, Cz = cz, Dx = dx, Dy = 480f, Dz = dz,
+                RandomSeed = (int)(id & 0xffff),
+            });
         }
 
         private static void Pump(int ms)
