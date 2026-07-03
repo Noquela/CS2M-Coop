@@ -303,6 +303,35 @@ O CS2 não tem doc oficial de ECS decente. As fontes reais, em ordem de valor:
    - **CSM (CS1)** — padrões de multiplayer (echo, autoridade) testados por anos.
 3. **cs2.paradoxwikis.com/Modding** — toolchain e setup (fraca em ECS).
 
-> Próximo passo desta trilha: clonar MoveIt/Traffic e comparar o método de reconstrução de edge deles
-> com `NetPlaceApplySystem` — se houver um jeito mais fiel de recriar/splitar que preserve conexão
-> nativamente, adotar no lugar do split manual.
+### 12.1 O que aprendi lendo a fonte do MoveIt (Quboid/CS2-MoveIt)
+
+Estudei o código real (`Code/MoveIt/Moveables/MVNode.cs`, `MVSegment.cs`, `Tool/Creation.cs`).
+Achados que valem para o CS2M:
+
+- **`Game.Net.ConnectedEdge` (buffer no `Node`)** é o jeito CANÔNICO de enumerar os edges de uma
+  junção: cada item tem `m_Edge`; para saber a ponta, `edge.m_Start.Equals(node)` (senão é `m_End`).
+  Melhor que varrer todos os edges. Adotar isso no split/junção e no `InvariantCheckSystem` (contar
+  grau do nó direto do buffer).
+- **MoveIt MOVE entidades existentes, nunca recria.** Ao mover um nó, ele altera a posição + os
+  pontos de controle (bezier) dos edges conectados e marca `Updated`+`BatchesUpdated`; a **topologia
+  sobrevive porque as refs de Entity (`m_Start`/`m_End`) não mudam**. → **Lição para o caminho de
+  MOVER/EDITAR do CS2M:** sincronizar um "mover" como *update do entity existente* (posição + Updated),
+  NÃO como delete-e-recria. Recriar perde conexões; o vanilla reconecta sozinho se você só mexe na
+  posição e marca Updated.
+- **API vanilla `CreateDefinitions(objectPrefab, …, original, controlPoints, …)`** (de
+  `ObjectToolBaseSystem`): `original = Entity` → RELOCA um existente; `original = Entity.Null` → cria
+  NOVO. `ControlPoint` carrega `m_Position`, `m_Rotation`, `m_Elevation`, `m_ElementIndex`,
+  `m_OriginalEntity` (setar aqui atacha extensão). É o caminho oficial para plopar objeto.
+- Ao manipular elevação de rede, o componente `Game.Net.Elevation` precisa existir nos DOIS nós
+  (`edge.m_Start` e `edge.m_End`) — MoveIt adiciona antes de mexer.
+
+**Conclusão estratégica:** o MoveIt **não** cria rua nova conectando a uma existente (ele só move o
+que já existe), então ele **não substitui** o split manual de junção T/X do `NetPlaceApplySystem` —
+esse continua sendo o jeito certo para o caso "receptor constrói rua nova que encosta em rua alheia".
+MAS o padrão dele (mover = update do existente + `ConnectedEdge` para topologia) é o certo para o
+caminho de MOVE/EDIT, e vale conferir se o `MoveDetector/RemoteEditApply` recria em vez de atualizar.
+
+> Próxima ação concreta desta trilha (ainda não feita): (1) trocar a enumeração de junção por
+> `ConnectedEdge` no split e no InvariantCheck; (2) auditar se o sync de "mover objeto/nó" atualiza o
+> entity existente em vez de recriar; (3) clonar `Krzychu124/Cities2-Traffic` e ver o tratamento de
+> lanes/conexões. Fonte clonada em cache: `scratchpad/CS2-MoveIt`.
