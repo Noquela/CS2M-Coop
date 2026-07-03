@@ -366,3 +366,32 @@ Refinamento futuro anotado (baixa prioridade, não vale churnar o build congelad
 `_strikes` do StateHash é global, não por-métrica — em sessão muito churny poderia somar strikes de
 métricas diferentes e sugerir /resync a mais (dano baixo: só uma msg no chat, e o log mostra a
 métrica exata). Trocar por strikes por-métrica quando houver motivo de campo.
+
+---
+
+## 14. Limite de escopo — o que o CS2M NÃO sincroniza (importante para o teste de campo)
+
+O CS2M sincroniza **ações do jogador com as ferramentas do jogo base**. Estado que só existe por
+causa de OUTROS mods NÃO é sincronizado — os dois PCs teriam que ter o mesmo mod E o CS2M teria que
+saber dos componentes dele. Então, no teste de campo, **divergência causada por um mod de terceiros
+é esperada, não é bug do CS2M**:
+
+- **Traffic (Krzychu124)** — conexões de faixa customizadas (`ModifiedLaneConnections` e afins),
+  setas de faixa, prioridades/semáforos manuais. Componentes de mod, fora do fluxo de placement base.
+- **Road Builder / Extended Road Upgrades** — prefabs de estrada customizados. O CS2M endereça rede
+  por prefab (nome) + geometria; um prefab que só existe na máquina de quem tem o mod não resolve na
+  outra.
+- **Anarchy, Move It, etc.** — colocações/movimentos fora das regras do jogo base. Move It já é
+  coberto no caminho de "mover" (§4/§13) para objetos com `CS2M_SyncId`, mas manipulações de rede do
+  Move It (mover nós/curvas) não passam pelo detector de rede do CS2M.
+
+**Regra prática para a sessão:** os 3 jogadores devem rodar **o MESMO conjunto de mods** (idealmente
+só o CS2M + os visuais que não alteram estado de jogo). Se alguém usar um mod que muda rede/tráfego,
+espere `[Hash] DRIFT` naquela categoria — e não é o CS2M que está errado, é estado que ele não vê.
+Isso também é uma diretriz para evolução futura: se quiser sincronizar Traffic/Road Builder, seria
+preciso um detector/apply dedicado por mod (como os que já existem por feature do jogo base).
+
+> Conclusão da trilha de documentação: o entendimento dos sistemas vanilla (§1–10), dos padrões
+> corretos de manipulação (§3, §12.1 do MoveIt), da correção dos apply-paths (§13) e dos próprios
+> validadores (§13.1), mais este limite de escopo (§14), fecham a "ciência da documentação do jogo"
+> no que é acionável para o CS2M. O que falta é dado de campo, não leitura.
