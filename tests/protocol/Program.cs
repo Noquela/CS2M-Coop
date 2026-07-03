@@ -109,6 +109,22 @@ namespace CS2MTests
         public int[] Pings { get; set; }
     }
 
+    public class DemandSyncCommand : CommandBase
+    {
+        public int Household { get; set; }
+        public int ResLow { get; set; }
+        public int ResMedium { get; set; }
+        public int ResHigh { get; set; }
+        public int Commercial { get; set; }
+        public int CommercialBuilding { get; set; }
+        public int Industrial { get; set; }
+        public int IndustrialBuilding { get; set; }
+        public int Storage { get; set; }
+        public int StorageBuilding { get; set; }
+        public int Office { get; set; }
+        public int OfficeBuilding { get; set; }
+    }
+
     public class FireSyncCommand : CommandBase
     {
         public byte Kind { get; set; }
@@ -392,6 +408,7 @@ namespace CS2MTests
             RoundTrip(opts, new MapPingCommand { X = -321.5f, Y = 480f, Z = 1204.25f, Username = "Bruno" }, c => c.Username == "Bruno" && Math.Abs(c.Z - 1204.25f) < 0.01f);
             RoundTrip(opts, new PlayerStatsCommand { Ids = new[] { 0, 1, 2 }, Names = new[] { "Host", "Amigo1", "Amigo2" }, Pings = new[] { 0, 45, 120 } }, c => c.Ids.Length == 3 && c.Names[2] == "Amigo2" && c.Pings[1] == 45);
             RoundTrip(opts, new FireSyncCommand { Kind = 2, TargetSyncId = 0UL, PrefabName = "Residential High 03", PosX = 15.5f, PosY = 478f, PosZ = -92.75f, Intensity = 0.85f }, c => c.Kind == 2 && c.PrefabName == "Residential High 03" && Math.Abs(c.Intensity - 0.85f) < 0.001f);
+            RoundTrip(opts, new DemandSyncCommand { Household = 55, ResLow = 40, ResMedium = 20, ResHigh = 10, Commercial = 30, CommercialBuilding = 25, Industrial = 60, IndustrialBuilding = 45, Storage = 5, StorageBuilding = 3, Office = 15, OfficeBuilding = 12 }, c => c.Household == 55 && c.ResHigh == 10 && c.OfficeBuilding == 12);
             RoundTrip(opts, new LoanCommand { Amount = 250000 }, c => c.Amount == 250000);
             RoundTrip(opts, new RenameCommand { TargetKind = 1, Number = 3, TargetPrefabName = "Bus Line", Name = "Linha Centro" }, c => c.TargetKind == 1 && c.Name == "Linha Centro");
             RoundTrip(opts, new AreaEditCommand { OwnerPrefabName = "GrainFarm01", PrefabName = "Grain Field", Xs = new[] { 1f, 2f, 3f }, Ys = new[] { 0f, 0f, 0f }, Zs = new[] { 4f, 5f, 6f }, Els = new[] { -3.4e38f, 0f, 0f }, Delete = false, CenterX = 2f, CenterZ = 5f }, c => c.PrefabName == "Grain Field" && c.Xs.Length == 3 && c.CenterZ == 5f);

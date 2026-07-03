@@ -186,6 +186,18 @@ namespace CS2M.Sync
             // InstalledUpgrade and the upgrade's effects on the parent itself.
             if (!string.IsNullOrEmpty(cmd.OwnerPrefabName) || cmd.OwnerSyncId != 0)
             {
+                // v51 receiver-side defense: only REAL service extensions may arrive owner-addressed.
+                // Older senders shipped every definition sub-object (lights, pipe nodes, farm area
+                // placeholders) this way, and recreating them here DUPLICATES what this PC already
+                // derived from the building — the farm placeholder twin is what broke work areas.
+                if (!EntityManager.HasComponent<Game.Prefabs.ServiceUpgradeData>(prefabEntity)
+                    && !EntityManager.HasComponent<Game.Prefabs.BuildingExtensionData>(prefabEntity))
+                {
+                    CS2M.Log.Info($"[Place] SKIP derived sub-object name={cmd.PrefabName} owner={cmd.OwnerPrefabName}");
+                    EntityManager.AddComponent<Deleted>(obj);
+                    return;
+                }
+
                 Entity owner = ResolveOwner(cmd);
                 if (owner == Entity.Null)
                 {
@@ -361,7 +373,7 @@ namespace CS2M.Sync
                         EntityManager.AddComponent<CS2M_RemotePlaced>(cand); // no delete echo
                     }
 
-                    EntityManager.AddComponent<Deleted>(cand);
+                    CascadeDeleteUtil.DeleteWithChildren(EntityManager, cand);
                     CS2M.Log.Verbose($"[Grow] replaced local building entity={cand.Index} at spawn lot");
                 }
             }

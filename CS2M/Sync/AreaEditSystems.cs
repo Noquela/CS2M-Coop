@@ -58,11 +58,34 @@ namespace CS2M.Sync
         private EntityQuery _deletedAreas;
         private readonly HashSet<Entity> _recentlySent = new HashSet<Entity>();
         private int _clearCounter;
+        private int _scanCounter;
+        private EntityQuery _workAreas;
 
         protected override void OnCreate()
         {
             base.OnCreate();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+
+            // v51 FIELD FIX: editing an existing work area only marks it Updated — never Applied —
+            // so the Applied-based query below NEVER saw real edits ("my farm field doesn't show up
+            // until /resync"). Poll owned areas at ~1 Hz and diff their polygon hash instead.
+            _workAreas = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.Area>(),
+                    ComponentType.ReadOnly<Game.Areas.Node>(),
+                    ComponentType.ReadOnly<Owner>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Game.Areas.District>(),
+                    ComponentType.ReadOnly<Game.Areas.MapTile>(),
+                },
+            });
             _appliedAreas = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -201,6 +224,94 @@ namespace CS2M.Sync
 
             DetectStandalone();
             DetectDeleted();
+
+            if (++_scanCounter >= 60)
+            {
+                _scanCounter = 0;
+                ScanWorkAreaEdits();
+            }
+        }
+
+        /// <summary>v51: ~1 Hz polygon-hash diff over owned areas — the only reliable signal for a
+        /// player RESHAPING a work area (vanilla marks the entity Updated, never Applied). First
+        /// sight is a silent baseline; the apply system updates the shared hash so a remotely
+        /// applied rewrite is never bounced back.</summary>
+        private void ScanWorkAreaEdits()
+        {
+            NativeArray<Entity> areas = _workAreas.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity area in areas)
+                {
+                    DynamicBuffer<Game.Areas.Node> nodes = EntityManager.GetBuffer<Game.Areas.Node>(area, true);
+                    if (nodes.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    int hash = WorkAreaHash.Compute(nodes);
+                    if (!WorkAreaHash.TryGet(area, out int known))
+                    {
+                        WorkAreaHash.Set(area, hash); // baseline (building placement, world load…)
+                        continue;
+                    }
+
+                    if (known == hash)
+                    {
+                        continue;
+                    }
+
+                    WorkAreaHash.Set(area, hash);
+
+                    Entity owner = EntityManager.GetComponentData<Owner>(area).m_Owner;
+                    if (!EntityManager.HasComponent<Game.Buildings.Building>(owner)
+                        || !EntityManager.HasComponent<Game.Objects.Transform>(owner)
+                        || !EntityManager.HasComponent<PrefabRef>(owner))
+                    {
+                        continue;
+                    }
+
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
+                            out PrefabBase prefab) || prefab == null
+                        || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(owner).m_Prefab,
+                            out PrefabBase ownerPrefab) || ownerPrefab == null)
+                    {
+                        continue;
+                    }
+
+                    var xs = new float[nodes.Length];
+                    var ys = new float[nodes.Length];
+                    var zs = new float[nodes.Length];
+                    var els = new float[nodes.Length];
+                    for (int i = 0; i < nodes.Length; i++)
+                    {
+                        xs[i] = nodes[i].m_Position.x;
+                        ys[i] = nodes[i].m_Position.y;
+                        zs[i] = nodes[i].m_Position.z;
+                        els[i] = nodes[i].m_Elevation;
+                    }
+
+                    var ownerTf = EntityManager.GetComponentData<Game.Objects.Transform>(owner);
+                    Command.SendToAll?.Invoke(new AreaEditCommand
+                    {
+                        OwnerSyncId = EntityManager.HasComponent<CS2M_SyncId>(owner)
+                            ? EntityManager.GetComponentData<CS2M_SyncId>(owner).m_Id
+                            : 0,
+                        OwnerPrefabName = ownerPrefab.name,
+                        OwnerX = ownerTf.m_Position.x,
+                        OwnerY = ownerTf.m_Position.y,
+                        OwnerZ = ownerTf.m_Position.z,
+                        PrefabType = prefab.GetType().Name,
+                        PrefabName = prefab.name,
+                        Xs = xs, Ys = ys, Zs = zs, Els = els,
+                    });
+                    CS2M.Log.Info($"[Area] DETECT+SEND edit name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length} (polygon diff)");
+                }
+            }
+            finally
+            {
+                areas.Dispose();
+            }
         }
 
         private void DetectStandalone()
@@ -334,6 +445,45 @@ namespace CS2M.Sync
     ///     area's polygon (or creates the area via a Permanent definition when missing). Runs before
     ///     Modification1 so the area triangulation/visual systems consume Updated the same frame.
     /// </summary>
+    /// <summary>Shared polygon-hash snapshot per owned area — the edit-diff scanner's memory,
+    /// updated by the apply system so remote rewrites never echo back.</summary>
+    public static class WorkAreaHash
+    {
+        private static readonly System.Collections.Generic.Dictionary<Entity, int> Hashes =
+            new System.Collections.Generic.Dictionary<Entity, int>();
+        private static readonly object Lock = new object();
+
+        public static int Compute(DynamicBuffer<Game.Areas.Node> nodes)
+        {
+            unchecked
+            {
+                int h = (int) 2166136261 ^ nodes.Length;
+                for (int i = 0; i < nodes.Length; i++)
+                {
+                    h = (h * 16777619) ^ (int) math.round(nodes[i].m_Position.x * 10f);
+                    h = (h * 16777619) ^ (int) math.round(nodes[i].m_Position.z * 10f);
+                }
+
+                return h;
+            }
+        }
+
+        public static void Set(Entity e, int hash)
+        {
+            lock (Lock) { Hashes[e] = hash; }
+        }
+
+        public static bool TryGet(Entity e, out int hash)
+        {
+            lock (Lock) { return Hashes.TryGetValue(e, out hash); }
+        }
+
+        public static void Clear()
+        {
+            lock (Lock) { Hashes.Clear(); }
+        }
+    }
+
     public partial class AreaEditApplySystem : GameSystemBase
     {
         private PrefabSystem _prefabSystem;
@@ -471,6 +621,10 @@ namespace CS2M.Sync
                     float el = cmd.Els != null && i < cmd.Els.Length ? cmd.Els[i] : float.MinValue;
                     nodes[i] = new Game.Areas.Node(new float3(cmd.Xs[i], cmd.Ys[i], cmd.Zs[i]), el);
                 }
+
+                // v51: update the shared polygon hash so the edit-diff scanner treats this remotely
+                // applied shape as already-known (no bounce-back).
+                WorkAreaHash.Set(target, WorkAreaHash.Compute(nodes));
 
                 CS2M.Log.Info($"[Area] APPLIED rewrite name={cmd.PrefabName} nodes={cmd.Xs.Length} entity={target.Index}");
                 return;

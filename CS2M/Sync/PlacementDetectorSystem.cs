@@ -239,6 +239,20 @@ namespace CS2M.Sync
                         continue;
                     }
 
+                    // v51 FIELD FIX: a human build stamps Applied on EVERY definition sub-object
+                    // (wall lights, bushes, pipe nodes, area placeholders…), and this query matched
+                    // them all — each one shipped as its own "extension" and DUPLICATED on the
+                    // receiver (which derives sub-objects from the building itself). A duplicated
+                    // farm placeholder is why work areas pointed at the wrong copy until /resync.
+                    // Real service extensions are the ONLY owned objects a player places directly,
+                    // and their prefab carries ServiceUpgradeData/BuildingExtensionData.
+                    Entity prefabEnt = EntityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
+                    if (!EntityManager.HasComponent<Game.Prefabs.ServiceUpgradeData>(prefabEnt)
+                        && !EntityManager.HasComponent<Game.Prefabs.BuildingExtensionData>(prefabEnt))
+                    {
+                        continue; // derived sub-object — both PCs generate it from the building
+                    }
+
                     Entity owner = EntityManager.GetComponentData<Owner>(entity).m_Owner;
                     if (!EntityManager.HasComponent<Game.Buildings.Building>(owner)
                         || !EntityManager.HasComponent<Game.Objects.Transform>(owner)

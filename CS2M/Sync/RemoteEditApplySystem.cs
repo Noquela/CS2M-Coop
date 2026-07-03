@@ -100,7 +100,9 @@ namespace CS2M.Sync
                 EntityManager.AddComponent<CS2M_RemotePlaced>(e);
             }
 
-            EntityManager.AddComponent<Deleted>(e);
+            // v51: cascade every live child too — replica buildings hold definition-made
+            // sub-nets/sub-areas the vanilla cascade can miss ("part of the building stays behind").
+            CascadeDeleteUtil.DeleteWithChildren(EntityManager, e);
             if (cmd.SyncId != 0)
             {
                 CS2M_SyncIdSystem.Map.Remove(cmd.SyncId);

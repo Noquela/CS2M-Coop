@@ -111,6 +111,8 @@ namespace CS2M
             updateSystem.UpdateAt<PlayerCursorSystem>(SystemUpdatePhase.Rendering);
             // v50: host broadcasts the player roster (names + latency) ~1 Hz for the player panel.
             updateSystem.UpdateAt<PlayerStatsSenderSystem>(SystemUpdatePhase.Rendering);
+            // v51: host-authoritative RCI demand bars (clients suppress local demand sim + mirror).
+            updateSystem.UpdateAt<DemandSyncSystem>(SystemUpdatePhase.Rendering);
 
             // Object placement sync (buildings/props/trees placed with the Object/Line tool).
             // Detector runs just before ModificationEnd (where Applied is visible, matching
@@ -248,6 +250,10 @@ namespace CS2M
             updateSystem.UpdateBefore<FireDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<FireApplySystem>(SystemUpdatePhase.Modification1);
             updateSystem.UpdateAt<FireSuppressSystem>(SystemUpdatePhase.Rendering);
+
+            // v51: structural health watchdog — logs [Invariant] VIOLATION the moment duplicated
+            // edges / orphaned children / dead attachments appear (field diagnosis in real time).
+            updateSystem.UpdateAt<InvariantCheckSystem>(SystemUpdatePhase.Rendering);
 
             // Headless self-test driver. Completely inert unless CS2M_AUTOPILOT is set, so the
             // normal build is unaffected. Runs at UIUpdate (same group as UISystem) so the client

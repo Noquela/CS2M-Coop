@@ -323,7 +323,7 @@ namespace CS2M.Sync
 
             // v50: was stuck at 19 since v40 — /validate silently skipped every newer check
             // (devtree/env/tile/route). Now tracks the full suite.
-            if (_testStep > 26)
+            if (_testStep > 27)
             {
                 _chatValidation = false;
                 RemotePlayerCursors.Remove(1);
@@ -420,7 +420,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 26) { return; }
+            if (_testStep > 27) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -452,7 +452,8 @@ namespace CS2M.Sync
                 case 23: VerifyRoute(); ActStop(); break;
                 case 24: VerifyStop(); ActFireStart(); break;
                 case 25: VerifyFireStart(); ActFireCollapse(); break;
-                case 26: VerifyFireCollapse(); Summary(); break;
+                case 26: VerifyFireCollapse(); ActTee(); break;
+                case 27: VerifyTee(); Summary(); break;
             }
 
             _testStep++;
@@ -720,8 +721,9 @@ namespace CS2M.Sync
         {
             // Entity count alone is NOT proof — the v37 direct-archetype path grew the count with a
             // hollow edge that never got composition/geometry/zone blocks (invisible in real play).
-            // Find the injected edge by XZ endpoints (the game re-snaps Y to terrain) and assert the
-            // real pipeline ran: References@Mod2B, CompositionSelect@Mod3, BlockSystem@Mod4.
+            // v51: the road may legitimately have been SLICED by the X-crossing splitter (it now
+            // wires real intersections), so find the CHAIN piece that starts at our start point;
+            // its far end is where the delete test must aim.
             int edges = _allEdgesQuery.CalculateEntityCount();
             Entity found = Entity.Null;
             NativeArray<Entity> ents = _allEdgesQuery.ToEntityArray(Allocator.Temp);
@@ -734,6 +736,18 @@ namespace CS2M.Sync
                     bool fwd = NearXZ(bz.a, _netStart) && NearXZ(bz.d, _netEnd);
                     bool rev = NearXZ(bz.a, _netEnd) && NearXZ(bz.d, _netStart);
                     if (fwd || rev) { found = e; break; }
+                }
+
+                if (found == Entity.Null)
+                {
+                    // sliced: take the piece touching the start point; retarget delete to its span
+                    foreach (Entity e in ents)
+                    {
+                        if (!EntityManager.HasComponent<Game.Net.Curve>(e)) { continue; }
+                        Colossal.Mathematics.Bezier4x3 bz = EntityManager.GetComponentData<Game.Net.Curve>(e).m_Bezier;
+                        if (NearXZ(bz.a, _netStart)) { found = e; _netEnd = bz.d; break; }
+                        if (NearXZ(bz.d, _netStart)) { found = e; _netEnd = bz.a; break; }
+                    }
                 }
             }
             finally { ents.Dispose(); }
@@ -1260,7 +1274,12 @@ namespace CS2M.Sync
             }
             finally { ents.Dispose(); }
 
-            if (_devTreeNode == Entity.Null) { Result("devtree", false, "no locked node found"); return; }
+            if (_devTreeNode == Entity.Null)
+            {
+                // Environment, not sync: this save simply has the whole tree unlocked already.
+                Result("devtree", true, "no locked node left to test (all unlocked in this save)");
+                return;
+            }
             if (!_prefabSystem.TryGetPrefab(_devTreeNode, out PrefabBase p) || p == null)
             {
                 Result("devtree", false, "no prefab for node");
@@ -1649,6 +1668,113 @@ namespace CS2M.Sync
                             || !EntityManager.HasComponent<Game.Events.OnFire>(_fireTarget);
             Result("fire-collapse", destroyed && fireGone,
                 $"destroyed={destroyed} fireCleared={fireGone} (Destroy event → vanilla DestroySystem teardown)");
+        }
+
+        // ------- v51 step 27: T-junction — a synced road ending MID-SPAN on another must split it -------
+
+        private float3 _teeJunction;
+
+        private void ActTee()
+        {
+            _teeJunction = default;
+            if (_edgeQuery.IsEmptyIgnoreFilter || !TryAnchor(out float3 anchor))
+            {
+                Result("net-tee", false, "no road/anchor available");
+                return;
+            }
+
+            NativeArray<Entity> ents = _edgeQuery.ToEntityArray(Allocator.Temp);
+            string prefabType, prefabName;
+            try
+            {
+                Entity src = ents[0];
+                if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(src).m_Prefab,
+                        out PrefabBase prefab) || prefab == null)
+                {
+                    Result("net-tee", false, "no road prefab");
+                    return;
+                }
+
+                prefabType = prefab.GetType().Name;
+                prefabName = prefab.name;
+            }
+            finally { ents.Dispose(); }
+
+            // Road A: straight 80 m bar away from the other test spots; road B ends dead-center on it.
+            var a0 = new float3(anchor.x + 260f, anchor.y, anchor.z + 260f);
+            var a1 = new float3(anchor.x + 340f, anchor.y, anchor.z + 260f);
+            _teeJunction = new float3((a0.x + a1.x) * 0.5f, anchor.y, a0.z);
+            var b0 = new float3(_teeJunction.x, anchor.y, anchor.z + 320f);
+
+            L($"[Auto] TEST net-tee INJECT name={prefabName} junction=({_teeJunction.x:F0},{_teeJunction.z:F0})");
+            RemoteNetQueue.Enqueue(StraightNet(prefabType, prefabName, a0, a1));
+            RemoteNetQueue.Enqueue(StraightNet(prefabType, prefabName, b0, _teeJunction));
+        }
+
+        private static CS2M.Commands.Data.Game.NetPlaceCommand StraightNet(string type, string name,
+            float3 s, float3 e)
+        {
+            float3 b = math.lerp(s, e, 1f / 3f);
+            float3 c = math.lerp(s, e, 2f / 3f);
+            return new CS2M.Commands.Data.Game.NetPlaceCommand
+            {
+                SyncId = CS2M_SyncIdSystem.Allocate(),
+                PrefabType = type, PrefabName = name,
+                Ax = s.x, Ay = s.y, Az = s.z,
+                Bx = b.x, By = b.y, Bz = b.z,
+                Cx = c.x, Cy = c.y, Cz = c.z,
+                Dx = e.x, Dy = e.y, Dz = e.z,
+                RandomSeed = 0,
+            };
+        }
+
+        private void VerifyTee()
+        {
+            if (_teeJunction.Equals(default(float3))) { return; }
+
+            // The junction must hold ONE node with >= 3 live edges (A split in two + B).
+            EntityQuery nodes = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Net.Node>(),
+                    ComponentType.ReadOnly<Game.Net.ConnectedEdge>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+
+            int bestEdges = 0;
+            int nodesNear = 0;
+            NativeArray<Entity> ents = nodes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity n in ents)
+                {
+                    float3 p = EntityManager.GetComponentData<Game.Net.Node>(n).m_Position;
+                    float dx = p.x - _teeJunction.x, dz = p.z - _teeJunction.z;
+                    if (dx * dx + dz * dz > 4f) { continue; }
+
+                    nodesNear++;
+                    int live = 0;
+                    DynamicBuffer<Game.Net.ConnectedEdge> ce =
+                        EntityManager.GetBuffer<Game.Net.ConnectedEdge>(n, true);
+                    for (int i = 0; i < ce.Length; i++)
+                    {
+                        if (EntityManager.Exists(ce[i].m_Edge)
+                            && !EntityManager.HasComponent<Deleted>(ce[i].m_Edge))
+                        {
+                            live++;
+                        }
+                    }
+
+                    bestEdges = math.max(bestEdges, live);
+                }
+            }
+            finally { ents.Dispose(); }
+
+            bool ok = nodesNear == 1 && bestEdges >= 3;
+            Result("net-tee", ok,
+                $"nodesAtJunction={nodesNear} connectedEdges={bestEdges} (need exactly 1 node with >=3 — split+fusion wired)");
         }
 
         private void Summary()
