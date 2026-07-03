@@ -213,6 +213,15 @@ namespace CS2MTests
         public int SyncedObjects { get; set; }
         public int Districts { get; set; }
         public int WaterSources { get; set; }
+        public long EdgeHash { get; set; }
+        public int Nodes { get; set; }
+        public long NodeHash { get; set; }
+        public int Buildings { get; set; }
+        public long BuildingHash { get; set; }
+        public int ZoneBlocks { get; set; }
+        public long ZoneHash { get; set; }
+        public long AreaHash { get; set; }
+        public int Money { get; set; }
     }
 
     public class MoneySyncCommand : CommandBase { public int Cash { get; set; } }
@@ -383,7 +392,7 @@ namespace CS2MTests
             RoundTrip(opts, new DeleteCommand { SyncId = 0UL, PrefabType = "BuildingPrefab", PrefabName = "WaterTower03", PosX = -152.4f, PosY = 478f, PosZ = -61f }, c => c.SyncId == 0UL && c.PrefabName == "WaterTower03" && Math.Abs(c.PosX - (-152.4f)) < 0.01f);
             RoundTrip(opts, new DevTreeCommand { NodeName = "Healthcare Node 3" }, c => c.NodeName == "Healthcare Node 3");
             RoundTrip(opts, new EnvSyncCommand { Temperature = 21.5f, Precipitation = 0.7f, Cloudiness = 0.4f, ElapsedTimeFrames = 987654u }, c => Math.Abs(c.Temperature - 21.5f) < 0.01f && c.ElapsedTimeFrames == 987654u);
-            RoundTrip(opts, new StateHashCommand { Edges = 1085, SyncedObjects = 42, Districts = 3, WaterSources = 5 }, c => c.Edges == 1085 && c.SyncedObjects == 42 && c.WaterSources == 5);
+            RoundTrip(opts, new StateHashCommand { Edges = 1085, SyncedObjects = 42, Districts = 3, WaterSources = 5, EdgeHash = 8877665544332211L, Nodes = 512, NodeHash = -123456789012345L, Buildings = 730, BuildingHash = 999888777666L, ZoneBlocks = 640, ZoneHash = -5L, AreaHash = 42424242L, Money = 1750000 }, c => c.Edges == 1085 && c.EdgeHash == 8877665544332211L && c.NodeHash == -123456789012345L && c.Buildings == 730 && c.ZoneHash == -5L && c.AreaHash == 42424242L && c.Money == 1750000);
             RoundTrip(opts, new MoneySyncCommand { Cash = 1234567 }, c => c.Cash == 1234567);
             RoundTrip(opts, new ProgressionSyncCommand { Xp = 5000, MaxPopulation = 12000, AchievedMilestone = 7, XpRewardRecord = 3 }, c => c.Xp == 5000 && c.AchievedMilestone == 7 && c.XpRewardRecord == 3);
             RoundTrip(opts, new ZonePaintCommand { BlockX = 100f, BlockZ = 200f, SizeX = 6, SizeY = 4, CellIndices = new[] { 0, 5, 11, 23 }, ZoneNames = new[] { "EU Residential Low", "", "EU Commercial", "EU Residential Low" } }, c => c.CellIndices.Length == 4 && c.CellIndices[2] == 11 && c.ZoneNames[1] == "" && c.ZoneNames[2] == "EU Commercial");

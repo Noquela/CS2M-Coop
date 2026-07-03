@@ -127,6 +127,13 @@ namespace CS2M.Commands
 
         public byte[] Serialize(CommandBase command)
         {
+            // v52 wire-tap OUT: the single point every outgoing command AND every host relay funnels
+            // through. Inert unless CS2M_WIRETAP=1; never throws (see WireTap.Record).
+            if (WireTap.Enabled)
+            {
+                WireTap.Record("OUT", command);
+            }
+
             return MessagePackSerializer.Serialize(command, _model);
         }
 

@@ -213,6 +213,13 @@ namespace CS2M.Networking
             DeliveryMethod deliveryMethod)
         {
             CommandBase command = CommandInternal.Instance.Deserialize(reader.GetRemainingBytes());
+            // v52 wire-tap IN: the single point every received packet funnels through, with the peer
+            // id so the host can attribute who sent what. Inert unless CS2M_WIRETAP=1; never throws.
+            if (WireTap.Enabled)
+            {
+                WireTap.Record("IN", command, peer.Id);
+            }
+
             CommandHandler handler = CommandInternal.Instance.GetCommandHandler(command.GetType());
             Log.Trace($"NetworkManager: OnNetworkReceiveEvent [PeerId: {peer.Id}] {command.GetType()}");
             if (command is PreconditionsCheckCommand)
