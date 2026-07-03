@@ -352,3 +352,17 @@ Conclusão: os apply-paths seguem os padrões vanilla corretos. A incerteza resi
 na interação das **duas simulações vivas** (que só o teste de 3 jogadores expõe) — e para isso o
 `StateHashSystems` (divergência por hash de conteúdo) + wire-tap estão armados para pegar qualquer
 resíduo em campo. Ver §11.
+
+### 13.1 Revisão dos próprios bug-catchers (o validador tem que ser correto)
+
+O selftest solo exercita o SENDER do StateHash, mas não a COMPARAÇÃO (sem cliente pra divergir).
+Revisei a lógica "assentado-e-divergente" (`StateHashApplySystem.Check`) por cenário e está correta:
+desync persistente dispara em ~2 amostras; comando em trânsito não dispara (o lado que recebe muda →
+não-assentado); construção ativa não dispara (detecta na pausa). Wire-tap: `Record` é chamado das
+duas threads (main no send, rede no receive) — protegido por `lock` + `Interlocked` no seq, cada
+`GetValue` de property em try/catch; nunca lança. Ambos corretos.
+
+Refinamento futuro anotado (baixa prioridade, não vale churnar o build congelado): o contador
+`_strikes` do StateHash é global, não por-métrica — em sessão muito churny poderia somar strikes de
+métricas diferentes e sugerir /resync a mais (dano baixo: só uma msg no chat, e o log mostra a
+métrica exata). Trocar por strikes por-métrica quando houver motivo de campo.
