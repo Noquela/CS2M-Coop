@@ -529,7 +529,21 @@ namespace CS2M.Sync
         private bool CoveredByExistingEdge(Bezier4x3 bezier, Entity netPrefab)
         {
             const float tolSq = 2.25f; // 1.5 m
-            float3 mid = MathUtils.Position(bezier, 0.5f);
+            // Sample the new curve at several points; it is redundant only if EVERY sample sits on
+            // SOME existing same-prefab edge. The old check required a SINGLE edge to cover all three
+            // of start/mid/end — which failed once a road had been split by junctions (no one piece
+            // spans it), letting exact-duplicate roads through as overlapping dup-edges. The bot
+            // hunter caught precisely that: re-sending a road already sliced by a T/X made a second
+            // stacked copy. Collective coverage (by many pieces) closes it.
+            const int N = 5;
+            var samples = new float3[N];
+            for (int i = 0; i < N; i++)
+            {
+                samples[i] = MathUtils.Position(bezier, i / (float)(N - 1));
+            }
+
+            var covered = new bool[N];
+            int coveredCount = 0;
 
             EntityQuery edges = GetEntityQuery(new EntityQueryDesc
             {
@@ -557,18 +571,31 @@ namespace CS2M.Sync
                     }
 
                     Bezier4x3 c = EntityManager.GetComponentData<Curve>(cand).m_Bezier;
-                    // Cheap reject by distance to the candidate's own midpoint.
                     float3 cmid = MathUtils.Position(c, 0.5f);
-                    float dxm = cmid.x - mid.x, dzm = cmid.z - mid.z;
                     float reach = MathUtils.Length(c) + 3f;
-                    if (dxm * dxm + dzm * dzm > reach * reach)
-                    {
-                        continue;
-                    }
+                    float reachSq = reach * reach;
 
-                    if (DistSqXZ(c, bezier.a) < tolSq && DistSqXZ(c, mid) < tolSq && DistSqXZ(c, bezier.d) < tolSq)
+                    for (int i = 0; i < N; i++)
                     {
-                        return true;
+                        if (covered[i])
+                        {
+                            continue;
+                        }
+
+                        float dxm = cmid.x - samples[i].x, dzm = cmid.z - samples[i].z;
+                        if (dxm * dxm + dzm * dzm > reachSq)
+                        {
+                            continue; // cheap reject: sample too far from this edge to lie on it
+                        }
+
+                        if (DistSqXZ(c, samples[i]) < tolSq)
+                        {
+                            covered[i] = true;
+                            if (++coveredCount == N)
+                            {
+                                return true; // every sample sits on some existing edge → redundant
+                            }
+                        }
                     }
                 }
             }
