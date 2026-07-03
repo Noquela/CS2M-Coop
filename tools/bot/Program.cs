@@ -85,8 +85,19 @@ namespace CS2MBot
     {
         public static int Main(string[] args)
         {
-            string managed = @"C:\JogosCrackeados\Cities.Skylines.II.v1.5.3f1\game\Cities2_Data\Managed";
-            string modDir = @"C:\Users\Bruno\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2M";
+            // Portable: prefer the same env vars the build uses (CSII_MANAGEDPATH / CSII_LOCALMODSPATH),
+            // fall back to the local dev paths so it still runs here with no env set. Keeps the bot
+            // free of machine-specific paths for a public/upstream contribution.
+            string managed = Environment.GetEnvironmentVariable("CSII_MANAGEDPATH");
+            if (string.IsNullOrEmpty(managed))
+            {
+                managed = @"C:\JogosCrackeados\Cities.Skylines.II.v1.5.3f1\game\Cities2_Data\Managed";
+            }
+
+            string modsRoot = Environment.GetEnvironmentVariable("CSII_LOCALMODSPATH");
+            string modDir = !string.IsNullOrEmpty(modsRoot)
+                ? Path.Combine(modsRoot, "CS2M")
+                : @"C:\Users\Bruno\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2M";
             AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
             {
                 string name = new AssemblyName(e.Name).Name + ".dll";
