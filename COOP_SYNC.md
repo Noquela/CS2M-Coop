@@ -49,7 +49,7 @@ sessão), prefab+posição (nativos), prefab+número (linhas).
 | Distritos | archetype de `AreaData` + polígono | v42 |
 | Superfícies/pavimento + delete de áreas | polígono + prefab/centro; delete por prefab+centro | v46 |
 | Áreas de trabalho (fazenda/mina) | padrão no place (réplica `CreateAreas`) + edição via `AreaEditCommand` | v45 |
-| Água/terreno | `WaterSourceData` direto; brush replay best-effort (drift → `/resync`) | fork inicial |
+| Água/terreno | `WaterSourceData` direto — **v50: Y ancorado ao terreno LOCAL do receptor + delete de fonte sincado** (fonte deletada vivia p/ sempre nos outros PCs = "água do nada" em campo); brush replay best-effort — **v50: cap de 3 strokes/frame + descarte de backlog >30** (fila acumulada no pause despejava tudo num frame = "torre de terreno" em campo); drift residual → `/resync` | fork inicial/v50 |
 | Tiles do mapa | centro do tile → `RemoveComponent<Native>` (espelho vanilla) | v44 |
 | Extensões de serviço | objeto com `Owner`; `ServiceUpgradeSystem` fia `InstalledUpgrade` sozinho | v44 |
 | **Growables host-autoritativos** (EXPERIMENTAL) | host sinca spawns do sim; cliente desliga `ZoneSpawnSystem`; level-up = delete-por-id + spawn; spawn limpa o lote no receptor. `CS2M_GROWABLE_SYNC=0` desliga | v44 |
@@ -138,7 +138,7 @@ dotnet build CS2M/CS2M.csproj -c Release -p:AssemblyVersion=1.0.N.0 -p:FileVersi
 # bump: manter <Version> no csproj igual ao release (builds manuais identificáveis)
 ```
 
-### 1) Protocolo (sem jogo, ~10 s) — `cd tests/protocol && dotnet run -c Release` → **34/34**.
+### 1) Protocolo (sem jogo, ~10 s) — `cd tests/protocol && dotnet run -c Release` → **35/35**.
 
 ### 2) Selftest in-game (1 instância, ~9 min) — 28 checks
 ```bash

@@ -40,8 +40,25 @@ namespace CS2M.Sync
                 return;
             }
 
-            while (RemoteTerrainQueue.TryDequeue(out TerrainCommand cmd))
+            // v50 field fix ("terrain tower"): this system runs in a simulation phase, so strokes
+            // pile up while the game is paused/stalled and used to ALL land on the first unpaused
+            // frame (each ApplyBrush scales with frame time → a mountain in one tick). Cap the
+            // work per frame and drop the oldest backlog beyond a sane window.
+            int dropped = 0;
+            while (RemoteTerrainQueue.Count > 30 && RemoteTerrainQueue.TryDequeue(out _))
             {
+                dropped++;
+            }
+
+            if (dropped > 0)
+            {
+                CS2M.Log.Info($"[Terrain] dropped {dropped} stale queued strokes (pause/stall backlog)");
+            }
+
+            int applied = 0;
+            while (applied < 3 && RemoteTerrainQueue.TryDequeue(out TerrainCommand cmd))
+            {
+                applied++;
                 try { ApplyOne(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] apply failed in TerrainApplySystem: {ex.Message}"); }
             }
         }

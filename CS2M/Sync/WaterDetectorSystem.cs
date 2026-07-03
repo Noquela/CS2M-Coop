@@ -23,7 +23,8 @@ namespace CS2M.Sync
     public partial class WaterDetectorSystem : GameSystemBase
     {
         private EntityQuery _sources;
-        private readonly HashSet<Entity> _seen = new HashSet<Entity>();
+        // Entity → last known position, so a REMOVED source can still be addressed on the wire.
+        private readonly Dictionary<Entity, float3> _seen = new Dictionary<Entity, float3>();
         private bool _baselineDone;
 
         protected override void OnCreate()
@@ -44,6 +45,7 @@ namespace CS2M.Sync
                 return;
             }
 
+            var current = new HashSet<Entity>();
             NativeArray<Entity> ents = _sources.ToEntityArray(Allocator.Temp);
             try
             {
@@ -51,7 +53,7 @@ namespace CS2M.Sync
                 {
                     foreach (Entity e in ents)
                     {
-                        _seen.Add(e);
+                        _seen[e] = EntityManager.GetComponentData<Transform>(e).m_Position;
                     }
 
                     _baselineDone = true;
@@ -60,13 +62,16 @@ namespace CS2M.Sync
 
                 foreach (Entity e in ents)
                 {
-                    if (!_seen.Add(e))
+                    current.Add(e);
+                    float3 pos = EntityManager.GetComponentData<Transform>(e).m_Position;
+                    if (_seen.ContainsKey(e))
                     {
-                        continue; // already known
+                        _seen[e] = pos; // keep the address fresh (tool can nudge sources)
+                        continue;
                     }
 
+                    _seen[e] = pos;
                     WaterSourceData w = EntityManager.GetComponentData<WaterSourceData>(e);
-                    float3 pos = EntityManager.GetComponentData<Transform>(e).m_Position;
                     Command.SendToAll?.Invoke(new WaterCommand
                     {
                         PosX = pos.x, PosY = pos.y, PosZ = pos.z,
@@ -80,6 +85,62 @@ namespace CS2M.Sync
             {
                 ents.Dispose();
             }
+
+            // v50: sources that VANISHED since the last scan → sync the removal (they used to live
+            // forever on the other PCs, flooding "out of nowhere" — field report). Removals we
+            // applied ourselves from the network are consumed silently (echo guard).
+            List<Entity> gone = null;
+            foreach (KeyValuePair<Entity, float3> kv in _seen)
+            {
+                if (!current.Contains(kv.Key))
+                {
+                    (gone ?? (gone = new List<Entity>())).Add(kv.Key);
+                }
+            }
+
+            if (gone == null)
+            {
+                return;
+            }
+
+            foreach (Entity e in gone)
+            {
+                float3 pos = _seen[e];
+                _seen.Remove(e);
+                if (WaterSync.ConsumeRemoteDelete(e))
+                {
+                    continue; // this removal came FROM the network — don't bounce it back
+                }
+
+                Command.SendToAll?.Invoke(new WaterCommand
+                {
+                    PosX = pos.x, PosY = pos.y, PosZ = pos.z,
+                    Delete = true,
+                });
+                CS2M.Log.Info($"[Water] DETECT+SEND delete pos=({pos.x:F0},{pos.z:F0})");
+            }
+        }
+    }
+
+    /// <summary>Echo bookkeeping for synced water-source removals.</summary>
+    public static class WaterSync
+    {
+        private static readonly HashSet<Entity> RemoteDeletes = new HashSet<Entity>();
+        private static readonly object Lock = new object();
+
+        public static void MarkRemoteDelete(Entity e)
+        {
+            lock (Lock) { RemoteDeletes.Add(e); }
+        }
+
+        public static bool ConsumeRemoteDelete(Entity e)
+        {
+            lock (Lock) { return RemoteDeletes.Remove(e); }
+        }
+
+        public static void Clear()
+        {
+            lock (Lock) { RemoteDeletes.Clear(); }
         }
     }
 }

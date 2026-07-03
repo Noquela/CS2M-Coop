@@ -280,6 +280,7 @@ namespace CS2MTests
         public float Multiplier { get; set; }
         public float Polluted { get; set; }
         public int ConstantDepth { get; set; }
+        public bool Delete { get; set; }
     }
 
     public class TerrainCommand : CommandBase
@@ -378,7 +379,8 @@ namespace CS2MTests
             RoundTrip(opts, new BudgetCommand { ServiceType = "ServicePrefab", ServiceName = "Roads", Percentage = 90 }, c => c.ServiceName == "Roads" && c.Percentage == 90);
             RoundTrip(opts, new PolicyCommand { PolicyType = "PolicyPrefab", PolicyName = "Taxi Starting Fee", Active = true, Adjustment = 27.5f }, c => c.PolicyName == "Taxi Starting Fee" && c.Active && Math.Abs(c.Adjustment - 27.5f) < 0.01f);
             RoundTrip(opts, new DistrictCommand { PrefabType = "DistrictPrefab", PrefabName = "District Area", OptionMask = 5u, Xs = new[] { -60f, 60f, 60f, -60f, -60f }, Ys = new[] { 477f, 477f, 477f, 477f, 477f }, Zs = new[] { -60f, -60f, 60f, 60f, -60f } }, c => c.PrefabName == "District Area" && c.OptionMask == 5u && c.Xs.Length == 5 && c.Zs[2] == 60f);
-            RoundTrip(opts, new WaterCommand { PosX = -307f, PosY = 5f, PosZ = -3124f, Radius = 20f, Height = 5f, Multiplier = 1f, Polluted = 0f, ConstantDepth = 0 }, c => Math.Abs(c.PosX - (-307f)) < 0.01f && c.Radius == 20f);
+            RoundTrip(opts, new WaterCommand { PosX = -307f, PosY = 5f, PosZ = -3124f, Radius = 20f, Height = 5f, Multiplier = 1f, Polluted = 0f, ConstantDepth = 0 }, c => Math.Abs(c.PosX - (-307f)) < 0.01f && c.Radius == 20f && !c.Delete);
+            RoundTrip(opts, new WaterCommand { PosX = 10f, PosZ = 20f, Delete = true }, c => c.Delete && c.PosZ == 20f);
             RoundTrip(opts, new TerrainCommand { Type = 0, PosX = -187f, PosY = 477f, PosZ = -3004f, Size = 40f, Strength = 100000f }, c => c.Type == 0 && c.Size == 40f && c.Strength == 100000f);
             RoundTrip(opts, new SpeedCommand { Speed = 3f }, c => c.Speed == 3f);
             RoundTrip(opts, new ResyncCommand(), c => true);

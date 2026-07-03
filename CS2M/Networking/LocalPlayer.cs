@@ -458,6 +458,7 @@ namespace CS2M.Networking
             Sync.MapPingSync.Clear();
             Sync.PlayerStatsSync.Clear();
             Sync.FireSync.Clear();
+            Sync.WaterSync.Clear();
             UI.ChatPanel.RefreshPlayerList();
 
             PlayerStatus = PlayerStatus.INACTIVE;

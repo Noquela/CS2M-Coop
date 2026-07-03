@@ -12,6 +12,8 @@ namespace CS2M.Sync
 
         public static bool TryDequeue(out TerrainCommand c) => Q.TryDequeue(out c);
 
+        public static int Count => Q.Count;
+
         public static void Clear()
         {
             while (Q.TryDequeue(out _))
