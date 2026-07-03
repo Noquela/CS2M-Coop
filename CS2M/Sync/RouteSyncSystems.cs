@@ -522,6 +522,19 @@ namespace CS2M.Sync
 
             ProcessPendingNumbers();
 
+            // v50: a stop object and the line that connects to it can arrive in the same frame, and
+            // the two apply systems' relative order is unspecified — if a waypoint references a stop
+            // SyncId that hasn't materialized yet, park the command and retry next frame (max 5).
+            if (_deferredCreates.Count > 0)
+            {
+                List<RouteCreateCommand> retry = _deferredCreates;
+                _deferredCreates = new List<RouteCreateCommand>();
+                foreach (RouteCreateCommand cmd in retry)
+                {
+                    try { ApplyCreate(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] route create apply failed: {ex.Message}"); }
+                }
+            }
+
             while (RouteSync.TryDequeueCreate(out RouteCreateCommand cmd))
             {
                 try { ApplyCreate(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] route create apply failed: {ex.Message}"); }
@@ -557,6 +570,33 @@ namespace CS2M.Sync
             }
         }
 
+        private System.Collections.Generic.List<RouteCreateCommand> _deferredCreates =
+            new System.Collections.Generic.List<RouteCreateCommand>();
+        private readonly System.Collections.Generic.Dictionary<ulong, int> _deferCounts =
+            new System.Collections.Generic.Dictionary<ulong, int>();
+
+        /// <summary>True when a waypoint references a synced stop that doesn't exist locally YET
+        /// (same-frame ordering). Position-addressed connections (id 0) never defer.</summary>
+        private bool ShouldDefer(RouteCreateCommand cmd)
+        {
+            if (cmd.WpConnId == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < cmd.WpConnId.Length; i++)
+            {
+                ulong id = cmd.WpConnId[i];
+                if (id != 0 && (!CS2M_SyncIdSystem.Map.TryGetValue(id, out Entity e)
+                                || !EntityManager.Exists(e)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private void ApplyCreate(RouteCreateCommand cmd)
         {
             int n = cmd.WpX?.Length ?? 0;
@@ -564,6 +604,22 @@ namespace CS2M.Sync
             {
                 return;
             }
+
+            if (ShouldDefer(cmd))
+            {
+                _deferCounts.TryGetValue(cmd.SyncId, out int tries);
+                if (tries < 5)
+                {
+                    _deferCounts[cmd.SyncId] = tries + 1;
+                    _deferredCreates.Add(cmd);
+                    CS2M.Log.Verbose($"[Route] DEFER create id={cmd.SyncId} (stop not materialized yet, try {tries + 1}/5)");
+                    return;
+                }
+
+                CS2M.Log.Info($"[Route] proceeding with unresolved stop id after 5 tries id={cmd.SyncId}");
+            }
+
+            _deferCounts.Remove(cmd.SyncId);
 
             if (cmd.Replace)
             {
@@ -601,9 +657,14 @@ namespace CS2M.Sync
 
             BuildElements(route, prefabEntity, rd, cmd);
 
-            if (!EntityManager.HasComponent<Applied>(route))
+            // v50: do NOT add Applied to the route — RouteBufferSystem only initializes render
+            // buffers for chunks with Created && !Applied. With Applied the route kept the
+            // archetype-default RouteBufferIndex(0), which aliased another line's buffer and
+            // NRE'd the renderer when no line existed yet (the "critical" the host saw).
+            // Born with -1 ("no buffer") the init path assigns a real slot and the line DRAWS.
+            if (EntityManager.HasComponent<Game.Rendering.RouteBufferIndex>(route))
             {
-                EntityManager.AddComponent<Applied>(route);
+                EntityManager.SetComponentData(route, new Game.Rendering.RouteBufferIndex { m_Index = -1 });
             }
 
             EntityManager.AddComponent<CS2M_RemotePlaced>(route);

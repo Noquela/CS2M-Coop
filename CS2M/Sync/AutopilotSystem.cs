@@ -72,6 +72,9 @@ namespace CS2M.Sync
         private int _testTimer;
         private ulong _treeSyncId;
         private ulong _buildingSyncId;
+        private ulong _stopSyncId;      // v50 step 24
+        private Entity _fireTarget;     // v50 steps 25-26
+        private ulong _fireSyncId;
 
         // captured state for the selftest verifications
         private int _moneyExpected;
@@ -303,7 +306,7 @@ namespace CS2M.Sync
             _results.Clear();
             _forceRun = false; // never override the live session's speed
             L("[Auto] CHAT VALIDATION starting (triggered by /validate)");
-            Chat($"validating this build in-session — ~20 checks over ~1 min. role={CS2M.API.Commands.Command.CurrentRole}. " +
+            Chat($"validating this build in-session — ~28 checks over ~2 min. role={CS2M.API.Commands.Command.CurrentRole}. " +
                  "NOTE: the check modifies the city (money/XP/test objects) — best on a test save.");
         }
 
@@ -318,7 +321,9 @@ namespace CS2M.Sync
                     true, "FakeFriend");
             }
 
-            if (_testStep > 19)
+            // v50: was stuck at 19 since v40 — /validate silently skipped every newer check
+            // (devtree/env/tile/route). Now tracks the full suite.
+            if (_testStep > 26)
             {
                 _chatValidation = false;
                 RemotePlayerCursors.Remove(1);
@@ -415,13 +420,13 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 23) { return; }
+            if (_testStep > 26) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
             switch (_testStep)
             {
-                case 0: ActMoney(); break;
+                case 0: CleanupOrphanTestWater(); ActMoney(); break;
                 case 1: VerifyMoney(); ActXp(); break;
                 case 2: VerifyXp(); _treeSyncId = InjectObject(_treeQuery, "tree", new float3(20f, 0f, 20f)); break;
                 case 3: VerifyCount("object:tree", 1); _buildingSyncId = InjectObject(_buildingQuery, "building", new float3(60f, 0f, 60f)); break;
@@ -444,10 +449,38 @@ namespace CS2M.Sync
                 case 20: VerifyDevTree(); ActEnvAndNativeDelete(); break;
                 case 21: VerifyEnvAndNativeDelete(); ActTile(); break;
                 case 22: VerifyTile(); ActRoute(); break;
-                case 23: VerifyRoute(); Summary(); break;
+                case 23: VerifyRoute(); ActStop(); break;
+                case 24: VerifyStop(); ActFireStart(); break;
+                case 25: VerifyFireStart(); ActFireCollapse(); break;
+                case 26: VerifyFireCollapse(); Summary(); break;
             }
 
             _testStep++;
+        }
+
+        /// <summary>Selftest boot: older test builds left their water sources alive and autosaves
+        /// kept them flooding the test city forever. They all carry CS2M_RemotePlaced, so they are
+        /// safe to sweep here (selftest mode only — never runs in a real session).</summary>
+        private void CleanupOrphanTestWater()
+        {
+            EntityQuery orphans = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Simulation.WaterSourceData>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+
+            int n = orphans.CalculateEntityCount();
+            if (n == 0)
+            {
+                return;
+            }
+
+            EntityManager.AddComponent<Deleted>(orphans);
+            L($"[Auto] BOOT cleanup removed {n} orphan test water source(s) from earlier runs");
         }
 
         private void ActMoney()
@@ -769,11 +802,13 @@ namespace CS2M.Sync
             _terrainH0 = TerrainUtils.SampleHeight(ref hd, pos);
             _terrainPos = pos;
             L($"[Auto] TEST terrain INJECT raise pos=({pos.x:F0},{pos.z:F0}) h0={_terrainH0:F2}");
+            // Gentle bump — 100000 built a 4 km sky-tower, wrecked nearby buildings and the mess
+            // accumulated through autosaves (field report). A few meters proves the brush the same.
             RemoteTerrainQueue.Enqueue(new TerrainCommand
             {
                 Type = 0, // Shift (raise/lower)
                 PosX = pos.x, PosY = pos.y, PosZ = pos.z,
-                Size = 40f, Strength = 100000f,
+                Size = 40f, Strength = 2000f,
             });
         }
 
@@ -783,6 +818,14 @@ namespace CS2M.Sync
             TerrainHeightData hd = _terrain.GetHeightData(true);
             float h1 = TerrainUtils.SampleHeight(ref hd, _terrainPos);
             Result("terrain", h1 > _terrainH0 + 0.05f, $"height {_terrainH0:F2}->{h1:F2}");
+
+            // Leave no trace: apply the exact inverse brush stroke.
+            RemoteTerrainQueue.Enqueue(new TerrainCommand
+            {
+                Type = 0,
+                PosX = _terrainPos.x, PosY = _terrainPos.y, PosZ = _terrainPos.z,
+                Size = 40f, Strength = -2000f,
+            });
         }
 
         private void ActWater()
@@ -805,12 +848,41 @@ namespace CS2M.Sync
         private void VerifyWater()
         {
             if (_waterBefore < 0) { return; }
-            int after = GetEntityQuery(new EntityQueryDesc
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<Game.Simulation.WaterSourceData>() },
                 None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
-            }).CalculateEntityCount();
+            });
+            int after = q.CalculateEntityCount();
             Result("water", after > _waterBefore, $"waterSources {_waterBefore}->{after}");
+
+            // Leave no trace: delete the source we just made (nearest to the anchor) — the flood it
+            // spawned drains on its own once the source is gone (field report: a lake stayed behind
+            // and autosaves kept it forever).
+            if (after > _waterBefore && TryAnchor(out float3 anchor))
+            {
+                Entity best = Entity.Null;
+                float bestD = 50f * 50f;
+                NativeArray<Entity> sources = q.ToEntityArray(Allocator.Temp);
+                try
+                {
+                    foreach (Entity s in sources)
+                    {
+                        if (!EntityManager.HasComponent<Game.Objects.Transform>(s)) { continue; }
+                        float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(s).m_Position;
+                        float dx = p.x - anchor.x, dz = p.z - anchor.z;
+                        float d = dx * dx + dz * dz;
+                        if (d < bestD) { bestD = d; best = s; }
+                    }
+                }
+                finally { sources.Dispose(); }
+
+                if (best != Entity.Null)
+                {
+                    EntityManager.AddComponent<Deleted>(best);
+                    L($"[Auto] TEST water CLEANUP removed test source entity={best.Index}");
+                }
+            }
         }
 
         private void ActDistrict()
@@ -1416,6 +1488,167 @@ namespace CS2M.Sync
 
             bool ok = wps == 3 && segs == 2 && number == 77;
             Result("route", ok, $"wps={wps} segs={segs} number={number} (line built from archetypes, game systems wired it)");
+        }
+
+        // ------- v50 step 24: road-side stop object attaches to the nearest edge -------
+
+        private void ActStop()
+        {
+            // First transport-stop prefab that is a placeable object (Bus Stop etc.).
+            EntityQuery stopPrefabs = GetEntityQuery(
+                ComponentType.ReadOnly<Game.Prefabs.TransportStopData>(),
+                ComponentType.ReadOnly<Game.Prefabs.ObjectData>());
+            EntityQuery edges = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Net.Edge>(),
+                    ComponentType.ReadOnly<Game.Net.Curve>(),
+                    ComponentType.ReadOnly<Game.Net.Road>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+
+            if (stopPrefabs.IsEmptyIgnoreFilter || edges.IsEmptyIgnoreFilter)
+            {
+                Result("stop-attach", false, "no stop prefab or no road edge in city");
+                return;
+            }
+
+            NativeArray<Entity> prefabEnts = stopPrefabs.ToEntityArray(Allocator.Temp);
+            NativeArray<Entity> edgeEnts = edges.ToEntityArray(Allocator.Temp);
+            try
+            {
+                Entity prefabEntity = prefabEnts[0];
+                if (!_prefabSystem.TryGetPrefab(prefabEntity, out PrefabBase prefab) || prefab == null)
+                {
+                    Result("stop-attach", false, "stop prefab unresolvable");
+                    return;
+                }
+
+                Game.Net.Curve curve = EntityManager.GetComponentData<Game.Net.Curve>(edgeEnts[0]);
+                float3 onCurve = Colossal.Mathematics.MathUtils.Position(curve.m_Bezier, 0.5f);
+                float3 pos = onCurve + new float3(4f, 0f, 0f); // curb-ish offset
+
+                var cmd = new ObjectPlaceCommand
+                {
+                    SyncId = CS2M_SyncIdSystem.Allocate(),
+                    PrefabType = prefab.GetType().Name,
+                    PrefabName = prefab.name,
+                    PosX = pos.x, PosY = pos.y, PosZ = pos.z,
+                    RotW = 1f,
+                    OwnerX = onCurve.x, OwnerY = onCurve.y, OwnerZ = onCurve.z, // attach hint
+                };
+                _stopSyncId = cmd.SyncId;
+                L($"[Auto] TEST stop INJECT name={cmd.PrefabName} pos=({pos.x:F0},{pos.z:F0}) hint=({onCurve.x:F0},{onCurve.z:F0}) syncId={cmd.SyncId}");
+                RemotePlacementQueue.EnqueueObject(cmd);
+            }
+            finally
+            {
+                prefabEnts.Dispose();
+                edgeEnts.Dispose();
+            }
+        }
+
+        private void VerifyStop()
+        {
+            if (_stopSyncId == 0) { return; }
+            if (!CS2M_SyncIdSystem.Map.TryGetValue(_stopSyncId, out Entity stop) || !EntityManager.Exists(stop))
+            {
+                Result("stop-attach", false, "stop entity not created");
+                return;
+            }
+
+            bool hasAttached = EntityManager.HasComponent<Game.Objects.Attached>(stop);
+            Entity parent = hasAttached
+                ? EntityManager.GetComponentData<Game.Objects.Attached>(stop).m_Parent
+                : Entity.Null;
+            bool parentIsEdge = parent != Entity.Null && EntityManager.HasComponent<Game.Net.Edge>(parent);
+            Result("stop-attach", parentIsEdge,
+                $"attached={hasAttached} parentEdge={parentIsEdge} (stop object wired to the road edge)");
+        }
+
+        // ------- v50 steps 25-26: host-authoritative fire mirrored via FireSyncCommand -------
+
+        private void ActFireStart()
+        {
+            // A NATIVE building from the save — the test-placed one sits on unzoned ground and the
+            // sim condemns+demolishes it before this step runs (learned the hard way).
+            EntityQuery buildings = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(),
+                    ComponentType.ReadOnly<Destroyed>(),
+                    ComponentType.ReadOnly<Game.Events.OnFire>(),
+                },
+            });
+
+            _fireTarget = Entity.Null;
+            _fireSyncId = 0;
+            NativeArray<Entity> ents = buildings.ToEntityArray(Allocator.Temp);
+            try
+            {
+                if (ents.Length == 0)
+                {
+                    Result("fire-start", false, "no native building alive to ignite");
+                    return;
+                }
+
+                _fireTarget = ents[0];
+            }
+            finally { ents.Dispose(); }
+
+            // Give it a sync id on the spot so the command resolves by id (the same first-touch
+            // pattern native move/delete uses).
+            _fireSyncId = CS2M_SyncIdSystem.Allocate();
+            CS2M_SyncIdSystem.Register(EntityManager, _fireTarget, _fireSyncId);
+
+            L($"[Auto] TEST fire INJECT start entity={_fireTarget.Index} syncId={_fireSyncId}");
+            FireSync.Enqueue(new CS2M.Commands.Data.Game.FireSyncCommand
+            {
+                Kind = 0,
+                TargetSyncId = _fireSyncId,
+                Intensity = 5f,
+            });
+        }
+
+        private void VerifyFireStart()
+        {
+            if (_fireTarget == Entity.Null) { return; }
+            bool onFire = EntityManager.Exists(_fireTarget)
+                          && EntityManager.HasComponent<Game.Events.OnFire>(_fireTarget);
+            Result("fire-start", onFire, onFire ? "building has OnFire (host event mirrored)" : "OnFire missing");
+        }
+
+        private void ActFireCollapse()
+        {
+            if (_fireTarget == Entity.Null) { return; }
+            L($"[Auto] TEST fire INJECT collapse syncId={_fireSyncId}");
+            FireSync.Enqueue(new CS2M.Commands.Data.Game.FireSyncCommand
+            {
+                Kind = 2,
+                TargetSyncId = _fireSyncId,
+            });
+        }
+
+        private void VerifyFireCollapse()
+        {
+            if (_fireTarget == Entity.Null) { return; }
+            bool destroyed = EntityManager.Exists(_fireTarget)
+                             && EntityManager.HasComponent<Destroyed>(_fireTarget);
+            bool fireGone = !EntityManager.Exists(_fireTarget)
+                            || !EntityManager.HasComponent<Game.Events.OnFire>(_fireTarget);
+            Result("fire-collapse", destroyed && fireGone,
+                $"destroyed={destroyed} fireCleared={fireGone} (Destroy event → vanilla DestroySystem teardown)");
         }
 
         private void Summary()

@@ -15,6 +15,15 @@ interface Message {
 const chatMessagesBinding = bindValue<Array<Message>>(mod.id, 'ChatMessages', []);
 const currentUsernameBinding = bindValue<string>(mod.id, 'CurrentUsername');
 const localChatMessageBinding = bindValue<string>(mod.id, 'LocalChatMessage');
+// v50: host-broadcast roster JSON: [{n: name, p: pingMs, h: isHost, c: "#hex"}]
+const playerListBinding = bindValue<string>(mod.id, 'PlayerList', "[]");
+
+interface PlayerRow {
+    n: string;
+    p: number;
+    h: boolean;
+    c: string;
+}
 
 export function sendChatMessage() {
     trigger(mod.id, "SendChatMessage");
@@ -32,6 +41,14 @@ export const ChatPanel = (e: any) => {
     const chatMessages = useValue(chatMessagesBinding);
     const currentUsername = useValue(currentUsernameBinding);
     const localChatMessage = useValue(localChatMessageBinding);
+    const playerListJson = useValue(playerListBinding);
+
+    let players: PlayerRow[] = [];
+    try {
+        players = JSON.parse(playerListJson || "[]");
+    } catch {
+        players = [];
+    }
 
     return (
         <SocialPanelLayout className={styles.socialPanelLayoutContent}>
@@ -41,6 +58,27 @@ export const ChatPanel = (e: any) => {
                    className={LifePathPanelStyle.lifePathPanel}
                    contentClassName={LifePathPanelStyle.content}
                    onClose={e.onClose}>
+                {players.length > 0 && (
+                    <div style={{
+                        display: "flex", flexDirection: "row", flexWrap: "wrap",
+                        padding: "4rem 8rem", alignItems: "center",
+                    }}>
+                        {players.map(pl => (
+                            <div style={{
+                                display: "flex", flexDirection: "row", alignItems: "center",
+                                marginRight: "12rem",
+                            }}>
+                                <div style={{
+                                    width: "10rem", height: "10rem", borderRadius: "5rem",
+                                    backgroundColor: pl.c, marginRight: "4rem",
+                                }}/>
+                                <span style={{fontSize: "13rem"}}>
+                                    {pl.n}{pl.h ? " ⭐" : ` ${pl.p}ms`}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
                 <Scrollable autoScroll={true} smooth={true}>
                     {chatMessages?.map(message => (
                         <div

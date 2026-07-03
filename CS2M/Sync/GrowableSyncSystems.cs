@@ -115,12 +115,14 @@ namespace CS2M.Sync
     public partial class GrowableSuppressSystem : GameSystemBase
     {
         private Game.Simulation.ZoneSpawnSystem _zoneSpawn;
+        private Game.Simulation.DestroyAbandonedSystem _destroyAbandoned;
         private bool _suppressed;
 
         protected override void OnCreate()
         {
             base.OnCreate();
             _zoneSpawn = World.GetOrCreateSystemManaged<Game.Simulation.ZoneSpawnSystem>();
+            _destroyAbandoned = World.GetOrCreateSystemManaged<Game.Simulation.DestroyAbandonedSystem>();
             CS2M.Log.Info("[Grow] GrowableSuppressSystem created");
         }
 
@@ -137,9 +139,12 @@ namespace CS2M.Sync
 
             _suppressed = shouldSuppress;
             _zoneSpawn.Enabled = !shouldSuppress;
+            // v50: abandoned-building teardown is the host's call too — its delete arrives as a
+            // DeleteCommand (synced growables by id; native ones now sync from the host's sim).
+            _destroyAbandoned.Enabled = !shouldSuppress;
             CS2M.Log.Info(shouldSuppress
-                ? "[Grow] client zone spawning SUPPRESSED (host-authoritative growables)"
-                : "[Grow] client zone spawning restored");
+                ? "[Grow] client zone spawning + abandoned teardown SUPPRESSED (host-authoritative growables)"
+                : "[Grow] client zone spawning + abandoned teardown restored");
         }
     }
 }

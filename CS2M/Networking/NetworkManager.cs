@@ -6,6 +6,7 @@ using CS2M.Commands.ApiServer;
 using CS2M.Util;
 using LiteNetLib;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -18,6 +19,19 @@ namespace CS2M.Networking
     public class NetworkManager
     {
         private const string ConnectionKey = "CSM";
+
+        // v50: per-player latency as LiteNetLib reports it (playerId = peer.Id + 1, matching the
+        // relay's SenderId convention). Feeds the host's ~1 Hz roster broadcast.
+        private static readonly Dictionary<int, int> _latencyByPlayerId = new Dictionary<int, int>();
+        private static readonly object _latencyLock = new object();
+
+        public static List<KeyValuePair<int, int>> LatencySnapshot()
+        {
+            lock (_latencyLock)
+            {
+                return new List<KeyValuePair<int, int>>(_latencyByPlayerId);
+            }
+        }
 
         private readonly NetManager _netManager;
         private readonly ApiServer _apiServer;
@@ -272,6 +286,11 @@ namespace CS2M.Networking
         private void ListenerOnPeerDisconnectedEvent(NetPeer peer, DisconnectInfo disconnectInfo)
         {
             Log.Trace($"NetworkManager: OnPeerDisconnectedEvent [PeerId: {peer.Id}]");
+            lock (_latencyLock)
+            {
+                _latencyByPlayerId.Remove(peer.Id + 1);
+            }
+
             if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.CLIENT)
             {
                 // TODO: Use disconnect info
@@ -293,6 +312,10 @@ namespace CS2M.Networking
         private void ListenerOnNetworkLatencyUpdateEvent(NetPeer peer, int latency)
         {
             Log.Trace($"NetworkManager: OnNetworkLatencyUpdateEvent [PeerId: {peer.Id}, Latency: {latency}]");
+            lock (_latencyLock)
+            {
+                _latencyByPlayerId[peer.Id + 1] = latency;
+            }
         }
 
         private void ListenerOnConnectionRequestEvent(ConnectionRequest request)

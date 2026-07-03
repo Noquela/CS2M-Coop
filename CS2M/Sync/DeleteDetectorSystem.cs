@@ -240,8 +240,12 @@ namespace CS2M.Sync
                     // (level-ups, condemned) — only sync those while the player is actively bulldozing.
                     // Everything else (service buildings, trees, props) is a player action from ANY
                     // path, including the info-panel delete button (no bulldozer in hand).
+                    // v50: with host-authoritative growables the HOST's sim owns the stock, so its
+                    // sim-driven demolitions (abandoned teardown…) DO sync; the client keeps the gate.
                     bool growable = EntityManager.HasComponent<SpawnableBuildingData>(prefabEntity);
-                    if (growable && !bulldozing)
+                    bool hostOwnsGrowables = GrowableDetectorSystem.Enabled_
+                        && NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER;
+                    if (growable && !bulldozing && !hostOwnsGrowables)
                     {
                         continue;
                     }

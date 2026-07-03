@@ -60,10 +60,13 @@ namespace CS2M.Sync
 
         private EntityQuery _ownedTiles;
         private int _frame;
+        private Game.Simulation.MapTilePurchaseSystem _purchaseSystem;
+        private int _lastSelectionCost;
 
         protected override void OnCreate()
         {
             base.OnCreate();
+            _purchaseSystem = World.GetOrCreateSystemManaged<Game.Simulation.MapTilePurchaseSystem>();
             _ownedTiles = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -85,6 +88,14 @@ namespace CS2M.Sync
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
                 return;
+            }
+
+            // v50: sample the live selection's price every frame — the purchase clears the
+            // selection, so by the time the ~2 s diff sees the new tiles this holds what was paid.
+            int selCost = _purchaseSystem.cost;
+            if (selCost > 0)
+            {
+                _lastSelectionCost = selCost;
             }
 
             if (++_frame < ScanEveryNFrames)
@@ -128,8 +139,14 @@ namespace CS2M.Sync
                 return;
             }
 
-            Command.SendToAll?.Invoke(new TilePurchaseCommand { Xs = xs.ToArray(), Zs = zs.ToArray() });
-            CS2M.Log.Info($"[Tile] DETECT+SEND purchased tiles={xs.Count}");
+            Command.SendToAll?.Invoke(new TilePurchaseCommand
+            {
+                Xs = xs.ToArray(),
+                Zs = zs.ToArray(),
+                Cost = _lastSelectionCost,
+            });
+            CS2M.Log.Info($"[Tile] DETECT+SEND purchased tiles={xs.Count} cost={_lastSelectionCost}");
+            _lastSelectionCost = 0;
         }
     }
 
@@ -225,6 +242,25 @@ namespace CS2M.Sync
             finally
             {
                 tiles.Dispose();
+            }
+
+            // v50: host-authoritative economy — debit what the buyer paid; the ~1 Hz money sync
+            // then propagates the corrected balance to everyone (same pattern as construction).
+            if (applied > 0 && cmd.Cost > 0
+                && NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
+            {
+                Entity city = World.GetOrCreateSystemManaged<Game.Simulation.CitySystem>().City;
+                if (city != Entity.Null && EntityManager.HasComponent<Game.City.PlayerMoney>(city))
+                {
+                    Game.City.PlayerMoney pm =
+                        EntityManager.GetComponentData<Game.City.PlayerMoney>(city);
+                    if (!pm.m_Unlimited)
+                    {
+                        pm.Subtract(cmd.Cost);
+                        EntityManager.SetComponentData(city, pm);
+                        CS2M.Log.Info($"[Tile] CHARGED cost={cmd.Cost} cash={pm.money}");
+                    }
+                }
             }
 
             CS2M.Log.Info($"[Tile] APPLIED purchased tiles={applied}/{cmd.Xs.Length}");

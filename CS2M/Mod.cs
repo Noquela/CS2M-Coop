@@ -69,6 +69,38 @@ namespace CS2M
 
             ModSupport.Instance.Init();
 
+            // v50: "saved the game" notice — any player's successful save is announced to everyone
+            // via the regular chat command (relayed by the host, so all 3+ players see it).
+            Game.SceneFlow.GameManager.instance.onGameSaveLoad += (saveName, previewUri, start, success) =>
+            {
+                try
+                {
+                    if (start || !success)
+                    {
+                        return;
+                    }
+
+                    var local = Networking.NetworkInterface.Instance.LocalPlayer;
+                    if (local.PlayerStatus != CS2M.API.Networking.PlayerStatus.PLAYING)
+                    {
+                        return;
+                    }
+
+                    string user = string.IsNullOrEmpty(local.Username) ? "Player" : local.Username;
+                    CommandInternal.Instance.SendToAll(new Commands.Data.Internal.ChatMessageCommand
+                    {
+                        Username = Name,
+                        Message = $"💾 {user} saved the game ({saveName})",
+                    });
+                    API.Chat.Instance?.PrintGameMessage($"💾 saved the game ({saveName})");
+                    Log.Info($"[Save] announced save '{saveName}'");
+                }
+                catch (System.Exception ex)
+                {
+                    Log.Info($"[Guard] save notice failed: {ex.Message}");
+                }
+            };
+
             // Patch methods
             var harmony = new Harmony(HarmonyPatchID);
             harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -77,6 +109,8 @@ namespace CS2M
             updateSystem.UpdateBefore<NetworkingSystem>(SystemUpdatePhase.PreSimulation);
             updateSystem.UpdateAt<UISystem>(SystemUpdatePhase.UIUpdate);
             updateSystem.UpdateAt<PlayerCursorSystem>(SystemUpdatePhase.Rendering);
+            // v50: host broadcasts the player roster (names + latency) ~1 Hz for the player panel.
+            updateSystem.UpdateAt<PlayerStatsSenderSystem>(SystemUpdatePhase.Rendering);
 
             // Object placement sync (buildings/props/trees placed with the Object/Line tool).
             // Detector runs just before ModificationEnd (where Applied is visible, matching
@@ -196,11 +230,24 @@ namespace CS2M
             // rename sync). Apply CREATES entities → must run before Modification1 (creation law).
             updateSystem.UpdateBefore<RouteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<RouteApplySystem>(SystemUpdatePhase.Modification1);
+            // v50 NOTE: do NOT add UpdateBefore<RemotePlacementApplySystem, RouteApplySystem> here —
+            // the two-type overload REGISTERS THE SYSTEM A SECOND TIME (anchored on the other), so it
+            // updated twice per frame and its second run destroyed the same frame's injected sub-net/
+            // sub-area definitions before the consumers saw them (v50 selftest crash). The stop-before-
+            // line ordering is handled inside RouteApplySystem instead (1-frame defer on unresolved
+            // SyncId connections).
 
             // EXPERIMENTAL: host-authoritative growables (CS2M_GROWABLE_SYNC=0 disables).
             // Host detects sim spawns before ModificationEnd; clients suppress their zone spawning.
             updateSystem.UpdateBefore<GrowableDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<GrowableSuppressSystem>(SystemUpdatePhase.Rendering);
+
+            // v50: host-authoritative fires (CS2M_FIRE_SYNC=0 disables). Host detects OnFire /
+            // Destroyed transitions; clients suppress local fire sim and mirror the events.
+            // Apply runs before Modification1 (collapse injects a Destroy event the same frame).
+            updateSystem.UpdateBefore<FireDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<FireApplySystem>(SystemUpdatePhase.Modification1);
+            updateSystem.UpdateAt<FireSuppressSystem>(SystemUpdatePhase.Rendering);
 
             // Headless self-test driver. Completely inert unless CS2M_AUTOPILOT is set, so the
             // normal build is unaffected. Runs at UIUpdate (same group as UISystem) so the client

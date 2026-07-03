@@ -57,6 +57,10 @@ namespace CS2M.Sync
         private bool _sentValid; // last state we actually sent (send one "hide" on valid→invalid)
         private int _lastLabelCount;
 
+        // v50: last valid local cursor world position — /ping pings this spot.
+        public static float3 LastLocalCursorPos;
+        public static bool LastLocalCursorValid;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -76,6 +80,7 @@ namespace CS2M.Sync
 
             SendLocalCursor();
             int drawn = DrawRemoteCursorsAndLabels();
+            DrawMapPings();
 
             if (++_logFrame >= LogEveryNFrames)
             {
@@ -113,6 +118,11 @@ namespace CS2M.Sync
 
             _lastValid = valid;
             _lastPos = pos;
+            if (valid)
+            {
+                LastLocalCursorPos = pos;
+                LastLocalCursorValid = true;
+            }
 
             // Don't spam 20 Hz invalid packets while the mouse sits on the UI: send exactly one
             // "hide" packet on the valid→invalid transition, then stay quiet until valid again.
@@ -204,6 +214,44 @@ namespace CS2M.Sync
 
             CleanupRendered(cursors);
             return drawn;
+        }
+
+        /// <summary>v50: pulsing "look here!" markers — expanding rings + a steady center dot,
+        /// colored per pinging player, fading out over the ping's lifetime.</summary>
+        private void DrawMapPings()
+        {
+            List<MapPingSync.Ping> pings = MapPingSync.Snapshot();
+            if (pings.Count == 0)
+            {
+                return;
+            }
+
+            OverlayRenderSystem.Buffer buffer = _overlay.GetBuffer(out JobHandle dependencies);
+            dependencies.Complete();
+
+            System.DateTime now = System.DateTime.UtcNow;
+            foreach (MapPingSync.Ping ping in pings)
+            {
+                float remaining = (float) (ping.ExpiresUtc - now).TotalSeconds;
+                if (remaining <= 0f)
+                {
+                    continue;
+                }
+
+                float age = MapPingSync.LifetimeSeconds - remaining;
+                float fade = math.saturate(remaining / MapPingSync.LifetimeSeconds) * 0.9f + 0.1f;
+                UnityEngine.Color color = CursorOverlay.ColorFor(ping.PlayerId);
+                color.a = fade;
+
+                // Steady dot + two rings expanding on a 1-second cycle, phase-shifted.
+                buffer.DrawCircle(color, ping.Position, 10f);
+                float cycle = age - (float) math.floor(age);
+                var faint = new UnityEngine.Color(color.r, color.g, color.b, fade * (1f - cycle) * 0.8f);
+                buffer.DrawCircle(faint, ping.Position, 20f + cycle * 60f);
+                float cycle2 = cycle + 0.5f > 1f ? cycle - 0.5f : cycle + 0.5f;
+                var faint2 = new UnityEngine.Color(color.r, color.g, color.b, fade * (1f - cycle2) * 0.8f);
+                buffer.DrawCircle(faint2, ping.Position, 20f + cycle2 * 60f);
+            }
         }
 
         private void PushLabels(string json)

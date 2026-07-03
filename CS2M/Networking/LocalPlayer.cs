@@ -24,6 +24,17 @@ namespace CS2M.Networking
         private NetworkManager _networkManager;
         private UISystem _uiSystem;
 
+        // v50 auto-reconnect: when an ESTABLISHED session drops without the user asking, retry the
+        // same connection every few seconds. Rejoining re-runs the full join flow (preconditions +
+        // world transfer), which doubles as an automatic resync.
+        private const int ReconnectMaxTries = 24;      // × 5 s ≈ 2 minutes
+        private const double ReconnectDelaySeconds = 5.0;
+        private ConnectionConfig _lastClientConfig;
+        private bool _intentionalDisconnect;
+        private bool _reconnecting;
+        private int _reconnectTriesLeft;
+        private DateTime _nextReconnectUtc;
+
         public LocalPlayer()
         {
             PlayerStatusChangedEvent += PlayerStatusChanged;
@@ -44,7 +55,10 @@ namespace CS2M.Networking
             _networkManager.NatHolePunchFailedEvent += DirectConnect;
             _networkManager.ClientConnectSuccessfulEvent += ConnectionEstablished;
             _networkManager.ClientConnectFailedEvent += ConnectionFailed;
-            _networkManager.ClientDisconnectEvent += Inactive;
+            _networkManager.ClientDisconnectEvent += OnClientDisconnected;
+
+            _lastClientConfig = connectionConfig;
+            _intentionalDisconnect = false;
 
             if (!_networkManager.InitConnect(connectionConfig))
             {
@@ -102,9 +116,66 @@ namespace CS2M.Networking
 
         public bool ConnectionFailed()
         {
+            if (_reconnecting)
+            {
+                // Host may still be coming back — keep the retry cycle alive.
+                Inactive();
+                ScheduleNextReconnect();
+                return true;
+            }
+
             _uiSystem.SetJoinErrors("CS2M.UI.JoinError.FailedToConnect");
             Inactive();
             return true;
+        }
+
+        /// <summary>v50: connection dropped by the network (NOT via the disconnect button). If we
+        /// were in an established session, start the auto-reconnect cycle; rejoining re-runs the
+        /// world transfer, so the client comes back fully resynced.</summary>
+        private bool OnClientDisconnected()
+        {
+            bool wasEstablished = PlayerStatus == PlayerStatus.PLAYING
+                                  || PlayerStatus == PlayerStatus.LOADING_MAP
+                                  || PlayerStatus == PlayerStatus.DOWNLOADING_MAP
+                                  || PlayerStatus == PlayerStatus.WAITING_TO_JOIN;
+
+            Inactive();
+
+            if (_intentionalDisconnect || !wasEstablished || _lastClientConfig == null)
+            {
+                _reconnecting = false;
+                _reconnectTriesLeft = 0;
+                return true;
+            }
+
+            _reconnecting = true;
+            _reconnectTriesLeft = ReconnectMaxTries;
+            _nextReconnectUtc = DateTime.UtcNow.AddSeconds(ReconnectDelaySeconds);
+            Log.Info($"[Reconnect] connection lost — retrying every {ReconnectDelaySeconds:F0}s (max {ReconnectMaxTries})");
+            API.Chat.Instance?.PrintGameMessage("Connection lost — auto-reconnecting…");
+            return true;
+        }
+
+        private void ScheduleNextReconnect()
+        {
+            if (_reconnectTriesLeft <= 0)
+            {
+                _reconnecting = false;
+                Log.Info("[Reconnect] giving up (no tries left)");
+                API.Chat.Instance?.PrintGameMessage("Reconnect failed — use the join menu to retry.");
+                return;
+            }
+
+            _nextReconnectUtc = DateTime.UtcNow.AddSeconds(ReconnectDelaySeconds);
+        }
+
+        /// <summary>v50: disconnect requested by the user/UI — never auto-reconnect after this.</summary>
+        public bool UserDisconnect()
+        {
+            _intentionalDisconnect = true;
+            _reconnecting = false;
+            _reconnectTriesLeft = 0;
+            return Inactive();
         }
 
         public bool ConnectionEstablished()
@@ -131,6 +202,9 @@ namespace CS2M.Networking
 
         public void PreconditionsError(PreconditionsErrorCommand command)
         {
+            // Structural mismatch (version/mods/DLCs/password) never fixes itself — stop retrying.
+            _reconnecting = false;
+            _reconnectTriesLeft = 0;
             Inactive();
             var errors = new List<string>();
             PreconditionsUtil.Errors err = command.Errors;
@@ -381,6 +455,10 @@ namespace CS2M.Networking
             Sync.RenameSync.Clear();
             Sync.RouteSync.Clear();
             Sync.RemoteStateHashQueue.Clear();
+            Sync.MapPingSync.Clear();
+            Sync.PlayerStatsSync.Clear();
+            Sync.FireSync.Clear();
+            UI.ChatPanel.RefreshPlayerList();
 
             PlayerStatus = PlayerStatus.INACTIVE;
             PlayerType = PlayerType.NONE;
@@ -397,6 +475,19 @@ namespace CS2M.Networking
             if (PlayerStatus != PlayerStatus.INACTIVE)
             {
                 _networkManager.ProcessEvents();
+            }
+            else if (_reconnecting && _reconnectTriesLeft > 0 && DateTime.UtcNow >= _nextReconnectUtc)
+            {
+                // v50 auto-reconnect tick.
+                _reconnectTriesLeft--;
+                int attempt = ReconnectMaxTries - _reconnectTriesLeft;
+                Log.Info($"[Reconnect] attempt {attempt}/{ReconnectMaxTries}");
+                API.Chat.Instance?.PrintGameMessage($"Reconnecting… (attempt {attempt}/{ReconnectMaxTries})");
+                _nextReconnectUtc = DateTime.UtcNow.AddSeconds(ReconnectDelaySeconds);
+                if (!GetServerInfo(_lastClientConfig))
+                {
+                    ScheduleNextReconnect();
+                }
             }
         }
 
@@ -479,6 +570,15 @@ namespace CS2M.Networking
                 API.Commands.Command.SendToAll?.Invoke(
                     new Commands.Data.Game.JoinNoticeCommand { Username = Username, Joining = false });
                 Log.Info($"[Join] SEND joining=false user={Username}");
+
+                // v50: a completed (re)join ends any pending auto-reconnect cycle.
+                if (_reconnecting)
+                {
+                    _reconnecting = false;
+                    _reconnectTriesLeft = 0;
+                    Log.Info("[Reconnect] SUCCESS — session re-established");
+                    API.Chat.Instance?.PrintGameMessage("Reconnected ✔ (world re-synced)");
+                }
             }
         }
 

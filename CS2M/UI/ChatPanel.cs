@@ -45,17 +45,23 @@ namespace CS2M.UI
         public ValueBinding<List<Message>> ChatMessages { get; }
         public ValueBinding<string> CurrentUsername { get; }
         public ValueBinding<string> LocalChatMessage { get; }
+        public ValueBinding<string> PlayerList { get; }
         public TriggerBinding SendChatMessage { get; }
         public TriggerBinding<string> SetLocalChatMessage { get; }
 
         public override LayoutPosition position => LayoutPosition.Right;
 
+        /// <summary>v50: singleton access for systems/handlers (all run on the main thread).</summary>
+        public static ChatPanel Instance { get; private set; }
+
         public ChatPanel()
         {
             Chat.Instance = this;
+            Instance = this;
 
             ChatMessages = new ValueBinding<List<Message>>(Mod.Name, nameof(ChatMessages), new List<Message>(),
                 new ListWriter<Message>(new ValueWriter<Message>()));
+            PlayerList = new ValueBinding<string>(Mod.Name, nameof(PlayerList), "[]");
             CurrentUsername = new ValueBinding<string>(Mod.Name, nameof(CurrentUsername), GetCurrentUsername());
             LocalChatMessage = new ValueBinding<string>(Mod.Name, nameof(LocalChatMessage), string.Empty);
             SendChatMessage = new TriggerBinding(Mod.Name, nameof(SendChatMessage), () => SendMessage());
@@ -98,6 +104,51 @@ namespace CS2M.UI
             if (LocalChatMessage.value != null && LocalChatMessage.value.Trim() == "/validate")
             {
                 Sync.AutopilotSystem.RequestChatValidation();
+                LocalChatMessage.Update(string.Empty);
+                return;
+            }
+
+            // v50 chat command: "/ping" marks the spot under your mouse for everyone ("look here!").
+            if (LocalChatMessage.value != null && LocalChatMessage.value.Trim() == "/ping")
+            {
+                if (Sync.PlayerCursorSystem.LastLocalCursorValid)
+                {
+                    var pos = Sync.PlayerCursorSystem.LastLocalCursorPos;
+                    var ping = new Commands.Data.Game.MapPingCommand
+                    {
+                        X = pos.x, Y = pos.y, Z = pos.z,
+                        Username = username,
+                    };
+                    API.Commands.Command.SendToAll?.Invoke(ping);
+                    Sync.MapPingSync.Add(-1, pos, username); // draw locally too (id -1 = self color slot)
+                    PrintGameMessage($"📍 pinged ({pos.x:F0}, {pos.z:F0})");
+                }
+                else
+                {
+                    PrintGameMessage("Point the mouse at the map, then type /ping.");
+                }
+
+                LocalChatMessage.Update(string.Empty);
+                return;
+            }
+
+            // v50 chat command: "/players" prints the roster (name + latency to host).
+            if (LocalChatMessage.value != null && LocalChatMessage.value.Trim() == "/players")
+            {
+                var stats = Sync.PlayerStatsSync.Get();
+                if (stats?.Ids == null || stats.Ids.Length == 0)
+                {
+                    PrintGameMessage("No roster yet (host broadcasts it every second).");
+                }
+                else
+                {
+                    for (int i = 0; i < stats.Ids.Length; i++)
+                    {
+                        string ms = stats.Ids[i] == 0 ? "host" : $"{stats.Pings[i]} ms";
+                        PrintGameMessage($"• {stats.Names[i]} — {ms}");
+                    }
+                }
+
                 LocalChatMessage.Update(string.Empty);
                 return;
             }
@@ -164,6 +215,52 @@ namespace CS2M.UI
         public void WelcomeChatMessage()
         {
             PrintGameMessage("Welcome to Cities: Skylines 2 Multiplayer!");
+        }
+
+        // Cursor palette in hex (same order as CursorOverlay.Palette) — panel dots match cursors.
+        private static readonly string[] PaletteHex =
+        {
+            "#3399FF", "#FF7333", "#4DD959", "#E64DCC", "#FFD933",
+        };
+
+        /// <summary>v50: pushes the latest roster (PlayerStatsSync) into the player-panel binding.
+        /// Called from the stats handler / host sender — both run on the main thread.</summary>
+        public static void RefreshPlayerList()
+        {
+            ChatPanel panel = Instance;
+            var stats = Sync.PlayerStatsSync.Get();
+            if (panel == null)
+            {
+                return;
+            }
+
+            if (stats?.Ids == null)
+            {
+                panel.PlayerList.Update("[]");
+                return;
+            }
+
+            var sb = new System.Text.StringBuilder(128);
+            sb.Append('[');
+            for (int i = 0; i < stats.Ids.Length; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append(',');
+                }
+
+                int id = stats.Ids[i];
+                string color = PaletteHex[((id % PaletteHex.Length) + PaletteHex.Length) % PaletteHex.Length];
+                string name = (stats.Names != null && i < stats.Names.Length ? stats.Names[i] : "?") ?? "?";
+                int ping = stats.Pings != null && i < stats.Pings.Length ? stats.Pings[i] : 0;
+                sb.Append("{\"n\":\"").Append(name.Replace("\\", "\\\\").Replace("\"", "\\\""))
+                    .Append("\",\"p\":").Append(ping)
+                    .Append(",\"h\":").Append(id == 0 ? "true" : "false")
+                    .Append(",\"c\":\"").Append(color).Append("\"}");
+            }
+
+            sb.Append(']');
+            panel.PlayerList.Update(sb.ToString());
         }
     }
 }

@@ -69,17 +69,10 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Game.Citizens.Household>(),
                     ComponentType.ReadOnly<Game.Vehicles.Vehicle>(),
                     ComponentType.ReadOnly<Game.Common.Event>(),
-                    ComponentType.ReadOnly<Game.Routes.TransportStop>(),
+                    // v50: standalone stop OBJECTS (bus stop shelters, taxi stands, mailboxes…) are
+                    // real placeable objects and DO sync now — only route ELEMENTS stay excluded.
                     ComponentType.ReadOnly<Game.Routes.TransportLine>(),
-                    ComponentType.ReadOnly<Game.Routes.TramStop>(),
-                    ComponentType.ReadOnly<Game.Routes.TrainStop>(),
-                    ComponentType.ReadOnly<Game.Routes.AirplaneStop>(),
-                    ComponentType.ReadOnly<Game.Routes.BusStop>(),
-                    ComponentType.ReadOnly<Game.Routes.ShipStop>(),
-                    ComponentType.ReadOnly<Game.Routes.TakeoffLocation>(),
-                    ComponentType.ReadOnly<Game.Routes.TaxiStand>(),
                     ComponentType.ReadOnly<Game.Routes.Waypoint>(),
-                    ComponentType.ReadOnly<Game.Routes.MailBox>(),
                     ComponentType.ReadOnly<Game.Routes.WaypointDefinition>(),
                 },
             });
@@ -180,6 +173,26 @@ namespace CS2M.Sync
                         Elevation elevation = EntityManager.GetComponentData<Elevation>(entity);
                         cmd.Elevation = elevation.m_Elevation;
                         cmd.ElevationFlags = (byte) elevation.m_Flags;
+                    }
+
+                    // v50: road-side attachments (stop shelters, taxi stands, mailboxes…) — ship the
+                    // exact point on the parent edge's curve so the receiver re-attaches to the SAME
+                    // edge. Reuses OwnerX/Y/Z, which extensions use for buildings (this entity has no
+                    // Owner, so the receiver can't confuse the two: OwnerPrefabName stays empty).
+                    if (EntityManager.HasComponent<Attached>(entity))
+                    {
+                        Attached att = EntityManager.GetComponentData<Attached>(entity);
+                        if (att.m_Parent != Entity.Null
+                            && EntityManager.HasComponent<Game.Net.Curve>(att.m_Parent))
+                        {
+                            Game.Net.Curve curve =
+                                EntityManager.GetComponentData<Game.Net.Curve>(att.m_Parent);
+                            float3 onCurve = Colossal.Mathematics.MathUtils.Position(
+                                curve.m_Bezier, att.m_CurvePosition);
+                            cmd.OwnerX = onCurve.x;
+                            cmd.OwnerY = onCurve.y;
+                            cmd.OwnerZ = onCurve.z;
+                        }
                     }
 
                     // Stamp a cross-PC id on our own entity and ship it so the other PC's copy

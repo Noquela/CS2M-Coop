@@ -1,8 +1,9 @@
-# CS2M-Coop — Documento de Estado (v1.0.49.0)
+# CS2M-Coop — Documento de Estado (v1.0.50.0)
 
 > **Este é o documento canônico do projeto.** Ele existe para que qualquer pessoa (ou sessão de IA
 > com contexto compactado) reconstrua o estado inteiro do fork a partir daqui. Última revisão
-> completa: 2026-07-02, release v1.0.49.0 (`51daac9`).
+> completa: 2026-07-02, release v1.0.50.0 (roadmap completo: paradas, ping/painel, incêndios
+> host-auth, auto-reconexão, custo de tile, aviso de save, supressão weather/condemned/abandoned).
 
 ---
 
@@ -18,7 +19,7 @@ adiciona sincronização de gameplay completa para **Cities: Skylines II 1.5.3f1
 | Mod deployado (PC do Bruno) | `C:\Users\Bruno\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2M` |
 | Jogo | `C:\JogosCrackeados\Cities.Skylines.II.v1.5.3f1\game` (crack RUNE: **1 instância só**; single-instance NÃO deve ser burlado) |
 | Log do mod | `...\Cities Skylines II\Logs\CS2M.log` (alto volume atrás de `CS2M_VERBOSE=1`) |
-| Zip de release | `C:\Users\Bruno\Desktop\CS2M_v49.zip` (conteúdo da pasta do mod sem `.claude`) |
+| Zip de release | `C:\Users\Bruno\Desktop\CS2M_v50.zip` (conteúdo da pasta do mod sem `.claude`) |
 
 **Regra de ouro do multiplayer**: todos os jogadores na MESMA versão (precondition bloqueia).
 Bruno joga com 2 amigos (3 jogadores — suportado desde a v43).
@@ -55,6 +56,14 @@ sessão), prefab+posição (nativos), prefab+número (linhas).
 | Renomear (prédio/distrito/linha) | `NameSystem` por identidade | v48 |
 | **Linhas de transporte** | criar/re-rotear/deletar/cor/número; waypoints completos; paradas por SyncId/posição; receptor constrói dos `RouteData` archetypes; eco por hash de waypoints; número aplicado com delay de 3 frames (InitializeSystem numera antes) | v49 |
 | Clima + relógio | overrides do `ClimateSystem` + realinhamento `TimeData.m_FirstFrame` (~0,5 Hz) | v42 |
+| **Paradas/objetos roadside** (abrigo de ônibus, taxi stand, mailbox…) | detector deixou de excluir stop-objects; hint = ponto na curva do edge parent (reusa OwnerX/Y/Z, protocolo intacto); apply resolve o edge (dist 3D ≤16 m) e seta `Attached` — `AttachSystem.UpdateAttachedReferences` registra o `SubObject` no edge; `UpdateBefore<RemotePlacementApply, RouteApply>` garante parada-antes-da-linha no mesmo frame | v50 |
+| **Incêndios host-autoritativos** (`CS2M_FIRE_SYNC=0` desliga) | host detecta transições `OnFire`/`Destroyed` (snapshot-diff 0,5 s; baseline silencioso p/ rubble de save) → `FireSyncCommand` kind=start/end/collapse; cliente espelha add/remove `OnFire`+`BatchesUpdated` e no colapso injeta **evento `Destroy` real** (DestroySystem local faz o teardown vanilla); cliente suprime `FireHazard`/`FireSimulation`/`FireRescueDispatch` | v50 |
+| **Danos da sim host-auth (garimpo)** | cliente suprime também `WeatherDamage`/`WeatherHazard` (raios) e `CondemnedBuilding`/`DestroyAbandoned` (demolições da sim); host com growable-sync manda deletes de growables NATIVOS demolidos pela sim (gate de bulldozer não se aplica ao host) | v50 |
+| **Ping no mapa** (`/ping` no chat) | `MapPingCommand` relayado; marcador pulsante 8 s no overlay (cor do jogador) + linha no chat; pinga onde o cursor local aponta | v50 |
+| **Painel de jogadores** | host broadcasta `PlayerStatsCommand` ~1 Hz (nome + latência LiteNetLib por peer); faixa no topo do chat (bolinha na cor do cursor + nome + ms) + `/players` imprime no chat | v50 |
+| **Auto-reconexão** | queda de sessão estabelecida (não intencional) → re-join automático a cada 5 s por até 2 min com a MESMA config; re-join = world transfer = resync completo; cancela em preconditions error ou disconnect manual (`UserDisconnect`) | v50 |
+| **Custo de tile espelhado** | comprador sampleia `MapTilePurchaseSystem.cost` da seleção viva por frame e manda `Cost` no comando; host debita do saldo compartilhado | v50 |
+| **Aviso "salvou o jogo"** | `GameManager.onGameSaveLoad` (start=false, success) → `ChatMessageCommand` relayado "💾 X saved the game (nome)" | v50 |
 | Velocidade/pause | host-autoritativo, **reforço por frame** (a UI vanilla reescreve `selectedSpeed`) | fork/v38 |
 | Cursor + nome | círculo overlay + label cohtml (slot `Game`, absolute 100%, rem; hide/stale 3 s) | fork/v38 |
 | 3+ jogadores | **relay estrela no host** (RelayOnServer implementado; upstream só tinha a flag) + `SenderId = peer.Id+1` | v43 |
@@ -97,6 +106,17 @@ growables host-auth + `/resync`. Rádio/foto/câmera são locais.
 8. **NUNCA lançar `Cities2.exe` com DLL do mod no CWD** (Mono sonda o CWD → registro de mods quebra
    com `NotSupportedException`). Lançar sempre da pasta do jogo.
 9. **Comando ruim não pode matar sistema**: todo drain de fila tem `try/catch` `[Guard]`.
+10. **NUNCA usar `updateSystem.UpdateBefore<A, B>(phase)` (overload de 2 tipos)**: ele REGISTRA o
+    sistema A uma 2ª vez (ancorado em B) → A atualiza 2×/frame. Com estado por frame
+    (`_pendingDefinitions`!) a 2ª execução destrói as definições injetadas ANTES dos consumidores
+    → foi o crash do selftest v50. Ordem entre nossos applies = resolver com defer/retry interno.
+11. **Rotas sincadas: SEM `Applied`, com `RouteBufferIndex = -1`**: o `RouteBufferSystem`
+    (render) só inicializa buffers de chunks `Created && !Applied`; com Applied a rota fica com o
+    index default 0 apontando pro buffer de OUTRA linha → NRE/corrupção no renderer (Critical no
+    Player.log que passava despercebido desde a v49 — o jogo cata e segue, mas mata o render).
+    Sempre checar o Player.log por "CRITICAL" além do CS2M.log.
+12. **Alvos de teste do selftest**: prédio plopado em solo sem zona é CONDENADO e demolido pela
+    sim ~40-60 s depois — testes tardios (fire) usam prédios NATIVOS do save.
 
 ---
 
@@ -118,21 +138,25 @@ dotnet build CS2M/CS2M.csproj -c Release -p:AssemblyVersion=1.0.N.0 -p:FileVersi
 # bump: manter <Version> no csproj igual ao release (builds manuais identificáveis)
 ```
 
-### 1) Protocolo (sem jogo, ~10 s) — `cd tests/protocol && dotnet run -c Release` → **31/31**.
+### 1) Protocolo (sem jogo, ~10 s) — `cd tests/protocol && dotnet run -c Release` → **34/34**.
 
-### 2) Selftest in-game (1 instância, ~8 min) — 25 checks
+### 2) Selftest in-game (1 instância, ~9 min) — 28 checks
 ```bash
 cd "C:/JogosCrackeados/Cities.Skylines.II.v1.5.3f1/game"   # CWD = pasta do jogo (lei 8!)
 export CS2M_AUTOPILOT=selftest CS2M_AP_TEST=1
 ./Cities2.exe -continuelastsave
 # aguardar "scripted test DONE" no CS2M.log; resultados: grep "\[Auto\] RESULT"
 ```
-Passos 0-23: role, money, xp, tree, building, move, zone, net(real-build: composição+conexão+
+Passos 0-26: role, money, xp, tree, building, move, zone, net(real-build: composição+conexão+
 blocos), net-delete, net-upgrade(estrada!), delete, tax, budget, district, water, terrain, policy,
-pause(freeze por frameIndex)+sabotagem+resume, devtree, env+native-delete, tile, **route**.
+pause(freeze por frameIndex)+sabotagem+resume, devtree, env+native-delete, tile, **route**,
+**stop-attach** (parada roadside atada ao edge), **fire-start** + **fire-collapse** (OnFire
+espelhado; colapso via evento Destroy → teardown vanilla).
 Validações NÃO-circulares (efeito real do mundo, nunca o valor escrito).
 
 ### 3) `/validate` no chat — mesma suíte em sessão aberta, PASS/FAIL no chat (modifica a cidade!).
+(v50 fix: o /validate estava PRESO no passo 19 desde a v40 — pulava devtree/env/tile/route em
+silêncio; agora acompanha a suíte completa.)
 
 ### 4) cs2m-bot (`tools/bot`, net48) — cliente headless com o protocolo REAL
 ```bash
@@ -147,25 +171,34 @@ Auto-calibra preconditions pelo eco de erro do servidor. Bateria v49: regressão
 
 ---
 
-## 4. Roadmap acordado (próximos, em ordem)
+## 4. Roadmap — TODOS OS ITENS ACORDADOS ENTREGUES NA v50 ✅
 
-1. **Paradas de ônibus criadas durante o desenho da linha** — verificar se a parada nova existe no
-   receptor; se não, sincar criação de `TransportStop` (fecha o transporte 100%).
-2. **Ping no mapa** ("olha aqui") + **painel de jogadores** (online/cor/ping) — coop-feel.
-3. **Incêndios/desastres host-autoritativos** — ignição sincada, cliente suprime aleatórias
-   (mata a última fonte grande de drift de nativos).
-4. **Auto-reconexão** com resync automático.
-5. Menores: aviso "host salvou", chirper compartilhado, fantasma de câmera, otimizar buscas O(n)
-   com o quadtree do jogo (`SearchSystem`), custo de tile espelhado no host.
+1. ✅ Paradas/objetos roadside (o "gap das paradas" real: linha em rua virgem já sincava desde a
+   v49 — waypoint sem conexão É a parada lógica; o que faltava eram os stop-OBJECTS colocáveis).
+2. ✅ Ping no mapa (`/ping`) + painel de jogadores (faixa no chat + `/players`).
+3. ✅ Incêndios host-autoritativos (+ garimpo: weather damage/raios, condemned e abandoned
+   teardown também viraram decisão do host).
+4. ✅ Auto-reconexão com resync automático (re-join = world transfer).
+5. ✅ Aviso "salvou o jogo"; ✅ custo de tile espelhado.
+
+Avaliados e conscientemente NÃO feitos:
+- Chirper compartilhado (ruído alto, valor baixo), fantasma de câmera (cursor já cobre 90%).
+- Quadtree nas buscas O(n): as buscas rodam só em apply de clique humano (~ms por evento em
+  cidade grande) — risco de bug > ganho. Reavaliar só se aparecer hitch real em campo.
 
 ## 5. Dívidas/notas conhecidas
-- Cost de tiles não espelhado (cliente compra "de graça" no saldo do host) — anotado no código.
+- **v50 não validada em campo ainda** — validar com os 3 jogadores: paradas roadside, fogo
+  host-auth (por padrão ON; `CS2M_FIRE_SYNC=0` desliga), auto-reconexão (derrubar wifi de um
+  cliente no meio do jogo), painel/ping.
 - Move de nativos: v48 (pré-move via Temp) — validar em campo.
 - Growables host-auth: EXPERIMENTAL — se duplicar prédio/lote teimoso, `CS2M_GROWABLE_SYNC=0`.
+- Bombeiros do CLIENTE não despacham (dispatch suprimido; fogo é 100% do host) — cosmético.
 - Selftest roda com save carregado via `-continuelastsave` (autosaves de runs sem mod são ok).
 - ilspycmd: sempre `-t Tipo` (nunca `-o`); dumps de decompile antigos em pasta temp de sessão.
 
-## 6. Ferramentas do jogo × cobertura (auditoria v49)
+## 6. Ferramentas do jogo × cobertura (auditoria v50)
 Object✅ Net✅ Zone✅ Terrain✅ Water✅ Bulldoze(obj/net/área)✅ Area(distrito/trabalho/superfície)✅
-Upgrade(replace)✅ Route✅ Selection/Default n/a. UI: tax✅ budget✅ policy(3 escopos)✅ devtree✅
-tiles✅ loans✅ rename✅ — pendente: paradas novas de linha (item 1 do roadmap).
+Upgrade(replace)✅ Route✅ Stops/roadside✅ Selection/Default n/a. UI: tax✅ budget✅
+policy(3 escopos)✅ devtree✅ tiles✅(+custo) loans✅ rename✅ ping✅ painel✅ — sem pendências
+conhecidas de ferramenta/UI. Sim-driven: growables✅(exp) fire✅ weather-damage✅ condemned✅
+abandoned✅ — não-sincável por design: cidadãos/veículos/tráfego individuais.

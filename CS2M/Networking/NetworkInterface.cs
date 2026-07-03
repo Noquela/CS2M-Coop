@@ -88,7 +88,8 @@ namespace CS2M.Networking
 
         public void StopServer()
         {
-            LocalPlayer.Inactive();
+            // User-initiated stop/leave — must not trigger the auto-reconnect cycle.
+            LocalPlayer.UserDisconnect();
         }
 
         public void SendToAll(CommandBase message)

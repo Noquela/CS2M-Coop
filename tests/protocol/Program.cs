@@ -91,7 +91,34 @@ namespace CS2MTests
 
     public class DevTreeCommand : CommandBase { public string NodeName { get; set; } }
 
-    public class TilePurchaseCommand : CommandBase { public float[] Xs { get; set; } public float[] Zs { get; set; } }
+    public class TilePurchaseCommand : CommandBase { public float[] Xs { get; set; } public float[] Zs { get; set; } public int Cost { get; set; } }
+
+    // --- v50 commands ---
+    public class MapPingCommand : CommandBase
+    {
+        public float X { get; set; }
+        public float Y { get; set; }
+        public float Z { get; set; }
+        public string Username { get; set; }
+    }
+
+    public class PlayerStatsCommand : CommandBase
+    {
+        public int[] Ids { get; set; }
+        public string[] Names { get; set; }
+        public int[] Pings { get; set; }
+    }
+
+    public class FireSyncCommand : CommandBase
+    {
+        public byte Kind { get; set; }
+        public ulong TargetSyncId { get; set; }
+        public string PrefabName { get; set; }
+        public float PosX { get; set; }
+        public float PosY { get; set; }
+        public float PosZ { get; set; }
+        public float Intensity { get; set; }
+    }
 
     public class LoanCommand : CommandBase { public int Amount { get; set; } }
 
@@ -357,7 +384,12 @@ namespace CS2MTests
             RoundTrip(opts, new ResyncCommand(), c => true);
             RoundTrip(opts, new NetDeleteCommand { StartX = 3644f, StartZ = 7096f, EndX = 3835f, EndZ = 7100f }, c => Math.Abs(c.StartX - 3644f) < 0.01f && Math.Abs(c.EndZ - 7100f) < 0.01f);
             RoundTrip(opts, new NetUpgradeCommand { StartX = 1f, EndX = 2f, General = 0u, Left = 0x1000u, Right = 0u }, c => c.Left == 0x1000u && c.General == 0u);
-            RoundTrip(opts, new TilePurchaseCommand { Xs = new[] { 100f, 200f }, Zs = new[] { -100f, -200f } }, c => c.Xs.Length == 2 && c.Zs[1] == -200f);
+            RoundTrip(opts, new TilePurchaseCommand { Xs = new[] { 100f, 200f }, Zs = new[] { -100f, -200f }, Cost = 44000 }, c => c.Xs.Length == 2 && c.Zs[1] == -200f && c.Cost == 44000);
+
+            // --- v50 commands ---
+            RoundTrip(opts, new MapPingCommand { X = -321.5f, Y = 480f, Z = 1204.25f, Username = "Bruno" }, c => c.Username == "Bruno" && Math.Abs(c.Z - 1204.25f) < 0.01f);
+            RoundTrip(opts, new PlayerStatsCommand { Ids = new[] { 0, 1, 2 }, Names = new[] { "Host", "Amigo1", "Amigo2" }, Pings = new[] { 0, 45, 120 } }, c => c.Ids.Length == 3 && c.Names[2] == "Amigo2" && c.Pings[1] == 45);
+            RoundTrip(opts, new FireSyncCommand { Kind = 2, TargetSyncId = 0UL, PrefabName = "Residential High 03", PosX = 15.5f, PosY = 478f, PosZ = -92.75f, Intensity = 0.85f }, c => c.Kind == 2 && c.PrefabName == "Residential High 03" && Math.Abs(c.Intensity - 0.85f) < 0.001f);
             RoundTrip(opts, new LoanCommand { Amount = 250000 }, c => c.Amount == 250000);
             RoundTrip(opts, new RenameCommand { TargetKind = 1, Number = 3, TargetPrefabName = "Bus Line", Name = "Linha Centro" }, c => c.TargetKind == 1 && c.Name == "Linha Centro");
             RoundTrip(opts, new AreaEditCommand { OwnerPrefabName = "GrainFarm01", PrefabName = "Grain Field", Xs = new[] { 1f, 2f, 3f }, Ys = new[] { 0f, 0f, 0f }, Zs = new[] { 4f, 5f, 6f }, Els = new[] { -3.4e38f, 0f, 0f }, Delete = false, CenterX = 2f, CenterZ = 5f }, c => c.PrefabName == "Grain Field" && c.Xs.Length == 3 && c.CenterZ == 5f);

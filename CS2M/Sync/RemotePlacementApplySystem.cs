@@ -153,6 +153,32 @@ namespace CS2M.Sync
                 SetOrAdd(obj, new Elevation(cmd.Elevation, (ElevationFlags) cmd.ElevationFlags));
             }
 
+            // v50: road-side attachment (bus-stop shelters, taxi stands, mailboxes…). The baked
+            // archetype does NOT carry Attached (the tool adds it at placement time) — so decide by
+            // the prefab's placement flags and ADD it ourselves. AttachSystem skips RoadSide prefabs
+            // in its find-parent job (the tool resolves those), so we resolve the edge from the
+            // shipped point-on-curve hint; AttachSystem's reference job then registers the
+            // SubObject on the edge because the entity is Updated.
+            if (string.IsNullOrEmpty(cmd.OwnerPrefabName) && cmd.OwnerSyncId == 0
+                && NeedsEdgeAttach(prefabEntity))
+            {
+                var hint = new float3(cmd.OwnerX, cmd.OwnerY, cmd.OwnerZ);
+                if (hint.x == 0f && hint.z == 0f)
+                {
+                    hint = position; // old-version sender: fall back to the stop's own position
+                }
+
+                if (FindNearestEdge(hint, out Entity edge, out float curvePos, out float dist))
+                {
+                    SetOrAdd(obj, new Attached(edge, Entity.Null, curvePos));
+                    CS2M.Log.Info($"[Place] ATTACHED name={cmd.PrefabName} edge={edge.Index} t={curvePos:F3} d={dist:F1}");
+                }
+                else
+                {
+                    CS2M.Log.Info($"[Place] WARN no edge to attach name={cmd.PrefabName} (stop stays loose)");
+                }
+            }
+
             // v44: service-building extension — attach to the resolved owner; the game's
             // ServiceUpgradeSystem (reacting to Created+Owner, and we run before Mod1) then wires
             // InstalledUpgrade and the upgrade's effects on the parent itself.
@@ -341,6 +367,84 @@ namespace CS2M.Sync
             {
                 ents.Dispose();
             }
+        }
+
+        /// <summary>True for objects that live attached to a net edge: any transport-stop prefab
+        /// (bus/tram/taxi stop objects — EU_TaxiStop02 ships without the RoadSide flag, learned in
+        /// the selftest) plus the road-side placement flags AttachSystem's find-parent job skips.</summary>
+        private bool NeedsEdgeAttach(Entity prefabEntity)
+        {
+            if (EntityManager.HasComponent<Game.Prefabs.TransportStopData>(prefabEntity))
+            {
+                return true;
+            }
+
+            if (!EntityManager.HasComponent<PlaceableObjectData>(prefabEntity))
+            {
+                return false;
+            }
+
+            // NOT OwnerSide — that means "attach beside the OWNER object" (transformers etc.),
+            // and snapping those to the nearest road would be wrong.
+            Game.Objects.PlacementFlags flags =
+                EntityManager.GetComponentData<PlaceableObjectData>(prefabEntity).m_Flags;
+            return (flags & (Game.Objects.PlacementFlags.RoadSide
+                             | Game.Objects.PlacementFlags.Shoreline)) != 0;
+        }
+
+        /// <summary>Nearest live net edge to a world point (3D distance along the curve — depth
+        /// separates surface roads from buried pipes). Returns the curve parameter for Attached.</summary>
+        private bool FindNearestEdge(float3 point, out Entity edge, out float curvePos, out float dist)
+        {
+            edge = Entity.Null;
+            curvePos = 0f;
+            dist = float.MaxValue;
+
+            EntityQuery edges = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Net.Edge>(),
+                    ComponentType.ReadOnly<Game.Net.Curve>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
+            });
+
+            Unity.Collections.NativeArray<Entity> ents = edges.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    Game.Net.Curve curve = EntityManager.GetComponentData<Game.Net.Curve>(cand);
+                    // Cheap reject: point far outside the segment's bounding reach.
+                    float reach = curve.m_Length * 0.5f + 20f;
+                    float3 mid = MathUtils.Position(curve.m_Bezier, 0.5f);
+                    if (math.distancesq(mid, point) > reach * reach)
+                    {
+                        continue;
+                    }
+
+                    // MathUtils.Distance RETURNS the distance and outputs the curve parameter.
+                    float t;
+                    float d = MathUtils.Distance(curve.m_Bezier, point, out t);
+                    if (d < dist)
+                    {
+                        dist = d;
+                        curvePos = t;
+                        edge = cand;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return edge != Entity.Null && dist <= 16f;
         }
 
         /// <summary>Resolve the extension's parent building: synced id first, else nearest

@@ -23,6 +23,12 @@ namespace CS2M.Sync
             new UColor(1.00f, 0.85f, 0.20f), // yellow
         };
 
+        /// <summary>Stable per-player color (same palette as cursors — pings match the cursor).</summary>
+        public static UColor ColorFor(int playerId)
+        {
+            return Palette[((playerId % Palette.Length) + Palette.Length) % Palette.Length];
+        }
+
         public static void DrawCursor(OverlayRenderSystem.Buffer buffer, int playerId, float3 position)
         {
             UColor color = Palette[((playerId % Palette.Length) + Palette.Length) % Palette.Length];
