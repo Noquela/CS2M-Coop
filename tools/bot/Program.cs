@@ -512,6 +512,22 @@ namespace CS2MBot
             Log("[6] objeto: arvore"); Pump(2000);
             if (!Alive("objeto")) { return Done(false); }
 
+            // 7. CONCORRENCIA: duas ruas identicas no mesmo instante, SEM pump entre elas — simula
+            // dois players desenhando em cima um do outro ao mesmo tempo (chegam no mesmo batch).
+            // O dedup por posicao (v54) tem que segurar a segunda mesmo com SyncIds diferentes.
+            Log("[7] concorrencia: 2x a MESMA rua sem intervalo (dois players no mesmo ponto)");
+            Road(sb | (ulong)++step, 500, 500, 560, 500);
+            Road(sb | (ulong)++step, 500, 500, 560, 500);
+            Pump(3500);
+            if (!Alive("concorrencia (2x mesma rua)")) { return Done(false); }
+
+            // 8. CONCORRENCIA cruzada: duas ruas que se cruzam, disparadas juntas (split simultaneo).
+            Log("[8] concorrencia cruzada: 2 ruas que se cruzam, no mesmo instante");
+            Road(sb | (ulong)++step, 520, 470, 520, 530);
+            Road(sb | (ulong)++step, 490, 500, 550, 500);
+            Pump(3500);
+            if (!Alive("concorrencia cruzada")) { return Done(false); }
+
             Send(new ChatMessageCommand { Username = _username, Message = "bot hunt done" });
             Log("aguardando o InvariantCheck do host varrer pos-cenarios (25s)...");
             Pump(25000);
