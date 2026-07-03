@@ -528,6 +528,37 @@ namespace CS2MBot
             Pump(3500);
             if (!Alive("concorrencia cruzada")) { return Done(false); }
 
+            // 9. juncao estrela: 4 ruas encontrando no MESMO ponto (grau 4+ num no).
+            Log("[9] juncao estrela: 4 ruas num ponto (600,600)");
+            Road(sb | (ulong)++step, 560, 600, 600, 600);
+            Road(sb | (ulong)++step, 600, 600, 640, 600);
+            Road(sb | (ulong)++step, 600, 560, 600, 600);
+            Road(sb | (ulong)++step, 600, 600, 600, 640);
+            Pump(4000);
+            if (!Alive("juncao estrela (4 vias)")) { return Done(false); }
+
+            // 10. RACE place/delete: coloca A, coloca B em cima, deleta A — tudo junto (mesmo batch).
+            Log("[10] race: A + B sobreposta + delete de A no mesmo instante");
+            ulong ra = sb | (ulong)++step;
+            Road(ra, 700, 600, 760, 600);
+            Pump(200);
+            Road(sb | (ulong)++step, 700, 600, 760, 600);
+            Send(new DeleteCommand { SyncId = ra });
+            Pump(3500);
+            if (!Alive("race place/delete sobreposto")) { return Done(false); }
+
+            // 11. re-colocacao: place -> delete -> place a MESMA rua (id novo) — o guard nao pode
+            // deixar sobra nem recusar a rua legitima depois do delete.
+            Log("[11] re-colocacao: place -> delete -> place a mesma");
+            ulong rc = sb | (ulong)++step;
+            Road(rc, 700, 660, 760, 660);
+            Pump(800);
+            Send(new DeleteCommand { SyncId = rc });
+            Pump(800);
+            Road(sb | (ulong)++step, 700, 660, 760, 660);
+            Pump(3500);
+            if (!Alive("re-colocacao apos delete")) { return Done(false); }
+
             Send(new ChatMessageCommand { Username = _username, Message = "bot hunt done" });
             Log("aguardando o InvariantCheck do host varrer pos-cenarios (25s)...");
             Pump(25000);
