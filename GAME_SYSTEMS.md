@@ -331,7 +331,24 @@ esse continua sendo o jeito certo para o caso "receptor constrói rua nova que e
 MAS o padrão dele (mover = update do existente + `ConnectedEdge` para topologia) é o certo para o
 caminho de MOVE/EDIT, e vale conferir se o `MoveDetector/RemoteEditApply` recria em vez de atualizar.
 
-> Próxima ação concreta desta trilha (ainda não feita): (1) trocar a enumeração de junção por
-> `ConnectedEdge` no split e no InvariantCheck; (2) auditar se o sync de "mover objeto/nó" atualiza o
-> entity existente em vez de recriar; (3) clonar `Krzychu124/Cities2-Traffic` e ver o tratamento de
-> lanes/conexões. Fonte clonada em cache: `scratchpad/CS2-MoveIt`.
+> Próxima ação concreta desta trilha: (1) trocar a enumeração de junção por `ConnectedEdge` no split
+> e no InvariantCheck; (2) clonar `Krzychu124/Cities2-Traffic` e ver o tratamento de lanes/conexões.
+> Fonte MoveIt clonada em cache: `scratchpad/CS2-MoveIt`.
+
+---
+
+## 13. Auditoria de fidelidade dos apply-paths (verificado contra o padrão vanilla)
+
+Confrontei os caminhos de aplicação do CS2M com os padrões vanilla acima. Resultado:
+
+| Caminho | Padrão esperado | Verificado |
+|---|---|---|
+| **Mover objeto** (`RemoteEditApplySystem.ApplyMove`) | resolver entity existente + `SetComponentData(Transform)` + `Updated`+`BatchesUpdated`; NÃO recriar | ✅ **correto** — é exatamente o padrão MoveIt (update in-place, topologia preservada). Nós/segmentos de rede não são movíveis sem MoveIt, então não há gap. |
+| **Deletar prédio/objeto** | cascata pelos filhos `Owner` (senão "pedaço no chão") | ✅ **correto** — deleções reais usam `CascadeDeleteUtil.DeleteWithChildren`; os `AddComponent<Deleted>` bare são só em entidades sem filhos-Owner (definições rejeitadas recém-criadas, edges no split, eventos de fogo, fontes d'água, rotas, áreas, limpeza de teste). |
+| **Criar rua c/ junção T/X** | dividir edge existente no ponto de junção (o pipeline Permanent não conecta) | ✅ **correto** — `NetPlaceApplySystem` faz split manual; selftest `net-tee` = 1 nó / 3 edges. |
+| **Sub-objetos derivados** | não re-sincar (os dois PCs geram) | ✅ **correto** — filtra por `ServiceUpgradeData`/`BuildingExtensionData`. |
+
+Conclusão: os apply-paths seguem os padrões vanilla corretos. A incerteza residual de sync está só
+na interação das **duas simulações vivas** (que só o teste de 3 jogadores expõe) — e para isso o
+`StateHashSystems` (divergência por hash de conteúdo) + wire-tap estão armados para pegar qualquer
+resíduo em campo. Ver §11.
