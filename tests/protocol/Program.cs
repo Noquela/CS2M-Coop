@@ -262,6 +262,24 @@ namespace CS2MTests
         public string Username { get; set; }
     }
 
+    public class ToolPreviewCommand : CommandBase
+    {
+        public bool Active { get; set; }
+        public string Username { get; set; }
+        public float Ax { get; set; }
+        public float Ay { get; set; }
+        public float Az { get; set; }
+        public float Bx { get; set; }
+        public float By { get; set; }
+        public float Bz { get; set; }
+        public float Cx { get; set; }
+        public float Cy { get; set; }
+        public float Cz { get; set; }
+        public float Dx { get; set; }
+        public float Dy { get; set; }
+        public float Dz { get; set; }
+    }
+
     // ---- New sync commands added by the fork (byte-for-byte copies of the mod's POCOs) ----
     public class TaxSyncCommand : CommandBase { public int[] Rates { get; set; } }
 
@@ -398,6 +416,7 @@ namespace CS2MTests
             RoundTrip(opts, new ZonePaintCommand { BlockX = 100f, BlockZ = 200f, SizeX = 6, SizeY = 4, CellIndices = new[] { 0, 5, 11, 23 }, ZoneNames = new[] { "EU Residential Low", "", "EU Commercial", "EU Residential Low" } }, c => c.CellIndices.Length == 4 && c.CellIndices[2] == 11 && c.ZoneNames[1] == "" && c.ZoneNames[2] == "EU Commercial");
             RoundTrip(opts, new JoinNoticeCommand { Username = "Bruno", Joining = true }, c => c.Username == "Bruno" && c.Joining);
             RoundTrip(opts, new PlayerCursorCommand { X = 1.5f, Z = 2.5f, Valid = true, Username = "amigo" }, c => c.Username == "amigo" && c.Valid && c.X == 1.5f);
+            RoundTrip(opts, new ToolPreviewCommand { Active = true, Username = "amigo", Ax = 200f, Az = 200f, Dx = 296f, Dz = 200f }, c => c.Active && c.Username == "amigo" && c.Ax == 200f && c.Dx == 296f);
 
             // --- New fork commands ---
             RoundTrip(opts, new TaxSyncCommand { Rates = new[] { 10, 3, -2, 5, 0, 7 } }, c => c.Rates.Length == 6 && c.Rates[1] == 3 && c.Rates[2] == -2);

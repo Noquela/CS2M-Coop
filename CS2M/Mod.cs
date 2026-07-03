@@ -109,6 +109,8 @@ namespace CS2M
             updateSystem.UpdateBefore<NetworkingSystem>(SystemUpdatePhase.PreSimulation);
             updateSystem.UpdateAt<UISystem>(SystemUpdatePhase.UIUpdate);
             updateSystem.UpdateAt<PlayerCursorSystem>(SystemUpdatePhase.Rendering);
+            // v55: live tool preview — see a friend drawing a road before they place it.
+            updateSystem.UpdateAt<Sync.ToolPreviewSystem>(SystemUpdatePhase.Rendering);
             // v50: host broadcasts the player roster (names + latency) ~1 Hz for the player panel.
             updateSystem.UpdateAt<PlayerStatsSenderSystem>(SystemUpdatePhase.Rendering);
             // v51: host-authoritative RCI demand bars (clients suppress local demand sim + mirror).
