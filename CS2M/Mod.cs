@@ -111,6 +111,8 @@ namespace CS2M
             updateSystem.UpdateAt<PlayerCursorSystem>(SystemUpdatePhase.Rendering);
             // v55: live tool preview — see a friend drawing a road before they place it.
             updateSystem.UpdateAt<Sync.ToolPreviewSystem>(SystemUpdatePhase.Rendering);
+            // v55: co-op sync-health badge (StateHash divergence -> user-facing trust signal).
+            updateSystem.UpdateAt<Sync.SyncStatusSystem>(SystemUpdatePhase.Rendering);
             // v50: host broadcasts the player roster (names + latency) ~1 Hz for the player panel.
             updateSystem.UpdateAt<PlayerStatsSenderSystem>(SystemUpdatePhase.Rendering);
             // v51: host-authoritative RCI demand bars (clients suppress local demand sim + mirror).

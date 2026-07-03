@@ -425,6 +425,7 @@ namespace CS2M.Sync
                                   $"money {local.Money}vs{host.Money}");
                     if (_strikes >= 2)
                     {
+                        SyncHealth.SetDrift(true, string.Join(", ", drifts));
                         Warn(drifts);
                     }
                 }
@@ -436,6 +437,7 @@ namespace CS2M.Sync
                     }
 
                     _strikes = 0;
+                    SyncHealth.SetDrift(false, "");
                 }
             }
 

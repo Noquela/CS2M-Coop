@@ -35,6 +35,7 @@ namespace CS2M.UI
         private ValueBinding<string> _username;
 
         private ValueBinding<string> _cursorLabels;
+        private ValueBinding<string> _syncStatus;
 
         private readonly Stopwatch _downloadTimer = new();
         private int _lastDownloadDone = 0;
@@ -92,6 +93,7 @@ namespace CS2M.UI
             // JSON array of remote player cursor labels: [{x,y,n,c}] in normalized
             // screen coords (0..1), updated every frame by PlayerCursorSystem.
             AddBinding(_cursorLabels = new ValueBinding<string>(Mod.Name, "CursorLabels", "[]"));
+            AddBinding(_syncStatus = new ValueBinding<string>(Mod.Name, "SyncStatus", "{\"state\":\"off\"}"));
 
             // Render-ack from the UI: the label component reports its real layouted rect
             // (getBoundingClientRect) so the log can prove cohtml actually drew it (w/h > 0).
@@ -220,6 +222,12 @@ namespace CS2M.UI
         public void SetCursorLabels(string json)
         {
             _cursorLabels?.Update(json);
+        }
+
+        /// <summary>v55: pushes the co-op sync-health JSON to the sync badge (~1 Hz).</summary>
+        public void SetSyncStatus(string json)
+        {
+            _syncStatus?.Update(json);
         }
     }
 }

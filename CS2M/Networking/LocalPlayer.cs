@@ -418,6 +418,7 @@ namespace CS2M.Networking
             // Drop any remote player cursors so they don't linger after leaving.
             Sync.RemotePlayerCursors.Clear();
             Sync.RemoteToolPreviews.Clear();
+            Sync.SyncHealth.Clear();
 
             // Drop any queued remote object placements.
             Sync.RemotePlacementQueue.Clear();
