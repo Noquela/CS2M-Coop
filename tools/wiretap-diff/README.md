@@ -12,6 +12,11 @@ python analyze.py host.jsonl amigo1.jsonl amigo2.jsonl
 python analyze.py *.jsonl --type Net     # foca em comandos de rede (ruas/canos)
 python analyze.py *.jsonl --type Zone    # foca em zoneamento
 python analyze.py *.jsonl --all          # inclui os periódicos (cursor, speed, stats, demanda...)
+
+# fluxo do teste de campo: o bug aconteceu ~22:43 → foca naquele momento
+python analyze.py *.jsonl --around 22:43:00              # divergencias na janela (+-120s)
+python analyze.py *.jsonl --around 22:43:00 --window 30  # janela mais apertada
+python analyze.py *.jsonl --around 22:43:00 --timeline   # ordem exata dos comandos dos 3 no momento
 ```
 Requer só Python 3 (sem dependências).
 

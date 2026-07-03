@@ -54,13 +54,57 @@ def load(path):
     return recs
 
 
+def parse_time(s):
+    """'HH:MM:SS.fff' -> segundos do dia (float). None se nao parsear."""
+    if not s:
+        return None
+    try:
+        h, m, sec = s.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(sec)
+    except (ValueError, AttributeError):
+        return None
+
+
+def within(rec, target, window):
+    t = parse_time(rec.get("t"))
+    return t is not None and abs(t - target) <= window
+
+
+def print_timeline(labels, recs_by):
+    """Intercala os registros de todos os arquivos por horario — ver a ordem no momento do bug."""
+    rows = []
+    for label in labels:
+        who = label.replace("CS2M_wiretap_", "").replace(".jsonl", "")[-8:]
+        for r in recs_by[label]:
+            t = parse_time(r.get("t"))
+            typ = r.get("type", "?")
+            if t is None or typ == "WireTapStart":
+                continue
+            body = ";".join(f"{k}={r[k]}" for k in sorted(r) if k not in META)
+            rows.append((t, r.get("t"), who, r.get("dir", "?"), typ, body[:110]))
+    rows.sort(key=lambda x: x[0])
+    print(f"\n=== TIMELINE ({len(rows)} comandos na janela, por tempo) ===")
+    for _, ts, who, d, typ, body in rows:
+        print(f"  {ts}  [{who:>8}] {d:<3} {typ:<22} {body}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Diff de gravacoes wiretap do CS2M")
     ap.add_argument("files", nargs="+", help="2+ arquivos CS2M_wiretap_*.jsonl")
     ap.add_argument("--all", action="store_true", help="inclui tipos periodicos (ruidosos)")
     ap.add_argument("--type", help="filtra por substring do tipo (ex.: Net, Place, Zone)")
     ap.add_argument("--limit", type=int, default=200, help="max de divergencias listadas")
+    ap.add_argument("--around", help="foca em comandos perto deste horario HH:MM:SS (ex.: 22:43:10)")
+    ap.add_argument("--window", type=float, default=120.0,
+                    help="janela em segundos ao redor de --around (padrao 120)")
+    ap.add_argument("--timeline", action="store_true",
+                    help="com --around, imprime os comandos dos jogadores intercalados por tempo")
     args = ap.parse_args()
+
+    target = parse_time(args.around) if args.around else None
+    if args.around and target is None:
+        print(f"!! --around invalido: '{args.around}' (use HH:MM:SS)", file=sys.stderr)
+        return
 
     labels = []
     recs_by = {}
@@ -69,6 +113,8 @@ def main():
         label = p.replace("\\", "/").split("/")[-1]
         labels.append(label)
         recs = load(p)
+        if target is not None:
+            recs = [r for r in recs if within(r, target, args.window)]
         recs_by[label] = recs
         s = set()
         for r in recs:
@@ -82,7 +128,8 @@ def main():
             s.add((typ, body))
         sigs_by[label] = s
 
-    print("=== RESUMO POR ARQUIVO ===")
+    scope_note = f"   (janela: {args.around} +-{args.window:.0f}s)" if target is not None else ""
+    print(f"=== RESUMO POR ARQUIVO ==={scope_note}")
     for label in labels:
         recs = recs_by[label]
         dirs = Counter(r.get("dir") for r in recs)
@@ -90,6 +137,9 @@ def main():
         print(f"\n[{label}]  {len(recs)} registros   OUT={dirs.get('OUT', 0)}  IN={dirs.get('IN', 0)}")
         top = ", ".join(f"{t}:{c}" for t, c in types.most_common(8))
         print(f"    tipos: {top}")
+
+    if args.timeline and target is not None:
+        print_timeline(labels, recs_by)
 
     if len(labels) < 2:
         print("\n(so 1 arquivo — passe 2+ pra comparar. Resumo acima e' so a leitura desse arquivo.)")
