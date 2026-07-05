@@ -161,6 +161,7 @@ namespace CS2M.Sync
 
             // ---- PASS 2: NEW EDGES + BOUNDARY -----------------------------------------------------
             var boundaryIds = new List<ulong>();
+            var boundaryPosX = new List<float>(); var boundaryPosY = new List<float>(); var boundaryPosZ = new List<float>();
             var boundarySeen = new HashSet<ulong>();
             // Node ids actually referenced by a SHIPPED edge (drives the pass-3 node filter).
             var referencedNodeIds = new HashSet<ulong>();
@@ -201,8 +202,10 @@ namespace CS2M.Sync
                 }
 
                 Edge ed = EntityManager.GetComponentData<Edge>(e);
-                ulong startId = ResolveEndpointId(ed.m_Start, nodeIdOf, boundaryIds, boundarySeen);
-                ulong endId = ResolveEndpointId(ed.m_End, nodeIdOf, boundaryIds, boundarySeen);
+                ulong startId = ResolveEndpointId(ed.m_Start, nodeIdOf, boundaryIds, boundarySeen,
+                    boundaryPosX, boundaryPosY, boundaryPosZ);
+                ulong endId = ResolveEndpointId(ed.m_End, nodeIdOf, boundaryIds, boundarySeen,
+                    boundaryPosX, boundaryPosY, boundaryPosZ);
                 if (startId == 0 || endId == 0)
                 {
                     CS2M.Log.Info($"[Batch] SKIP edge={e.Index} unresolved endpoint (start={startId} end={endId})");
@@ -368,6 +371,9 @@ namespace CS2M.Sync
                 DelStartX = dsX.ToArray(), DelStartZ = dsZ.ToArray(), DelEndX = deX.ToArray(), DelEndZ = deZ.ToArray(),
 
                 BoundaryNodeIds = boundaryIds.ToArray(),
+                BoundaryPosX = boundaryPosX.ToArray(),
+                BoundaryPosY = boundaryPosY.ToArray(),
+                BoundaryPosZ = boundaryPosZ.ToArray(),
             };
 
             Command.SendToAll?.Invoke(cmd);
@@ -380,7 +386,8 @@ namespace CS2M.Sync
         /// that gained an arm — Ensure it a stable id (already present for session-placed nodes) and record it
         /// in the boundary set (id ONLY; the receiver resolves it by identity, never re-creates it).</summary>
         private ulong ResolveEndpointId(Entity node, Dictionary<Entity, ulong> nodeIdOf,
-            List<ulong> boundaryIds, HashSet<ulong> boundarySeen)
+            List<ulong> boundaryIds, HashSet<ulong> boundarySeen,
+            List<float> boundaryPosX, List<float> boundaryPosY, List<float> boundaryPosZ)
         {
             if (nodeIdOf.TryGetValue(node, out ulong known))
             {
@@ -402,6 +409,9 @@ namespace CS2M.Sync
             if (boundarySeen.Add(id))
             {
                 boundaryIds.Add(id);
+                // Settled position: the receiver's id-miss fallback for SAVE nodes (identical geometry).
+                float3 p = EntityManager.GetComponentData<Node>(node).m_Position;
+                boundaryPosX.Add(p.x); boundaryPosY.Add(p.y); boundaryPosZ.Add(p.z);
             }
 
             return id;

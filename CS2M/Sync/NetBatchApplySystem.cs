@@ -35,6 +35,7 @@ namespace CS2M.Sync
     public partial class NetBatchApplySystem : GameSystemBase
     {
         private PrefabSystem _prefabSystem;
+        private EntityQuery _liveNodes;
 
         // A batch whose boundary nodes are not all resolvable yet (a sibling batch that creates them may still
         // be in flight). Held until they resolve or it ages out — never applied partially.
@@ -46,6 +47,16 @@ namespace CS2M.Sync
         {
             base.OnCreate();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            _liveNodes = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Node>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Edge>(),
+                    ComponentType.ReadOnly<Game.Tools.Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
+            });
             CS2M.Log.Info("[Batch] NetBatchApplySystem created");
         }
 
@@ -116,12 +127,28 @@ namespace CS2M.Sync
             // (1) Resolve boundary FIRST — bail before any structural change if one is missing.
             if (cmd.BoundaryNodeIds != null)
             {
-                foreach (ulong bid in cmd.BoundaryNodeIds)
+                bool hasPos = cmd.BoundaryPosX != null && cmd.BoundaryPosX.Length == cmd.BoundaryNodeIds.Length;
+                for (int bi = 0; bi < cmd.BoundaryNodeIds.Length; bi++)
                 {
+                    ulong bid = cmd.BoundaryNodeIds[bi];
                     if (!CS2M_NodeSyncIds.TryResolve(EntityManager, bid, out Entity be))
                     {
-                        _lastMissingId = bid;
-                        return false;
+                        // Id-miss fallback for SAVE-loaded boundary nodes (no id on either PC): save
+                        // geometry is byte-identical on both machines (same file at join), so a STRICT
+                        // <0.5 m match is exact resolution there, not guessing. Adopt the id so every
+                        // later batch touching this node resolves instantly.
+                        if (hasPos && FindNodeStrict(
+                                new float3(cmd.BoundaryPosX[bi], cmd.BoundaryPosY[bi], cmd.BoundaryPosZ[bi]),
+                                out be))
+                        {
+                            CS2M_NodeSyncIds.Register(EntityManager, be, bid);
+                            CS2M.Log.Info($"[Batch] boundary adopt-by-pos id={bid} node={be.Index}");
+                        }
+                        else
+                        {
+                            _lastMissingId = bid;
+                            return false;
+                        }
                     }
 
                     idToEntity[bid] = be;
@@ -347,6 +374,34 @@ namespace CS2M.Sync
 
             netData = EntityManager.GetComponentData<NetData>(netPrefab);
             return true;
+        }
+
+        /// <summary>Nearest live standalone node within 0.5 m of the builder's settled coord, or false.
+        /// Intentionally STRICT: this is exact-resolution for byte-identical save geometry, not the loose
+        /// proximity guessing (3.5–10 m radii) this architecture retired for session content.</summary>
+        private bool FindNodeStrict(float3 pos, out Entity node)
+        {
+            node = Entity.Null;
+            float best = 0.25f; // 0.5 m squared
+            Unity.Collections.NativeArray<Entity> arr = _liveNodes.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity n in arr)
+                {
+                    float d = math.distancesq(EntityManager.GetComponentData<Node>(n).m_Position, pos);
+                    if (d < best)
+                    {
+                        best = d;
+                        node = n;
+                    }
+                }
+            }
+            finally
+            {
+                arr.Dispose();
+            }
+
+            return node != Entity.Null;
         }
 
         private void SetOrAdd<T>(Entity e, T data) where T : unmanaged, IComponentData

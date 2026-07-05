@@ -95,7 +95,14 @@ namespace CS2M.Commands.Data.Game
         public float[] DelEndX { get; set; }
         public float[] DelEndZ { get; set; }
 
-        // ---- BOUNDARY (pre-existing nodes referenced by new edges; id only, never their data) -----
+        // ---- BOUNDARY (pre-existing nodes referenced by new edges; NEVER their data) --------------
         public ulong[] BoundaryNodeIds { get; set; }
+        // The builder's settled position of each boundary node. Used ONLY as the id-miss fallback for
+        // SAVE-loaded nodes (no CS2M_NodeSyncId on either PC): save geometry is byte-identical on both
+        // machines (same file at join), so a STRICT (<0.5 m) position match is sound there — unlike the
+        // loose proximity guessing this architecture retired for session content.
+        public float[] BoundaryPosX { get; set; }
+        public float[] BoundaryPosY { get; set; }
+        public float[] BoundaryPosZ { get; set; }
     }
 }
