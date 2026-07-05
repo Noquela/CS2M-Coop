@@ -1,234 +1,93 @@
-17:30:22.344 [Auto] ENABLED role=SELFTEST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\selftest.log
-17:30:40.957 [Auto] loadingComplete purpose=LoadGame mode=Game
-17:30:40.958 [Auto] city loaded -> arming StartServer
-17:30:42.918 [Auto] StartServer on :1111 status=PLAYING
-17:30:42.919 [Auto] RESULT role: PASS (CurrentRole=Server (expect Server after StartServer))
-17:30:42.925 [Auto] RESULT contract: PASS (42 comandos classificados, 11 tools cobertos)
-17:30:42.964 [Auto] SELFTEST beginning — validating every feature against real game state
-17:30:42.965 [Auto] PLAYING — watching for placements in the world.
-17:30:42.966 [Auto] VERIFY CHANGED remoteObjects=0 (was -1) totalEdges=736 (was -1) simSpeed=1 status=PLAYING
-17:30:44.979 [Auto] TEST replay INJECT road name=Small Road A=(382,-241) B=(271,-350)
-17:30:44.980 [Auto] TEST money INJECT before=2000000000 unlimited=True -> set=2001000000
-17:30:44.999 [Auto] VERIFY CHANGED remoteObjects=0 (was 0) totalEdges=737 (was 736) simSpeed=1 status=PLAYING
-17:30:47.411 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=737 (was 737) simSpeed=1 status=PLAYING
-17:30:47.678 [Auto] RESULT money: PASS (guard OK: city has unlimited money -> apply correctly skipped)
-17:30:47.678 [Auto] TEST progression INJECT beforeXp=520 milestone=0 maxPop=94 -> setXp=200520
-17:30:50.225 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=737 (was 737) simSpeed=3 status=PLAYING
-17:30:50.801 [Auto] RESULT progression: PASS (afterXp=200520 expected~200520)
-17:30:50.803 [Auto] TEST object INJECT kind=tree name=FloridaPalmTree01 pos=(818,408,373) syncId=12590802318779219969
-17:30:50.820 [Auto] VERIFY CHANGED remoteObjects=1 (was 0) totalEdges=737 (was 737) simSpeed=3 status=PLAYING
-17:30:53.337 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=737 (was 737) simSpeed=3 status=PLAYING
-17:30:53.616 [Auto] RESULT object:tree: PASS (remoteObjects=1 (>= 1))
-17:30:53.616 [Auto] TEST object INJECT kind=building name=IndustrialAgricultureHub03_L1 pos=(558,402,385) syncId=12590802318779219970
-17:30:53.638 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=744 (was 737) simSpeed=3 status=PLAYING
-17:30:56.155 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=744 (was 744) simSpeed=3 status=PLAYING
-17:30:56.435 [Auto] RESULT object:building: PASS (remoteObjects=2 (>= 2))
-17:30:56.436 [Auto] TEST move INJECT syncId=12590802318779219970 from=(558,385) to=(573,400)
-17:30:56.881 [Auto] VERIFY CHANGED remoteObjects=2 (was 2) totalEdges=737 (was 744) simSpeed=3 status=PLAYING
-17:30:56.888 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=737 (was 737) simSpeed=3 status=PLAYING
-17:30:59.255 [Auto] RESULT move: FAIL (building gone after move)
-17:30:59.256 [Auto] TEST zoning INJECT block=(531,20) cell0 37->40 name='Industrial Manufacturing'
-17:30:59.409 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=737 (was 737) simSpeed=3 status=PLAYING
-17:31:01.927 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=737 (was 737) simSpeed=3 status=PLAYING
-17:31:02.068 [Auto] RESULT zoning: PASS (cell0=40 expected=40)
-17:31:02.069 [Auto] TEST net INJECT name=Small Road edgesBefore=737
-17:31:02.116 [Auto] VERIFY CHANGED remoteObjects=1 (was 1) totalEdges=740 (was 737) simSpeed=3 status=PLAYING
-17:31:04.631 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=740 (was 740) simSpeed=3 status=PLAYING
-17:31:04.913 [Auto] RESULT net: PASS (edges 737->740 composition=True nodeConnected=True zoneBlocks=4 (real build, not a hollow edge))
-17:31:04.913 [Auto] TEST net-delete INJECT start=(382,-281) end=(286,-376) edgesBefore=740
-17:31:04.930 [Auto] VERIFY CHANGED remoteObjects=1 (was 1) totalEdges=739 (was 740) simSpeed=3 status=PLAYING
-17:31:07.449 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:07.729 [Auto] RESULT net-delete: PASS (edges 740->739)
-17:31:07.731 [Auto] TEST net-upgrade INJECT edge=52052 left=0x1000 (from SideFlagMask)
-17:31:09.978 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:10.551 [Auto] RESULT net-upgrade: PASS (left=0x1000 expectedBit=0x1000)
-17:31:10.552 [Auto] TEST delete INJECT syncId=12590802318779219969
-17:31:10.577 [Auto] VERIFY CHANGED remoteObjects=0 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:13.098 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:13.366 [Auto] RESULT delete: PASS (tree removed)
-17:31:13.366 [Auto] TEST tax INJECT main 12->15
-17:31:15.630 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:16.191 [Auto] RESULT tax: PASS (main=15 expected=15)
-17:31:16.192 [Auto] TEST budget INJECT name=Roads 100->90
-17:31:18.146 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:18.999 [Auto] RESULT budget: PASS (pct=90 expected=90)
-17:31:19.001 [Auto] TEST district INJECT name=District Area center=(498,325) before=2
-17:31:19.017 [Auto] VERIFY CHANGED remoteObjects=1 (was 0) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:21.537 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:21.818 [Auto] RESULT district: PASS (districts 2->3)
-17:31:21.820 [Auto] TEST water INJECT pos=(498,325) before=9
-17:31:21.832 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:24.380 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:24.668 [Auto] RESULT water: PASS (waterSources 9->10)
-17:31:24.669 [Auto] TEST water CLEANUP removed test source entity=55885
-17:31:24.670 [Auto] TEST terrain INJECT raise pos=(618,445) h0=397,31
-17:31:24.685 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:27.240 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:27.521 [Auto] RESULT terrain: PASS (height 397,31->4096,00)
-17:31:27.522 [Auto] TEST policy INJECT name=Taxi Starting Fee active=True adj 23->40
-17:31:27.540 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:27.547 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:30.144 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:30.413 [Auto] RESULT policy: PASS (found=True adj=40 expected=40)
-17:31:30.413 [Auto] TEST pause INJECT joining=true (speedBefore=0 fi=10558772)
-17:31:32.618 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=0 status=PLAYING
-17:31:33.166 [Auto] RESULT pause: PASS (frameIndex 10558772->10558772 (sim must freeze while joining))
-17:31:33.168 [Auto] TEST pause SABOTAGE selectedSpeed=1 (emulating the pause-button/SPACE rewrite)
-17:31:35.086 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=0 status=PLAYING
-17:31:35.921 [Auto] RESULT pause-enforce: PASS (frameIndex 10558772->10558772 (must stay frozen despite adversarial speed write))
-17:31:35.922 [Auto] TEST pause INJECT joining=false (resume)
-17:31:37.595 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:38.753 [Auto] RESULT resume: PASS (frameIndex 10558772->10559280 (sim must tick again after resume))
-17:31:38.754 [Auto] TEST devtree INJECT node=SatelliteUplinkNode
-17:31:40.147 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:41.605 [Auto] RESULT devtree: PASS (node Locked disabled (UnlockSystem consumed our event))
-17:31:41.608 [Auto] TEST env+nativeDelete INJECT tree=FloridaPalmTree01 pos=(798,353)
-17:31:41.642 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:41.652 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:44.242 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:44.516 [Auto] RESULT env: PASS (weatherOverride=True clockRealigned=True)
-17:31:44.516 [Auto] RESULT native-delete: PASS (native tree removed by prefab+pos)
-17:31:44.518 [Auto] TEST tile INJECT center=(-623,3117)
-17:31:46.806 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:47.375 [Auto] RESULT tile: PASS (tile unlocked (Native removed))
-17:31:47.377 [Auto] TEST route INJECT prefab=Bus Line id=12590802318779219972
-17:31:47.397 [Auto] VERIFY CHANGED remoteObjects=7 (was 1) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:49.923 [Auto] VERIFY heartbeat remoteObjects=7 (was 7) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:50.204 [Auto] RESULT route: PASS (wps=3 segs=2 number=77 (line built from archetypes, game systems wired it))
-17:31:50.207 [Auto] TEST stop INJECT name=EU_TaxiStop02 pos=(333,-375) hint=(329,-375) syncId=12590802318779219973
-17:31:50.224 [Auto] VERIFY CHANGED remoteObjects=8 (was 7) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:52.766 [Auto] VERIFY heartbeat remoteObjects=8 (was 8) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:53.049 [Auto] RESULT stop-attach: PASS (attached=True parentEdge=True (stop object wired to the road edge))
-17:31:53.051 [Auto] TEST fire INJECT start entity=58475 syncId=12590802318779219974
-17:31:55.314 [Auto] VERIFY heartbeat remoteObjects=8 (was 8) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:55.890 [Auto] RESULT fire-start: PASS (building has OnFire (host event mirrored))
-17:31:55.891 [Auto] TEST fire INJECT collapse syncId=12590802318779219974
-17:31:57.861 [Auto] VERIFY heartbeat remoteObjects=8 (was 8) totalEdges=739 (was 739) simSpeed=3 status=PLAYING
-17:31:58.733 [Auto] RESULT fire-collapse: PASS (destroyed=True fireCleared=True (Destroy event → vanilla DestroySystem teardown))
-17:31:58.734 [Auto] TEST net-tee INJECT name=Small Road junction=(798,585)
-17:31:58.761 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=741 (was 739) simSpeed=3 status=PLAYING
-17:31:58.781 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=743 (was 741) simSpeed=3 status=PLAYING
-17:32:01.344 [Auto] VERIFY heartbeat remoteObjects=8 (was 8) totalEdges=743 (was 743) simSpeed=3 status=PLAYING
-17:32:01.613 [Auto] RESULT net-tee: PASS (nodesAtJunction=1 connectedEdges=3 (need exactly 1 node with >=3 — split+fusion wired))
-17:32:01.614 [Auto] TEST net-xcross INJECT centre=(218,605) 4 arms w/ drifting centre node (HasNodes path)
-17:32:01.628 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=744 (was 743) simSpeed=3 status=PLAYING
-17:32:01.642 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=745 (was 744) simSpeed=3 status=PLAYING
-17:32:01.661 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=746 (was 745) simSpeed=3 status=PLAYING
-17:32:01.679 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=747 (was 746) simSpeed=3 status=PLAYING
-17:32:04.238 [Auto] VERIFY heartbeat remoteObjects=8 (was 8) totalEdges=747 (was 747) simSpeed=3 status=PLAYING
-17:32:04.478 [Auto] RESULT net-xcross: PASS (nodesAtCentre=1 connectedEdges=4 nodeAt=(218,7,604,8) centre=(218,2,604,7) (need exactly 1 node w/ >=4 near centre — drifting-centre junction fused, not duplicated))
-17:32:04.479 [Auto] TEST net-arm-delete INJECT delete north arm (218,655)->centre
-17:32:04.494 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=746 (was 747) simSpeed=3 status=PLAYING
-17:32:07.050 [Auto] VERIFY heartbeat remoteObjects=8 (was 8) totalEdges=746 (was 746) simSpeed=3 status=PLAYING
-17:32:07.335 [Auto] RESULT net-arm-delete: PASS (centreNodes=1 centreDegree=3 orphanTipNodes=0 (delete must re-cap the junction to degree 3 and clean the orphan dead-end))
-17:32:07.336 [Auto] TEST net-splitflow INJECT full A + halves A1/A2 at M=(798,25) (FindCoveringEdge must delete A)
-17:32:07.351 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=747 (was 746) simSpeed=3 status=PLAYING
-17:32:07.384 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=748 (was 747) simSpeed=3 status=PLAYING
-17:32:09.936 [Auto] VERIFY heartbeat remoteObjects=8 (was 8) totalEdges=748 (was 748) simSpeed=3 status=PLAYING
-17:32:10.192 [Auto] RESULT net-splitflow: PASS (midNodes=1 midDegree=2 originalA_survives=False (A1+A2 fuse at 1 mid node deg 2, and FindCoveringEdge deleted the un-split A))
-17:32:10.193 [Auto] TEST net-moved-junction INJECT junction M=(98,-75), 3rd road to M+5m
-17:32:10.208 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=749 (was 748) simSpeed=3 status=PLAYING
-17:32:10.221 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=750 (was 749) simSpeed=3 status=PLAYING
-17:32:10.240 [Auto] VERIFY CHANGED remoteObjects=8 (was 8) totalEdges=751 (was 750) simSpeed=3 status=PLAYING
-17:32:12.800 [Auto] VERIFY heartbeat remoteObjects=8 (was 8) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:13.053 [Auto] RESULT net-moved-junction: PASS (nodesNear=1 degree=3 (existing junction shifted 5 m must fuse the 3rd road via the 8 m degree>=2 fallback, not duplicate))
-17:32:13.054 [Auto] TEST route-reroute-saveline CREATE prefab=Bus Line number=91
-17:32:13.065 [Auto] VERIFY CHANGED remoteObjects=14 (was 8) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:15.595 [Auto] VERIFY heartbeat remoteObjects=14 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:15.879 [Auto] TEST route-reroute-saveline REROUTE by number=91 midZ 555->635
-17:32:15.879 [Auto] VERIFY CHANGED remoteObjects=13 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:15.893 [Auto] VERIFY CHANGED remoteObjects=18 (was 13) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:15.903 [Auto] VERIFY CHANGED remoteObjects=13 (was 18) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:18.451 [Auto] VERIFY heartbeat remoteObjects=13 (was 13) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:18.720 [Auto] RESULT route-reroute-saveline: PASS (midZ=635 expected~635 guardStamped=True (save-line resolved by prefab+number, reroute applied, echo guard set))
-17:32:20.987 [Auto] VERIFY heartbeat remoteObjects=13 (was 13) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:21.549 [Auto] TEST node-upgrade INJECT node=59926 pos=(100,-75) TrafficLights=0x400
-17:32:23.538 [Auto] VERIFY heartbeat remoteObjects=13 (was 13) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:24.394 [Auto] RESULT node-upgrade: PASS (node=59926 hasUpgraded=True general=0x400 expected TrafficLights=0x400 (node-level junction flag written by the node upgrade path))
-17:32:26.068 [Auto] VERIFY heartbeat remoteObjects=13 (was 13) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:27.224 [Auto] TEST fee INJECT resource=1 -> 99,45
-17:32:28.608 [Auto] VERIFY heartbeat remoteObjects=13 (was 13) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:30.061 [Auto] RESULT fee: PASS (resource=1 actual=99,45 expected=99,45 (ServiceFeeSystem.SetFee applied to City buffer))
-17:32:31.149 [Auto] VERIFY heartbeat remoteObjects=13 (was 13) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:32.893 [Auto] TEST water-move CREATE at (198,25)
-17:32:32.905 [Auto] VERIFY CHANGED remoteObjects=14 (was 13) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:35.456 [Auto] VERIFY heartbeat remoteObjects=14 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:35.738 [Auto] TEST water-move MOVE (198,25)->(258,85)
-17:32:38.003 [Auto] VERIFY heartbeat remoteObjects=14 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:38.579 [Auto] RESULT water-move: PASS (nearOld=0 nearNew=1 (source repositioned in place, none left flooding the old spot))
-17:32:40.545 [Auto] VERIFY heartbeat remoteObjects=14 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:41.419 [Auto] RESULT ext-disable: PASS (skipped: no enabled extension in this city to toggle)
-17:32:43.095 [Auto] VERIFY heartbeat remoteObjects=14 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:45.648 [Auto] VERIFY heartbeat remoteObjects=14 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:47.122 [Auto] TEST city-name INJECT "CoopCity-14" -> "CS2M-SelfTest-11"
-17:32:48.198 [Auto] VERIFY heartbeat remoteObjects=14 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:49.973 [Auto] RESULT city-name: PASS (cityName="CS2M-SelfTest-11" expected="CS2M-SelfTest-11" (kind-4 RenameApply set CityConfigurationSystem.cityName))
-17:32:50.755 [Auto] VERIFY heartbeat remoteObjects=14 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:52.829 [Auto] TEST district-reshape CREATE name=District Area center=(-2,-175)
-17:32:52.843 [Auto] VERIFY CHANGED remoteObjects=15 (was 14) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:55.398 [Auto] VERIFY heartbeat remoteObjects=15 (was 15) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:55.684 [Auto] TEST district-reshape RESHAPE ->+-120 at (-2,-175)
-17:32:57.960 [Auto] VERIFY heartbeat remoteObjects=15 (was 15) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:32:58.544 [Auto] RESULT district-reshape: PASS (nearCount=1 minNodeX=-122 expected~-122 hashStable=True (reshape rewrote the SAME district in place — exactly 1, no duplicate, no echo))
-17:33:00.517 [Auto] VERIFY heartbeat remoteObjects=15 (was 15) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:33:01.411 [Auto] TEST line-visibility INJECT hide number=77
-17:33:03.108 [Auto] VERIFY heartbeat remoteObjects=15 (was 15) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:33:04.293 [Auto] RESULT line-visibility: PASS (HiddenRoute=True (visibility apply added the tag by prefab+number))
-17:33:05.677 [Auto] VERIFY heartbeat remoteObjects=15 (was 15) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:33:07.163 [Auto] RESULT ext-move: PASS (skipped: no extension in this city to relocate)
-17:33:08.253 [Auto] VERIFY heartbeat remoteObjects=15 (was 15) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:33:10.831 [Auto] VERIFY heartbeat remoteObjects=15 (was 15) totalEdges=751 (was 751) simSpeed=3 status=PLAYING
-17:33:12.930 [Auto] TEST net-batch INJECT prefab=Small Road ids=12590802318779219988/12590802318779219989 edgesBefore=751
-17:33:12.948 [Auto] VERIFY CHANGED remoteObjects=18 (was 15) totalEdges=752 (was 751) simSpeed=3 status=PLAYING
-17:33:15.520 [Auto] VERIFY heartbeat remoteObjects=18 (was 18) totalEdges=752 (was 752) simSpeed=3 status=PLAYING
-17:33:15.815 [Auto] RESULT net-batch: PASS (edges 751->752 wired=True compResolved=True subBlocks=4)
-17:33:18.099 [Auto] VERIFY heartbeat remoteObjects=18 (was 18) totalEdges=752 (was 752) simSpeed=3 status=PLAYING
-17:33:18.693 [Auto] ================ SELFTEST RESULTS ================
-17:33:18.694 [Auto] RESULT role: PASS (CurrentRole=Server (expect Server after StartServer))
-17:33:18.694 [Auto] RESULT contract: PASS (42 comandos classificados, 11 tools cobertos)
-17:33:18.694 [Auto] RESULT money: PASS (guard OK: city has unlimited money -> apply correctly skipped)
-17:33:18.695 [Auto] RESULT progression: PASS (afterXp=200520 expected~200520)
-17:33:18.696 [Auto] RESULT object:tree: PASS (remoteObjects=1 (>= 1))
-17:33:18.696 [Auto] RESULT object:building: PASS (remoteObjects=2 (>= 2))
-17:33:18.696 [Auto] RESULT move: FAIL (building gone after move)
-17:33:18.697 [Auto] RESULT zoning: PASS (cell0=40 expected=40)
-17:33:18.697 [Auto] RESULT net: PASS (edges 737->740 composition=True nodeConnected=True zoneBlocks=4 (real build, not a hollow edge))
-17:33:18.697 [Auto] RESULT net-delete: PASS (edges 740->739)
-17:33:18.698 [Auto] RESULT net-upgrade: PASS (left=0x1000 expectedBit=0x1000)
-17:33:18.698 [Auto] RESULT delete: PASS (tree removed)
-17:33:18.698 [Auto] RESULT tax: PASS (main=15 expected=15)
-17:33:18.699 [Auto] RESULT budget: PASS (pct=90 expected=90)
-17:33:18.699 [Auto] RESULT district: PASS (districts 2->3)
-17:33:18.699 [Auto] RESULT water: PASS (waterSources 9->10)
-17:33:18.700 [Auto] RESULT terrain: PASS (height 397,31->4096,00)
-17:33:18.700 [Auto] RESULT policy: PASS (found=True adj=40 expected=40)
-17:33:18.701 [Auto] RESULT pause: PASS (frameIndex 10558772->10558772 (sim must freeze while joining))
-17:33:18.701 [Auto] RESULT pause-enforce: PASS (frameIndex 10558772->10558772 (must stay frozen despite adversarial speed write))
-17:33:18.701 [Auto] RESULT resume: PASS (frameIndex 10558772->10559280 (sim must tick again after resume))
-17:33:18.702 [Auto] RESULT devtree: PASS (node Locked disabled (UnlockSystem consumed our event))
-17:33:18.702 [Auto] RESULT env: PASS (weatherOverride=True clockRealigned=True)
-17:33:18.702 [Auto] RESULT native-delete: PASS (native tree removed by prefab+pos)
-17:33:18.702 [Auto] RESULT tile: PASS (tile unlocked (Native removed))
-17:33:18.703 [Auto] RESULT route: PASS (wps=3 segs=2 number=77 (line built from archetypes, game systems wired it))
-17:33:18.703 [Auto] RESULT stop-attach: PASS (attached=True parentEdge=True (stop object wired to the road edge))
-17:33:18.703 [Auto] RESULT fire-start: PASS (building has OnFire (host event mirrored))
-17:33:18.704 [Auto] RESULT fire-collapse: PASS (destroyed=True fireCleared=True (Destroy event → vanilla DestroySystem teardown))
-17:33:18.704 [Auto] RESULT net-tee: PASS (nodesAtJunction=1 connectedEdges=3 (need exactly 1 node with >=3 — split+fusion wired))
-17:33:18.704 [Auto] RESULT net-xcross: PASS (nodesAtCentre=1 connectedEdges=4 nodeAt=(218,7,604,8) centre=(218,2,604,7) (need exactly 1 node w/ >=4 near centre — drifting-centre junction fused, not duplicated))
-17:33:18.705 [Auto] RESULT net-arm-delete: PASS (centreNodes=1 centreDegree=3 orphanTipNodes=0 (delete must re-cap the junction to degree 3 and clean the orphan dead-end))
-17:33:18.706 [Auto] RESULT net-splitflow: PASS (midNodes=1 midDegree=2 originalA_survives=False (A1+A2 fuse at 1 mid node deg 2, and FindCoveringEdge deleted the un-split A))
-17:33:18.706 [Auto] RESULT net-moved-junction: PASS (nodesNear=1 degree=3 (existing junction shifted 5 m must fuse the 3rd road via the 8 m degree>=2 fallback, not duplicate))
-17:33:18.706 [Auto] RESULT route-reroute-saveline: PASS (midZ=635 expected~635 guardStamped=True (save-line resolved by prefab+number, reroute applied, echo guard set))
-17:33:18.706 [Auto] RESULT node-upgrade: PASS (node=59926 hasUpgraded=True general=0x400 expected TrafficLights=0x400 (node-level junction flag written by the node upgrade path))
-17:33:18.707 [Auto] RESULT fee: PASS (resource=1 actual=99,45 expected=99,45 (ServiceFeeSystem.SetFee applied to City buffer))
-17:33:18.707 [Auto] RESULT water-move: PASS (nearOld=0 nearNew=1 (source repositioned in place, none left flooding the old spot))
-17:33:18.708 [Auto] RESULT ext-disable: PASS (skipped: no enabled extension in this city to toggle)
-17:33:18.708 [Auto] RESULT city-name: PASS (cityName="CS2M-SelfTest-11" expected="CS2M-SelfTest-11" (kind-4 RenameApply set CityConfigurationSystem.cityName))
-17:33:18.708 [Auto] RESULT district-reshape: PASS (nearCount=1 minNodeX=-122 expected~-122 hashStable=True (reshape rewrote the SAME district in place — exactly 1, no duplicate, no echo))
-17:33:18.709 [Auto] RESULT line-visibility: PASS (HiddenRoute=True (visibility apply added the tag by prefab+number))
-17:33:18.709 [Auto] RESULT ext-move: PASS (skipped: no extension in this city to relocate)
-17:33:18.710 [Auto] RESULT net-batch: PASS (edges 751->752 wired=True compResolved=True subBlocks=4)
-17:33:18.710 [Auto] INFO population=6 maxPopulation(xp)=94 (population is emergent sim state — NOT directly synced; see gaps)
-17:33:18.710 [Auto] GAPS not-validated-here: live population/citizens/vehicles/traffic/economy tick are not synced (emergent simulation); net snapping/split, growable edits, zone flood-fill are v2.
-17:33:18.711 [Auto] scripted test DONE
-17:33:20.703 [Auto] VERIFY heartbeat remoteObjects=18 (was 18) totalEdges=752 (was 752) simSpeed=3 status=PLAYING
+19:11:17.048 [Auto] ENABLED role=SELFTEST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\selftest.log
+19:11:36.816 [Auto] loadingComplete purpose=LoadGame mode=Game
+19:11:36.817 [Auto] city loaded -> arming StartServer
+19:11:38.740 [Auto] StartServer on :1111 status=PLAYING
+19:11:38.741 [Auto] RESULT role: PASS (CurrentRole=Server (expect Server after StartServer))
+19:11:38.747 [Auto] RESULT contract: PASS (42 comandos classificados, 11 tools cobertos)
+19:11:38.795 [Auto] SELFTEST beginning — validating every feature against real game state
+19:11:38.797 [Auto] PLAYING — watching for placements in the world.
+19:11:38.797 [Auto] VERIFY CHANGED remoteObjects=0 (was -1) totalEdges=735 (was -1) simSpeed=1 status=PLAYING
+19:11:40.790 [Auto] TEST replay INJECT road name=Small Road A=(382,-241) B=(271,-350)
+19:11:40.790 [Auto] TEST money INJECT before=2000000000 unlimited=True -> set=2001000000
+19:11:40.812 [Auto] VERIFY CHANGED remoteObjects=0 (was 0) totalEdges=736 (was 735) simSpeed=1 status=PLAYING
+19:11:43.226 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=736 (was 736) simSpeed=1 status=PLAYING
+19:11:43.491 [Auto] RESULT money: PASS (guard OK: city has unlimited money -> apply correctly skipped)
+19:11:43.491 [Auto] TEST progression INJECT beforeXp=520 milestone=0 maxPop=94 -> setXp=200520
+19:11:45.988 [Auto] VERIFY heartbeat remoteObjects=0 (was 0) totalEdges=736 (was 736) simSpeed=3 status=PLAYING
+19:11:46.553 [Auto] RESULT progression: PASS (afterXp=200520 expected~200520)
+19:11:46.554 [Auto] TEST object INJECT kind=tree name=FloridaPalmTree01 pos=(818,408,373) syncId=11506054933140996097
+19:11:46.572 [Auto] VERIFY CHANGED remoteObjects=1 (was 0) totalEdges=736 (was 736) simSpeed=3 status=PLAYING
+19:11:49.057 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=736 (was 736) simSpeed=3 status=PLAYING
+19:11:49.332 [Auto] RESULT object:tree: PASS (remoteObjects=1 (>= 1))
+19:11:49.332 [Auto] TEST object INJECT kind=building name=IndustrialAgricultureHub03_L1 pos=(558,402,385) syncId=11506054933140996098
+19:11:49.354 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=743 (was 736) simSpeed=3 status=PLAYING
+19:11:51.840 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=743 (was 743) simSpeed=3 status=PLAYING
+19:11:52.117 [Auto] RESULT object:building: PASS (remoteObjects=2 (>= 2))
+19:11:52.118 [Auto] TEST move INJECT syncId=11506054933140996098 from=(558,385) to=(573,400)
+19:11:54.332 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=743 (was 743) simSpeed=3 status=PLAYING
+19:11:54.897 [Auto] RESULT move: PASS (pos=(573,400) expected=(573,400))
+19:11:54.898 [Auto] TEST zoning INJECT block=(718,474) cell0 37->40 name='Industrial Manufacturing'
+19:11:56.815 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=743 (was 743) simSpeed=3 status=PLAYING
+19:11:57.674 [Auto] RESULT zoning: PASS (cell0=40 expected=40)
+19:11:57.675 [Auto] TEST net INJECT name=Small Road edgesBefore=743
+19:11:57.722 [Auto] VERIFY CHANGED remoteObjects=2 (was 2) totalEdges=746 (was 743) simSpeed=3 status=PLAYING
+19:12:00.218 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=746 (was 746) simSpeed=3 status=PLAYING
+19:12:00.498 [Auto] RESULT net: PASS (edges 743->746 composition=True nodeConnected=True zoneBlocks=4 (real build, not a hollow edge))
+19:12:00.498 [Auto] TEST net-delete INJECT start=(382,-281) end=(286,-376) edgesBefore=746
+19:12:00.513 [Auto] VERIFY CHANGED remoteObjects=2 (was 2) totalEdges=745 (was 746) simSpeed=3 status=PLAYING
+19:12:03.017 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=745 (was 745) simSpeed=3 status=PLAYING
+19:12:03.296 [Auto] RESULT net-delete: PASS (edges 746->745)
+19:12:03.297 [Auto] TEST net-upgrade INJECT edge=52052 left=0x1000 (from SideFlagMask)
+19:12:05.539 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=745 (was 745) simSpeed=3 status=PLAYING
+19:12:06.111 [Auto] RESULT net-upgrade: PASS (left=0x1000 expectedBit=0x1000)
+19:12:06.111 [Auto] TEST delete INJECT syncId=11506054933140996097
+19:12:06.137 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=745 (was 745) simSpeed=3 status=PLAYING
+19:12:08.651 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=745 (was 745) simSpeed=3 status=PLAYING
+19:12:08.919 [Auto] RESULT delete: PASS (tree removed)
+19:12:08.919 [Auto] TEST tax INJECT main 12->15
+19:12:11.174 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=745 (was 745) simSpeed=3 status=PLAYING
+19:12:11.736 [Auto] RESULT tax: PASS (main=15 expected=15)
+19:12:11.737 [Auto] TEST budget INJECT name=Roads 100->90
+19:12:13.687 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=745 (was 745) simSpeed=3 status=PLAYING
+19:12:14.538 [Auto] RESULT budget: PASS (pct=90 expected=90)
+19:12:14.540 [Auto] TEST district INJECT name=District Area center=(498,325) before=2
+19:12:14.555 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=745 (was 745) simSpeed=3 status=PLAYING
+19:12:15.489 [Auto] VERIFY CHANGED remoteObjects=2 (was 2) totalEdges=738 (was 745) simSpeed=3 status=PLAYING
+19:12:15.496 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:17.347 [Auto] RESULT district: PASS (districts 2->3)
+19:12:17.348 [Auto] TEST water INJECT pos=(498,325) before=9
+19:12:17.361 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:19.875 [Auto] VERIFY heartbeat remoteObjects=2 (was 2) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:20.160 [Auto] RESULT water: PASS (waterSources 9->10)
+19:12:20.161 [Auto] TEST water CLEANUP removed test source entity=55380
+19:12:20.161 [Auto] TEST terrain INJECT raise pos=(618,445) h0=397,31
+19:12:20.177 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:22.726 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:23.005 [Auto] RESULT terrain: PASS (height 397,31->4096,00)
+19:12:23.006 [Auto] TEST policy INJECT name=Taxi Starting Fee active=True adj 23->40
+19:12:23.025 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:23.031 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:25.604 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:25.870 [Auto] RESULT policy: PASS (found=True adj=40 expected=40)
+19:12:25.870 [Auto] TEST pause INJECT joining=true (speedBefore=0 fi=10558706)
+19:12:28.072 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=738 (was 738) simSpeed=0 status=PLAYING
+19:12:28.621 [Auto] RESULT pause: PASS (frameIndex 10558706->10558706 (sim must freeze while joining))
+19:12:28.621 [Auto] TEST pause SABOTAGE selectedSpeed=1 (emulating the pause-button/SPACE rewrite)
+19:12:30.538 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=738 (was 738) simSpeed=0 status=PLAYING
+19:12:31.372 [Auto] RESULT pause-enforce: PASS (frameIndex 10558706->10558706 (must stay frozen despite adversarial speed write))
+19:12:31.373 [Auto] TEST pause INJECT joining=false (resume)
+19:12:33.033 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:34.176 [Auto] RESULT resume: PASS (frameIndex 10558706->10559209 (sim must tick again after resume))
+19:12:34.178 [Auto] TEST devtree INJECT node=SatelliteUplinkNode
+19:12:35.557 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:37.003 [Auto] RESULT devtree: PASS (node Locked disabled (UnlockSystem consumed our event))
+19:12:37.005 [Auto] TEST env+nativeDelete INJECT tree=FloridaPalmTree01 pos=(798,353)
+19:12:37.039 [Auto] VERIFY CHANGED remoteObjects=2 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:37.047 [Auto] VERIFY CHANGED remoteObjects=1 (was 2) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:39.613 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:39.885 [Auto] RESULT env: PASS (weatherOverride=True clockRealigned=True)
+19:12:39.885 [Auto] RESULT native-delete: PASS (native tree removed by prefab+pos)
+19:12:39.887 [Auto] TEST tile INJECT center=(-623,3117)
+19:12:42.157 [Auto] VERIFY heartbeat remoteObjects=1 (was 1) totalEdges=738 (was 738) simSpeed=3 status=PLAYING
+19:12:42.718 [Auto] RESULT tile: PASS (tile unlocked (Native removed))
+19:12:42.720 [Auto] TEST route INJECT prefab=Bus Line id=11506054933140996100

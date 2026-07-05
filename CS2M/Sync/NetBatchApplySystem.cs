@@ -117,43 +117,73 @@ namespace CS2M.Sync
         }
 
         /// <summary>Apply the whole batch atomically. Returns false WITHOUT mutating anything when a boundary
-        /// node can't be resolved yet (the caller parks the batch); <see cref="_lastMissingId"/> names it.</summary>
+        /// node can't be resolved yet (the caller parks the batch); <see cref="_lastMissingId"/> names it.
+        /// Atomicity is real: prefabs are validated up front (a miss DROPS the whole batch — a missing
+        /// prefab never heals by retrying), and boundary resolution PLANS first, mutating identity state
+        /// only after every id resolved (a park leaves zero side effects).</summary>
         private bool TryApply(NetBatchCommand cmd)
         {
             _lastMissingId = 0;
             var idToEntity = new Dictionary<ulong, Entity>();
             var boundarySet = new HashSet<ulong>();
 
-            // (1) Resolve boundary FIRST — bail before any structural change if one is missing.
+            // (0) Validate EVERY prefab/archetype up front (pure reads). Any miss → consume the batch as a
+            // loud DROP instead of building a PARTIAL network (the adversarial review's atomicity finding).
+            if (!ValidateAllPrefabs(cmd))
+            {
+                CS2M.Log.Info("[Batch] DROP prefab-missing (whole batch — see RESOLVE-FAIL above)");
+                return true;
+            }
+
+            // (1) Resolve boundary — PLAN ONLY, no mutation, so a park has zero side effects. `claimed`
+            // prevents two boundary ids adopting the SAME physical node (two save nodes <0.5 m apart —
+            // the review's critical finding: it produced a degenerate self-loop edge and collapsed two
+            // junctions into one).
+            var adoptPlan = new List<KeyValuePair<ulong, Entity>>();
+            var claimed = new HashSet<Entity>();
             if (cmd.BoundaryNodeIds != null)
             {
                 bool hasPos = cmd.BoundaryPosX != null && cmd.BoundaryPosX.Length == cmd.BoundaryNodeIds.Length;
                 for (int bi = 0; bi < cmd.BoundaryNodeIds.Length; bi++)
                 {
                     ulong bid = cmd.BoundaryNodeIds[bi];
-                    if (!CS2M_NodeSyncIds.TryResolve(EntityManager, bid, out Entity be))
+                    if (CS2M_NodeSyncIds.TryResolve(EntityManager, bid, out Entity be))
                     {
-                        // Id-miss fallback for SAVE-loaded boundary nodes (no id on either PC): save
-                        // geometry is byte-identical on both machines (same file at join), so a STRICT
-                        // <0.5 m match is exact resolution there, not guessing. Adopt the id so every
-                        // later batch touching this node resolves instantly.
-                        if (hasPos && FindNodeStrict(
-                                new float3(cmd.BoundaryPosX[bi], cmd.BoundaryPosY[bi], cmd.BoundaryPosZ[bi]),
-                                out be))
+                        if (!claimed.Add(be))
                         {
-                            CS2M_NodeSyncIds.Register(EntityManager, be, bid);
-                            CS2M.Log.Info($"[Batch] boundary adopt-by-pos id={bid} node={be.Index}");
-                        }
-                        else
-                        {
+                            // Two ids already bound to one entity = pre-existing map corruption. Park —
+                            // never build a self-loop out of it.
                             _lastMissingId = bid;
                             return false;
                         }
+                    }
+                    // Id-miss fallback for SAVE-loaded boundary nodes (no id on either PC): save geometry
+                    // is byte-identical on both machines (same file at join), so a STRICT <0.5 m match is
+                    // exact resolution there, not guessing. Only BARE nodes (no CS2M_NodeSyncId) not yet
+                    // claimed this call are valid adopt targets.
+                    else if (hasPos && FindNodeStrict(
+                                 new float3(cmd.BoundaryPosX[bi], cmd.BoundaryPosY[bi], cmd.BoundaryPosZ[bi]),
+                                 claimed, out be))
+                    {
+                        claimed.Add(be);
+                        adoptPlan.Add(new KeyValuePair<ulong, Entity>(bid, be));
+                    }
+                    else
+                    {
+                        _lastMissingId = bid;
+                        return false;
                     }
 
                     idToEntity[bid] = be;
                     boundarySet.Add(bid);
                 }
+            }
+
+            // Every boundary resolved — NOW commit the planned adoptions.
+            foreach (KeyValuePair<ulong, Entity> adopt in adoptPlan)
+            {
+                CS2M_NodeSyncIds.Register(EntityManager, adopt.Value, adopt.Key);
+                CS2M.Log.Info($"[Batch] boundary adopt-by-pos id={adopt.Key} node={adopt.Value.Index}");
             }
 
             // (2) Create new NODES.
@@ -180,6 +210,20 @@ namespace CS2M.Sync
                 {
                     CS2M.Log.Info($"[Batch] SKIP edge {i} unresolved endpoint " +
                                   $"(startId={cmd.EdgeStartNodeIds[i]} endId={cmd.EdgeEndNodeIds[i]})");
+                    continue;
+                }
+
+                // Defense in depth vs the double-claim class: never fabricate a self-loop.
+                if (s == en)
+                {
+                    CS2M.Log.Info($"[Batch] SKIP edge {i} degenerate (start==end entity={s.Index})");
+                    continue;
+                }
+
+                // Idempotency: this exact edge (by node-pair identity) already exists → duplicate delivery.
+                if (FindEdgeById(cmd.EdgeStartNodeIds[i], cmd.EdgeEndNodeIds[i], out _))
+                {
+                    CS2M.Log.Info($"[Batch] SKIP dup edge {i} (already live)");
                     continue;
                 }
 
@@ -216,6 +260,14 @@ namespace CS2M.Sync
 
         private Entity CreateNode(NetBatchCommand cmd, int i)
         {
+            // Idempotency (duplicate/re-delivered batch, same guard class as RemotePlacementApplySystem's
+            // SyncId check): if this id already maps to a LIVE node, reuse it — never fabricate a twin.
+            if (CS2M_NodeSyncIds.TryResolve(EntityManager, cmd.NodeIds[i], out Entity existing))
+            {
+                CS2M.Log.Info($"[Batch] SKIP dup node id={cmd.NodeIds[i]} (already live)");
+                return existing;
+            }
+
             if (!ResolveNetPrefab(cmd.NodePrefabTypes[i], cmd.NodePrefabNames[i], out Entity netPrefab, out NetData netData))
             {
                 return Entity.Null;
@@ -376,10 +428,12 @@ namespace CS2M.Sync
             return true;
         }
 
-        /// <summary>Nearest live standalone node within 0.5 m of the builder's settled coord, or false.
+        /// <summary>Nearest BARE live node (no <see cref="CS2M_NodeSyncId"/> yet, not already claimed by an
+        /// earlier boundary id of this batch) within 0.5 m of the builder's settled coord, or false.
         /// Intentionally STRICT: this is exact-resolution for byte-identical save geometry, not the loose
-        /// proximity guessing (3.5–10 m radii) this architecture retired for session content.</summary>
-        private bool FindNodeStrict(float3 pos, out Entity node)
+        /// proximity guessing (3.5–10 m radii) this architecture retired for session content. An id-bearing
+        /// node is NEVER a valid adopt target — overwriting its id would silently reassign identity.</summary>
+        private bool FindNodeStrict(float3 pos, HashSet<Entity> claimed, out Entity node)
         {
             node = Entity.Null;
             float best = 0.25f; // 0.5 m squared
@@ -388,6 +442,11 @@ namespace CS2M.Sync
             {
                 foreach (Entity n in arr)
                 {
+                    if (claimed.Contains(n) || EntityManager.HasComponent<CS2M_NodeSyncId>(n))
+                    {
+                        continue;
+                    }
+
                     float d = math.distancesq(EntityManager.GetComponentData<Node>(n).m_Position, pos);
                     if (d < best)
                     {
@@ -402,6 +461,48 @@ namespace CS2M.Sync
             }
 
             return node != Entity.Null;
+        }
+
+        /// <summary>Pure-read pre-validation of every prefab (and its archetype) the batch references, so
+        /// the apply is all-or-nothing: a resolve failure drops the WHOLE batch instead of committing a
+        /// partial network (some arms present, others silently missing — a lasting desync).</summary>
+        private bool ValidateAllPrefabs(NetBatchCommand cmd)
+        {
+            var seen = new HashSet<string>();
+
+            int nodeCount = cmd.NodeIds != null ? cmd.NodeIds.Length : 0;
+            for (int i = 0; i < nodeCount; i++)
+            {
+                string key = cmd.NodePrefabTypes[i] + "|" + cmd.NodePrefabNames[i];
+                if (!seen.Add(key))
+                {
+                    continue;
+                }
+
+                if (!ResolveNetPrefab(cmd.NodePrefabTypes[i], cmd.NodePrefabNames[i], out _, out NetData nd)
+                    || !nd.m_NodeArchetype.Valid)
+                {
+                    return false;
+                }
+            }
+
+            int edgeCount = cmd.EdgeStartNodeIds != null ? cmd.EdgeStartNodeIds.Length : 0;
+            for (int i = 0; i < edgeCount; i++)
+            {
+                string key = "E" + cmd.EdgePrefabTypes[i] + "|" + cmd.EdgePrefabNames[i];
+                if (!seen.Add(key))
+                {
+                    continue;
+                }
+
+                if (!ResolveNetPrefab(cmd.EdgePrefabTypes[i], cmd.EdgePrefabNames[i], out _, out NetData ed)
+                    || !ed.m_EdgeArchetype.Valid)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void SetOrAdd<T>(Entity e, T data) where T : unmanaged, IComponentData
