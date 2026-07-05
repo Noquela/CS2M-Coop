@@ -7,26 +7,46 @@ using Game;
 using Game.Common;
 using Game.Net;
 using Game.Prefabs;
+using Game.Tools;
 using Unity.Entities;
 using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
     /// <summary>
-    ///     AtomicBatch APPLY (receiver). Drains ONE <see cref="NetBatchCommand"/> per frame and applies the
-    ///     WHOLE batch in that single frame — a save/load in miniature. Runs at
-    ///     <c>UpdateBefore(Modification1)</c> so the Created/Updated tags baked into the net archetype survive
-    ///     into every consumer (References@Mod2B, CompositionSelect@Mod3, Geometry/Lane/Block@Mod4) this frame
-    ///     and the derived pipeline re-computes from a COMPLETE, identical input set.
+    ///     AtomicBatch APPLY (receiver), HYBRID model. Drains ONE <see cref="NetBatchCommand"/> per frame and
+    ///     applies the WHOLE batch in that single frame — a save/load in miniature. Runs at
+    ///     <c>UpdateBefore(Modification1)</c> so everything it emits is consumed by GenerateNodes@Mod1 /
+    ///     GenerateEdges@Mod2 and the derived pipeline (References@Mod2B, CompositionSelect@Mod3,
+    ///     Geometry/Lane/Block@Mod4) re-computes from a COMPLETE, identical input set this frame.
+    ///
+    ///     NODES are created DIRECTLY from the prefab's <c>NetData.m_NodeArchetype</c> — proven: direct nodes
+    ///     render correctly. EDGES take the LEGACY vanilla definition path instead of the archetype: each is
+    ///     emitted as a <c>CreationDefinition(Permanent)</c> + <c>NetCourse</c> (the exact pattern of
+    ///     <see cref="NetPlaceApplySystem"/>.EmitCourse) whose two endpoints reference the already
+    ///     created/resolved node entities by <c>m_Entity</c>. The direct-archetype edge was a hollow shell —
+    ///     the pavement/lane mesh and terrain deformation never derived (this system runs before the net
+    ///     consumers, but a raw archetype edge is not a definition, so GenerateEdges never (re)builds its
+    ///     geometry) — whereas GenerateEdges FROM A DEFINITION builds the REAL edge (curve terrain-fit,
+    ///     composition, geometry, lanes, zone blocks, mesh). ALL of a batch's node creations + edge
+    ///     definitions happen in the SAME OnUpdate, so GenerateEdges consumes the complete set in one frame,
+    ///     NodeAlign sees every arm at once, and ATOMICITY is preserved.
     ///
     ///     Steps: (1) resolve every boundary node by <see cref="CS2M_NodeSyncIds.TryResolve"/> — any miss parks
     ///     the ENTIRE batch (retry ~every 15 frames up to 300, then DROP; NEVER guess by proximity). (2) create
-    ///     new nodes directly from the prefab's <c>NetData.m_NodeArchetype</c>. (3) create new edges from
-    ///     <c>m_EdgeArchetype</c>, linking resolved (new|boundary) node entities by identity. (4) mark boundary
-    ///     nodes Updated (+BatchesUpdated) so ReferencesSystem re-wires ConnectedEdge and NodeAlign re-centres
-    ///     with the new arm. (5) apply the split's deletes by node-pair identity + cascade. Every created /
-    ///     deleted entity is tagged <c>CS2M_RemotePlaced</c> (the by-component echo guard); nothing gets
-    ///     <c>Temp</c> or <c>Applied</c> (Applied would re-trigger detectors).
+    ///     new nodes directly from <c>m_NodeArchetype</c> (tagged <c>CS2M_RemotePlaced</c>, the by-component
+    ///     echo guard; no <c>Temp</c>/<c>Applied</c>). (3) emit one Permanent definition per new edge
+    ///     (<see cref="EmitEdgeCourse"/>), linking resolved (new|boundary) node entities by identity. The edge
+    ///     GenerateEdges then produces is born <c>Applied &amp; Created</c> and WITHOUT <c>CS2M_RemotePlaced</c>
+    ///     (we never hold that entity), so — same contract as NetPlaceApplySystem — each course MARKS its seg
+    ///     hash in <see cref="RemoteNetEcho"/> first and <see cref="NetBatchCaptureSystem"/> skips it
+    ///     (reason=remoteEcho) instead of re-broadcasting. Any edge <c>Upgraded</c> flags are deferred to
+    ///     <see cref="RemoteNetUpgradeQueue"/> and applied by identity in following frames by
+    ///     <see cref="NetEditApplySystem"/> (existing mechanism, zero new apply code). (4) mark boundary nodes
+    ///     Updated (+BatchesUpdated) so ReferencesSystem re-wires ConnectedEdge and NodeAlign re-centres with
+    ///     the new arm. (5) apply the split's deletes by node-pair identity + cascade. Emitted definitions are
+    ///     destroyed the NEXT frame once GenerateNodes/Edges have consumed them (<c>_pendingDefinitions</c>,
+    ///     mirrors NetPlaceApplySystem).
     ///
     ///     The delete resolution (<see cref="FindEdgeById"/> / <see cref="RebuildAfterDelete"/>) intentionally
     ///     duplicates the identity-first logic from <see cref="NetEditApplySystem"/> rather than refactoring
@@ -36,6 +56,11 @@ namespace CS2M.Sync
     {
         private PrefabSystem _prefabSystem;
         private EntityQuery _liveNodes;
+
+        // Edge definitions injected this frame (the vanilla path — see EmitEdgeCourse). Consumed by
+        // GenerateNodes/Edges this same frame, then destroyed at the TOP of next OnUpdate. Exact mirror of
+        // NetPlaceApplySystem._pendingDefinitions.
+        private readonly List<Entity> _pendingDefinitions = new List<Entity>();
 
         // A batch whose boundary nodes are not all resolvable yet (a sibling batch that creates them may still
         // be in flight). Held until they resolve or it ages out — never applied partially.
@@ -62,6 +87,19 @@ namespace CS2M.Sync
 
         protected override void OnUpdate()
         {
+            // Edge definitions injected last frame were consumed by GenerateNodes/Edges already — clean up.
+            // (ToolClearSystem may have destroyed them first; the Exists guard makes this idempotent.)
+            // Mirrors NetPlaceApplySystem; runs before the PLAYING gate so nothing ever leaks.
+            for (int i = 0; i < _pendingDefinitions.Count; i++)
+            {
+                if (EntityManager.Exists(_pendingDefinitions[i]))
+                {
+                    EntityManager.DestroyEntity(_pendingDefinitions[i]);
+                }
+            }
+
+            _pendingDefinitions.Clear();
+
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
                 return;
@@ -227,8 +265,8 @@ namespace CS2M.Sync
                     continue;
                 }
 
-                Entity ee = CreateEdge(cmd, i, s, en);
-                if (ee != Entity.Null)
+                // Vanilla path: emit a Permanent definition (GenerateEdges builds the REAL edge this frame).
+                if (EmitEdgeCourse(cmd, i, s, en))
                 {
                     createdEdges++;
                     if (boundarySet.Contains(cmd.EdgeStartNodeIds[i])) { boundaryTouched.Add(s); }
@@ -310,17 +348,19 @@ namespace CS2M.Sync
             return node;
         }
 
-        private Entity CreateEdge(NetBatchCommand cmd, int i, Entity startNode, Entity endNode)
+        /// <summary>Emit ONE vanilla net DEFINITION for this edge — the LEGACY visual-correct path, an exact
+        /// copy of <see cref="NetPlaceApplySystem"/>.EmitCourse (no pullback: node == curve endpoint). A
+        /// <c>CreationDefinition(Permanent)</c> + <c>NetCourse</c> whose endpoints reference the already
+        /// created/resolved node entities by <c>m_Entity</c>; GenerateNodes@Mod1/GenerateEdges@Mod2 then build
+        /// the REAL edge THIS frame (curve terrain-fit, composition, geometry, lanes, zone blocks, mesh) — the
+        /// derivation the direct-archetype edge never got. Returns true when a definition was emitted.</summary>
+        private bool EmitEdgeCourse(NetBatchCommand cmd, int i, Entity startNode, Entity endNode)
         {
-            if (!ResolveNetPrefab(cmd.EdgePrefabTypes[i], cmd.EdgePrefabNames[i], out Entity netPrefab, out NetData netData))
+            // Prefab is pre-validated by ValidateAllPrefabs (incl. m_EdgeArchetype.Valid — kept as the
+            // "is this a real net?" proxy even though the definition path no longer uses the archetype).
+            if (!ResolveNetPrefab(cmd.EdgePrefabTypes[i], cmd.EdgePrefabNames[i], out Entity netPrefab, out _))
             {
-                return Entity.Null;
-            }
-
-            if (!netData.m_EdgeArchetype.Valid)
-            {
-                CS2M.Log.Info($"[Batch] edge RESOLVE-FAIL {cmd.EdgePrefabNames[i]} invalid edge archetype");
-                return Entity.Null;
+                return false;
             }
 
             var bezier = new Bezier4x3(
@@ -329,43 +369,84 @@ namespace CS2M.Sync
                 new float3(cmd.EdgeCX[i], cmd.EdgeCY[i], cmd.EdgeCZ[i]),
                 new float3(cmd.EdgeDX[i], cmd.EdgeDY[i], cmd.EdgeDZ[i]));
 
-            Entity edge = EntityManager.CreateEntity();
-            EntityManager.SetArchetype(edge, netData.m_EdgeArchetype);
+            // ECHO GUARD (same as NetPlaceApplySystem.EmitCourse line ~282): the edge GenerateEdges produces
+            // from this definition is born Applied+Created and WITHOUT CS2M_RemotePlaced (we never hold that
+            // entity), so NetBatchCaptureSystem would otherwise re-capture and re-broadcast it. Marking the
+            // seg hash first makes the capture skip it (reason=remoteEcho). prefabName is cmd.EdgePrefabNames[i]
+            // — the same prefab.name the capture hashes for the produced edge.
+            RemoteNetEcho.Mark(RemoteNetEcho.SegHash(bezier.a, bezier.d, cmd.EdgePrefabNames[i]));
 
-            SetOrAdd(edge, new PrefabRef(netPrefab));
-            SetOrAdd(edge, new Edge { m_Start = startNode, m_End = endNode });
-            SetOrAdd(edge, new Curve { m_Bezier = bezier, m_Length = MathUtils.Length(bezier) });
-            // CRITICAL (I1): without a Composition entry CompositionSelectSystem@Mod3 falls into an
-            // untraced fallback. The prefab is the composition source for a default (un-upgraded) edge.
-            SetOrAdd(edge, new Composition { m_Edge = netPrefab, m_StartNode = netPrefab, m_EndNode = netPrefab });
-            // Same BuildOrder on both PCs → deterministic lane/block ordering.
-            SetOrAdd(edge, new BuildOrder { m_Start = cmd.EdgeBuildOrderStart[i], m_End = cmd.EdgeBuildOrderEnd[i] });
-            SetOrAdd(edge, new PseudoRandomSeed((ushort) cmd.EdgeSeeds[i]));
+            // The edge's single Game.Net.Elevation float2 maps to BOTH per-endpoint course elevations —
+            // exactly how NetDetectorSystem shipped it into NetPlaceCommand (el → startElev AND endElev).
+            float2 elev = cmd.EdgeHasElevation[i]
+                ? new float2(cmd.EdgeElevX[i], cmd.EdgeElevY[i])
+                : float2.zero;
 
+            NetCourse course = default;
+            course.m_Curve = bezier;
+            course.m_Length = MathUtils.Length(bezier);
+            course.m_FixedIndex = -1;
+
+            course.m_StartPosition.m_Position = bezier.a;
+            course.m_StartPosition.m_Rotation = NetUtils.GetNodeRotation(MathUtils.StartTangent(bezier));
+            course.m_StartPosition.m_CourseDelta = 0f;
+            course.m_StartPosition.m_Elevation = elev;
+            course.m_StartPosition.m_ParentMesh = -1;
+            course.m_StartPosition.m_Flags = CoursePosFlags.IsFirst;
+            course.m_StartPosition.m_Entity = startNode;
+
+            course.m_EndPosition.m_Position = bezier.d;
+            course.m_EndPosition.m_Rotation = NetUtils.GetNodeRotation(MathUtils.EndTangent(bezier));
+            course.m_EndPosition.m_CourseDelta = 1f;
+            course.m_EndPosition.m_Elevation = elev;
+            course.m_EndPosition.m_ParentMesh = -1;
+            course.m_EndPosition.m_Flags = CoursePosFlags.IsLast;
+            course.m_EndPosition.m_Entity = endNode;
+
+            Entity def = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(def, new CreationDefinition
+            {
+                m_Prefab = netPrefab,
+                m_RandomSeed = cmd.EdgeSeeds[i], // same seed both PCs → deterministic pylons/catenary/details
+                m_Flags = CreationFlags.Permanent, // no Temp: GenerateEdge builds the REAL segment this frame
+            });
+            EntityManager.AddComponentData(def, course);
+            EntityManager.AddComponent<Updated>(def); // required by GenerateEdgesSystem's definition query
+            _pendingDefinitions.Add(def);
+
+            // BuildOrder is NOT set here: the vanilla GenerateEdges pipeline assigns it locally (it always
+            // did on the legacy net path, which produced correct geometry). cmd.EdgeBuildOrderStart/End stay
+            // in the wire format (unused on apply) rather than churn the command struct + captor.
+
+            // Upgraded (sidewalks/trees/sound barriers/quays/lighting): applied BY IDENTITY via the existing
+            // net-edit pipeline instead of the CreationDefinition. NetEditApplySystem drains
+            // RemoteNetUpgradeQueue in FOLLOWING frames (once GenerateEdges has built this edge and both
+            // endpoint node ids resolve) — zero new apply code, and it is the path already proven for
+            // remote upgrades. The definition deliberately does NOT carry Upgraded (that interaction with the
+            // batch was never validated).
             if (cmd.EdgeHasUpgraded[i])
             {
-                SetOrAdd(edge, new Upgraded
+                float3 sPos = EntityManager.GetComponentData<Node>(startNode).m_Position;
+                float3 ePos = EntityManager.GetComponentData<Node>(endNode).m_Position;
+                RemoteNetUpgradeQueue.Enqueue(new NetUpgradeCommand
                 {
-                    m_Flags = new CompositionFlags
-                    {
-                        m_General = (CompositionFlags.General) cmd.EdgeUpgradedG[i],
-                        m_Left = (CompositionFlags.Side) cmd.EdgeUpgradedL[i],
-                        m_Right = (CompositionFlags.Side) cmd.EdgeUpgradedR[i],
-                    },
+                    StartNodeId = cmd.EdgeStartNodeIds[i],
+                    EndNodeId = cmd.EdgeEndNodeIds[i],
+                    General = cmd.EdgeUpgradedG[i],
+                    Left = cmd.EdgeUpgradedL[i],
+                    Right = cmd.EdgeUpgradedR[i],
+                    // Node positions: the position fallback NetEditApplySystem.FindEdge uses when identity
+                    // can't resolve (legacy/save content). Identity is the primary path here.
+                    StartX = sPos.x, StartY = sPos.y, StartZ = sPos.z,
+                    EndX = ePos.x, EndY = ePos.y, EndZ = ePos.z,
+                    IsNode = false,
                 });
             }
 
-            if (cmd.EdgeHasElevation[i])
-            {
-                SetOrAdd(edge, new Game.Net.Elevation(new float2(cmd.EdgeElevX[i], cmd.EdgeElevY[i])));
-            }
-
-            if (!EntityManager.HasComponent<CS2M_RemotePlaced>(edge))
-            {
-                EntityManager.AddComponent<CS2M_RemotePlaced>(edge);
-            }
-
-            return edge;
+            CS2M.Log.Info(
+                $"[Batch] EMIT-DEF edge {i} name={cmd.EdgePrefabNames[i]} len={course.m_Length:F1} " +
+                $"startNode={startNode.Index} endNode={endNode.Index} upg={cmd.EdgeHasUpgraded[i]}");
+            return true;
         }
 
         /// <summary>Delete the edge the split removed, addressed by node-pair identity (never proximity). Tags

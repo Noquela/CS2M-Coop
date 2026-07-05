@@ -1368,6 +1368,66 @@ namespace CS2M.Sync
             finally { ents.Dispose(); }
         }
 
+        /// <summary>2-sim wire test: the host applies AND ships the same fabricated batch, so both machines
+        /// build the identical road from identical input — the client's [Batch] RECV/APPLIED plus convergent
+        /// roads/nodes hashes prove the full network round-trip of the AtomicBatch path.</summary>
+        private void SendNetBatch2()
+        {
+            if (_edgeQuery.IsEmptyIgnoreFilter) { L("[Auto] TEST net-batch2 SKIP no edges to clone"); return; }
+            NativeArray<Entity> ents = _edgeQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                Entity src = ents[0];
+                PrefabRef pr = EntityManager.GetComponentData<PrefabRef>(src);
+                if (!_prefabSystem.TryGetPrefab(pr.m_Prefab, out PrefabBase prefab) || prefab == null)
+                {
+                    L("[Auto] TEST net-batch2 SKIP no prefab");
+                    return;
+                }
+
+                Colossal.Mathematics.Bezier4x3 srcB = EntityManager.GetComponentData<Game.Net.Curve>(src).m_Bezier;
+                var a0 = new float3(srcB.a.x + 320f, srcB.a.y, srcB.a.z + 320f);
+                var d0 = new float3(srcB.a.x + 420f, srcB.a.y, srcB.a.z + 320f);
+                float3 b0 = math.lerp(a0, d0, 1f / 3f);
+                float3 c0 = math.lerp(a0, d0, 2f / 3f);
+                ulong idA = CS2M_SyncIdSystem.Allocate();
+                ulong idB = CS2M_SyncIdSystem.Allocate();
+
+                var cmd = new NetBatchCommand
+                {
+                    NodeIds = new[] { idA, idB },
+                    NodePosX = new[] { a0.x, d0.x }, NodePosY = new[] { a0.y, d0.y }, NodePosZ = new[] { a0.z, d0.z },
+                    NodeRotX = new[] { 0f, 0f }, NodeRotY = new[] { 0f, 0f }, NodeRotZ = new[] { 0f, 0f }, NodeRotW = new[] { 1f, 1f },
+                    NodePrefabTypes = new[] { prefab.GetType().Name, prefab.GetType().Name },
+                    NodePrefabNames = new[] { prefab.name, prefab.name },
+                    NodeHasStandalone = new[] { false, false },
+                    NodeHasElevation = new[] { false, false }, NodeElevX = new[] { 0f, 0f }, NodeElevY = new[] { 0f, 0f },
+                    NodeSeeds = new[] { 21, 22 },
+                    EdgeStartNodeIds = new[] { idA }, EdgeEndNodeIds = new[] { idB },
+                    EdgeAX = new[] { a0.x }, EdgeAY = new[] { a0.y }, EdgeAZ = new[] { a0.z },
+                    EdgeBX = new[] { b0.x }, EdgeBY = new[] { b0.y }, EdgeBZ = new[] { b0.z },
+                    EdgeCX = new[] { c0.x }, EdgeCY = new[] { c0.y }, EdgeCZ = new[] { c0.z },
+                    EdgeDX = new[] { d0.x }, EdgeDY = new[] { d0.y }, EdgeDZ = new[] { d0.z },
+                    EdgePrefabTypes = new[] { prefab.GetType().Name },
+                    EdgePrefabNames = new[] { prefab.name },
+                    EdgeHasUpgraded = new[] { false },
+                    EdgeUpgradedG = new[] { 0u }, EdgeUpgradedL = new[] { 0u }, EdgeUpgradedR = new[] { 0u },
+                    EdgeHasElevation = new[] { false }, EdgeElevX = new[] { 0f }, EdgeElevY = new[] { 0f },
+                    EdgeSeeds = new[] { 23 },
+                    EdgeBuildOrderStart = new[] { 0u }, EdgeBuildOrderEnd = new[] { 15u },
+                    DelStartNodeIds = new ulong[0], DelEndNodeIds = new ulong[0],
+                    DelStartX = new float[0], DelStartZ = new float[0], DelEndX = new float[0], DelEndZ = new float[0],
+                    BoundaryNodeIds = new ulong[0],
+                    BoundaryPosX = new float[0], BoundaryPosY = new float[0], BoundaryPosZ = new float[0],
+                };
+
+                RemoteNetBatchQueue.Enqueue(cmd);      // host builds it locally
+                Command.SendToAll?.Invoke(cmd);        // client builds the SAME road over the wire
+                L($"[Auto] TEST net-batch2 SEND ids={idA}/{idB} prefab={prefab.name}");
+            }
+            finally { ents.Dispose(); }
+        }
+
         /// <summary>The strong assertions for the direct-archetype recipe: the node ids resolve, the game's
         /// ReferencesSystem WIRED the edge into ConnectedEdge (derivation ran), and CompositionSelectSystem
         /// RESOLVED Composition to a real NetComposition entity (carries NetCompositionData) — i.e. it no
@@ -3224,7 +3284,7 @@ namespace CS2M.Sync
 
         private void RunHostStep()
         {
-            if (_testStep >= 28) { return; }
+            if (_testStep >= 29) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
 
             switch (_testStep)
@@ -3256,7 +3316,11 @@ namespace CS2M.Sync
                 case 24: SendCityName2(); _testTimer = 300; break;
                 case 25: SendLineVisibility2(); _testTimer = 300; break;
                 case 26: SendTax2(); _testTimer = 300; break;
-                case 27: L("[Auto] scripted test DONE (over the wire). Check CLIENT log VERIFY lines."); break;
+                // v57: AtomicBatch over the REAL wire — the one seam no solo test covers. Host enqueues the
+                // SAME fabricated batch locally AND ships it; both sides build the identical road from
+                // identical input → client logs [Batch] RECV/APPLIED and roads/nodes hashes stay convergent.
+                case 27: SendNetBatch2(); _testTimer = 400; break;
+                case 28: L("[Auto] scripted test DONE (over the wire). Check CLIENT log VERIFY lines."); break;
             }
 
             _testStep++;

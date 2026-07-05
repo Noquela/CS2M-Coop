@@ -459,6 +459,16 @@ namespace CS2M.Sync
                     // real edit (clearing a work area) and still syncs.
                     if (EntityManager.HasComponent<Owner>(area))
                     {
+                        // CONTRACT SCOPE (same rule as the create/edit queries): an owned area is only
+                        // synced when it is a resource FIELD (Extractor). Cosmetic sub-areas (Hangaround/
+                        // Walking/Grass…) are regenerated LOCALLY per machine — the sim swaps them while
+                        // the owner lives, and shipping that delete removed the OTHER PC's healthy local copy
+                        // (the areas(hash) drift Bruno hit on 05/07).
+                        if (!EntityManager.HasComponent<Game.Areas.Extractor>(area))
+                        {
+                            continue;
+                        }
+
                         Entity areaOwner = EntityManager.GetComponentData<Owner>(area).m_Owner;
                         if (!EntityManager.Exists(areaOwner)
                             || EntityManager.HasComponent<Deleted>(areaOwner))
