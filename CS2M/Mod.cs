@@ -185,6 +185,14 @@ namespace CS2M
             // GenerateNodesSystem@Mod1/GenerateEdgesSystem@Mod2 and the full pipeline runs this frame.
             updateSystem.UpdateBefore<NetPlaceApplySystem>(SystemUpdatePhase.Modification1);
 
+            // AtomicBatch net sync (gated CS2M_ATOMIC=1): capture the WHOLE result of one tool apply and
+            // rebuild it atomically on the receiver (save/load in miniature) so the derived pipeline
+            // converges instead of drifting per-segment. Capture shares the detector slot (geometry has
+            // settled by ModificationEnd); apply shares the Modification1 slot so Created/Updated survive
+            // into every net consumer this frame. Both stay registered; the flag only toggles the SENDER.
+            updateSystem.UpdateBefore<NetBatchCaptureSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<NetBatchApplySystem>(SystemUpdatePhase.Modification1);
+
             // Host-authoritative node geometry (gated CS2M_NODEPIN=1): on the client, snap identified nodes
             // back to the host's coord so the <1 m junction drift (CS2 non-determinism) that breaks zone-block
             // matching converges. Same slot so GenerateNodes/Edges re-derive geometry from the pin this frame.

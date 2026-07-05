@@ -57,6 +57,12 @@ namespace CS2M.Sync
 
         protected override void OnUpdate()
         {
+            // AtomicBatch bundles edge deletes into the batch under CS2M_ATOMIC=1 — don't double-send them.
+            if (AtomicBatch.Enabled)
+            {
+                return;
+            }
+
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
                 return;

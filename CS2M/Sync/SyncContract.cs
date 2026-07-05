@@ -47,6 +47,7 @@ namespace CS2M.Sync
         {
             // ---- Net (roads / rail / pipes / power / fences / quays) --------------------------------
             { "NetPlaceCommand",        SyncClass.WorldContract },
+            { "NetBatchCommand",        SyncClass.WorldContract },
             { "NetToolReplayCommand",   SyncClass.WorldContract },
             { "NetUpgradeCommand",      SyncClass.WorldContract },
             { "NetDeleteCommand",       SyncClass.WorldContract },
@@ -107,7 +108,7 @@ namespace CS2M.Sync
         /// (no world state) so they map to an empty set. A construction tool with no mapping is a violation.</summary>
         public static readonly Dictionary<string, string[]> ToolCoverage = new Dictionary<string, string[]>
         {
-            { "NetToolSystem",       new[] { "NetPlaceCommand", "NetToolReplayCommand", "NetUpgradeCommand", "NetDeleteCommand" } },
+            { "NetToolSystem",       new[] { "NetPlaceCommand", "NetBatchCommand", "NetToolReplayCommand", "NetUpgradeCommand", "NetDeleteCommand" } },
             { "ZoneToolSystem",      new[] { "ZonePaintCommand" } },
             { "AreaToolSystem",      new[] { "AreaEditCommand", "DistrictCommand", "TilePurchaseCommand" } },
             { "ObjectToolSystem",    new[] { "ObjectPlaceCommand", "MoveCommand" } },

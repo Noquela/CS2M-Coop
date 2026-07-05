@@ -73,6 +73,12 @@ namespace CS2M.Sync
 
         protected override void OnUpdate()
         {
+            // AtomicBatch owns net sync under CS2M_ATOMIC=1 — don't ALSO ship Applied edges (double-sync).
+            if (AtomicBatch.Enabled)
+            {
+                return;
+            }
+
             RemoteNetEcho.Tick();
 
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)

@@ -97,6 +97,9 @@ namespace CS2M.Sync
         private float3 _netStart;
         private float3 _netEnd;
         private int _edgesBeforeNetDelete;
+        private ulong _batchNodeA;
+        private ulong _batchNodeB;
+        private int _edgesBeforeBatch;
         private Entity _upgradeEdge;
         private uint _upgradeExpectedLeft;
         private Entity _policyEntity;
@@ -451,7 +454,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 52) { return; }
+            if (_testStep > 54) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -509,7 +512,12 @@ namespace CS2M.Sync
                 case 49: VerifyLineVisibility(); break;
                 case 50: ActExtMove(); break;
                 case 51: VerifyExtMove(); break;
-                case 52: Summary(); break;
+                // AtomicBatch: inject a fabricated NetBatchCommand into the REAL remote queue (exactly what
+                // a received builder batch does) and assert the direct-archetype apply produced a road the
+                // derivation pipeline actually consumed (ConnectedEdge wired + Composition resolved).
+                case 52: ActNetBatch(); break;
+                case 53: VerifyNetBatch(); break;
+                case 54: Summary(); break;
             }
 
             _testStep++;
@@ -1296,6 +1304,111 @@ namespace CS2M.Sync
             if (_edgesBeforeNetDelete < 0) { return; }
             int edges = _allEdgesQuery.CalculateEntityCount();
             Result("net-delete", edges < _edgesBeforeNetDelete, $"edges {_edgesBeforeNetDelete}->{edges}");
+        }
+
+        /// <summary>AtomicBatch smoke: fabricate the batch a remote builder's capture would ship for one
+        /// isolated straight road (2 new nodes + 1 edge, no boundary) and enqueue it into the REAL
+        /// RemoteNetBatchQueue. NetBatchApplySystem (always on) must create it via the direct-archetype
+        /// recipe the same frame.</summary>
+        private void ActNetBatch()
+        {
+            if (_edgeQuery.IsEmptyIgnoreFilter) { Result("net-batch", false, "no edges in city to clone"); _edgesBeforeBatch = -1; return; }
+            NativeArray<Entity> ents = _edgeQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                Entity src = ents[0];
+                PrefabRef pr = EntityManager.GetComponentData<PrefabRef>(src);
+                if (!_prefabSystem.TryGetPrefab(pr.m_Prefab, out PrefabBase prefab) || prefab == null)
+                {
+                    Result("net-batch", false, "no prefab for edge");
+                    _edgesBeforeBatch = -1;
+                    return;
+                }
+
+                Colossal.Mathematics.Bezier4x3 srcB = EntityManager.GetComponentData<Game.Net.Curve>(src).m_Bezier;
+                var a0 = new float3(srcB.a.x + 140f, srcB.a.y, srcB.a.z + 140f);
+                var d0 = new float3(srcB.a.x + 240f, srcB.a.y, srcB.a.z + 140f);
+                float3 b0 = math.lerp(a0, d0, 1f / 3f);
+                float3 c0 = math.lerp(a0, d0, 2f / 3f);
+
+                _batchNodeA = CS2M_SyncIdSystem.Allocate();
+                _batchNodeB = CS2M_SyncIdSystem.Allocate();
+                _edgesBeforeBatch = _allEdgesQuery.CalculateEntityCount();
+                L($"[Auto] TEST net-batch INJECT prefab={prefab.name} ids={_batchNodeA}/{_batchNodeB} edgesBefore={_edgesBeforeBatch}");
+
+                RemoteNetBatchQueue.Enqueue(new NetBatchCommand
+                {
+                    NodeIds = new[] { _batchNodeA, _batchNodeB },
+                    NodePosX = new[] { a0.x, d0.x }, NodePosY = new[] { a0.y, d0.y }, NodePosZ = new[] { a0.z, d0.z },
+                    NodeRotX = new[] { 0f, 0f }, NodeRotY = new[] { 0f, 0f }, NodeRotZ = new[] { 0f, 0f }, NodeRotW = new[] { 1f, 1f },
+                    NodePrefabTypes = new[] { prefab.GetType().Name, prefab.GetType().Name },
+                    NodePrefabNames = new[] { prefab.name, prefab.name },
+                    NodeHasStandalone = new[] { false, false },
+                    NodeHasElevation = new[] { false, false }, NodeElevX = new[] { 0f, 0f }, NodeElevY = new[] { 0f, 0f },
+                    NodeSeeds = new[] { 11, 12 },
+
+                    EdgeStartNodeIds = new[] { _batchNodeA }, EdgeEndNodeIds = new[] { _batchNodeB },
+                    EdgeAX = new[] { a0.x }, EdgeAY = new[] { a0.y }, EdgeAZ = new[] { a0.z },
+                    EdgeBX = new[] { b0.x }, EdgeBY = new[] { b0.y }, EdgeBZ = new[] { b0.z },
+                    EdgeCX = new[] { c0.x }, EdgeCY = new[] { c0.y }, EdgeCZ = new[] { c0.z },
+                    EdgeDX = new[] { d0.x }, EdgeDY = new[] { d0.y }, EdgeDZ = new[] { d0.z },
+                    EdgePrefabTypes = new[] { prefab.GetType().Name },
+                    EdgePrefabNames = new[] { prefab.name },
+                    EdgeHasUpgraded = new[] { false },
+                    EdgeUpgradedG = new[] { 0u }, EdgeUpgradedL = new[] { 0u }, EdgeUpgradedR = new[] { 0u },
+                    EdgeHasElevation = new[] { false }, EdgeElevX = new[] { 0f }, EdgeElevY = new[] { 0f },
+                    EdgeSeeds = new[] { 13 },
+                    EdgeBuildOrderStart = new[] { 0u }, EdgeBuildOrderEnd = new[] { 15u },
+
+                    DelStartNodeIds = new ulong[0], DelEndNodeIds = new ulong[0],
+                    DelStartX = new float[0], DelStartZ = new float[0], DelEndX = new float[0], DelEndZ = new float[0],
+                    BoundaryNodeIds = new ulong[0],
+                });
+            }
+            finally { ents.Dispose(); }
+        }
+
+        /// <summary>The strong assertions for the direct-archetype recipe: the node ids resolve, the game's
+        /// ReferencesSystem WIRED the edge into ConnectedEdge (derivation ran), and CompositionSelectSystem
+        /// RESOLVED Composition to a real NetComposition entity (carries NetCompositionData) — i.e. it no
+        /// longer points at the raw prefab we seeded. That was the implementation's #1 open risk.</summary>
+        private void VerifyNetBatch()
+        {
+            if (_edgesBeforeBatch < 0) { return; }
+            int edges = _allEdgesQuery.CalculateEntityCount();
+            bool countOk = edges > _edgesBeforeBatch;
+
+            bool wired = false;
+            bool compResolved = false;
+            int subBlocks = -1;
+            if (CS2M_NodeSyncIds.TryResolve(EntityManager, _batchNodeA, out Entity na)
+                && EntityManager.HasBuffer<Game.Net.ConnectedEdge>(na))
+            {
+                DynamicBuffer<Game.Net.ConnectedEdge> ce = EntityManager.GetBuffer<Game.Net.ConnectedEdge>(na, true);
+                for (int i = 0; i < ce.Length; i++)
+                {
+                    Entity e = ce[i].m_Edge;
+                    if (!EntityManager.Exists(e) || EntityManager.HasComponent<Deleted>(e)) { continue; }
+
+                    wired = true;
+                    if (EntityManager.HasComponent<Game.Net.Composition>(e))
+                    {
+                        Game.Net.Composition comp = EntityManager.GetComponentData<Game.Net.Composition>(e);
+                        compResolved = comp.m_Edge != Entity.Null
+                                       && EntityManager.HasComponent<Game.Prefabs.NetCompositionData>(comp.m_Edge);
+                    }
+
+                    if (EntityManager.HasBuffer<Game.Zones.SubBlock>(e))
+                    {
+                        subBlocks = EntityManager.GetBuffer<Game.Zones.SubBlock>(e, true).Length;
+                    }
+
+                    break;
+                }
+            }
+
+            Result("net-batch", countOk && wired && compResolved,
+                $"edges {_edgesBeforeBatch}->{edges} wired={wired} compResolved={compResolved} subBlocks={subBlocks}");
         }
 
         private void ActTax()

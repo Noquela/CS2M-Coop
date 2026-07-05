@@ -429,6 +429,7 @@ namespace CS2M.Networking
             Sync.RemoteMoneyQueue.Clear();
             Sync.RemoteEditQueue.Clear();
             Sync.RemoteNetQueue.Clear();
+            Sync.RemoteNetBatchQueue.Clear();
             Sync.RemoteReplayQueue.Clear();
             Sync.RemoteNetEcho.Clear();
             Sync.RemoteProgressionQueue.Clear();

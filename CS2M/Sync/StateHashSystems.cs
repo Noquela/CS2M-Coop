@@ -448,6 +448,12 @@ namespace CS2M.Sync
                 var list = new List<string>(arr.Length);
                 foreach (Entity e in arr)
                 {
+                    // Same contract filter as AccAreas — the localizer must diff the SAME set the radar hashes.
+                    if (!AreaInContract(em, e))
+                    {
+                        continue;
+                    }
+
                     Unity.Mathematics.float3 c = em.GetComponentData<Game.Areas.Geometry>(e).m_CenterPosition;
                     int nodes = em.HasBuffer<Game.Areas.Node>(e) ? em.GetBuffer<Game.Areas.Node>(e, true).Length : 0;
                     int owned = em.HasComponent<Game.Common.Owner>(e) ? 1 : 0;
@@ -542,15 +548,32 @@ namespace CS2M.Sync
             return acc;
         }
 
+        /// <summary>An area is IN the sync contract unless it is a building-owned decorative sub-area
+        /// (Owner present, no Extractor): those regenerate LOCALLY per PC (Surface/Space/Hangaround/
+        /// Walking…) and are excluded from sync BY DESIGN — hashing them makes the radar cry wolf forever
+        /// (the 634-vs-637 phantom-surface drift). Extractor fields (farm/forestry/ore) are owned AND
+        /// synced; districts/standalone player surfaces carry no Owner.</summary>
+        internal static bool AreaInContract(EntityManager em, Entity e)
+        {
+            return !em.HasComponent<Game.Common.Owner>(e)
+                   || em.HasComponent<Game.Areas.Extractor>(e);
+        }
+
         private static long AccAreas(EntityManager em, EntityQuery q, out int count)
         {
             NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
-            count = arr.Length;
+            count = 0;
             long acc = 0;
             try
             {
                 foreach (Entity e in arr)
                 {
+                    if (!AreaInContract(em, e))
+                    {
+                        continue;
+                    }
+
+                    count++;
                     acc = unchecked(acc + Pt(em.GetComponentData<Game.Areas.Geometry>(e).m_CenterPosition));
                 }
             }
