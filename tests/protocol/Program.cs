@@ -363,6 +363,63 @@ namespace CS2MTests
         public uint Right { get; set; }
     }
 
+    // AtomicBatch (byte-for-byte copy of the mod's NetBatchCommand — the whole result of one net-tool
+    // apply as flat parallel primitive arrays; the widest command on the wire).
+    public class NetBatchCommand : CommandBase
+    {
+        public ulong[] NodeIds { get; set; }
+        public float[] NodePosX { get; set; }
+        public float[] NodePosY { get; set; }
+        public float[] NodePosZ { get; set; }
+        public float[] NodeRotX { get; set; }
+        public float[] NodeRotY { get; set; }
+        public float[] NodeRotZ { get; set; }
+        public float[] NodeRotW { get; set; }
+        public string[] NodePrefabTypes { get; set; }
+        public string[] NodePrefabNames { get; set; }
+        public bool[] NodeHasStandalone { get; set; }
+        public bool[] NodeHasElevation { get; set; }
+        public float[] NodeElevX { get; set; }
+        public float[] NodeElevY { get; set; }
+        public int[] NodeSeeds { get; set; }
+        public ulong[] EdgeStartNodeIds { get; set; }
+        public ulong[] EdgeEndNodeIds { get; set; }
+        public float[] EdgeAX { get; set; }
+        public float[] EdgeAY { get; set; }
+        public float[] EdgeAZ { get; set; }
+        public float[] EdgeBX { get; set; }
+        public float[] EdgeBY { get; set; }
+        public float[] EdgeBZ { get; set; }
+        public float[] EdgeCX { get; set; }
+        public float[] EdgeCY { get; set; }
+        public float[] EdgeCZ { get; set; }
+        public float[] EdgeDX { get; set; }
+        public float[] EdgeDY { get; set; }
+        public float[] EdgeDZ { get; set; }
+        public string[] EdgePrefabTypes { get; set; }
+        public string[] EdgePrefabNames { get; set; }
+        public bool[] EdgeHasUpgraded { get; set; }
+        public uint[] EdgeUpgradedG { get; set; }
+        public uint[] EdgeUpgradedL { get; set; }
+        public uint[] EdgeUpgradedR { get; set; }
+        public bool[] EdgeHasElevation { get; set; }
+        public float[] EdgeElevX { get; set; }
+        public float[] EdgeElevY { get; set; }
+        public int[] EdgeSeeds { get; set; }
+        public uint[] EdgeBuildOrderStart { get; set; }
+        public uint[] EdgeBuildOrderEnd { get; set; }
+        public ulong[] DelStartNodeIds { get; set; }
+        public ulong[] DelEndNodeIds { get; set; }
+        public float[] DelStartX { get; set; }
+        public float[] DelStartZ { get; set; }
+        public float[] DelEndX { get; set; }
+        public float[] DelEndZ { get; set; }
+        public ulong[] BoundaryNodeIds { get; set; }
+        public float[] BoundaryPosX { get; set; }
+        public float[] BoundaryPosY { get; set; }
+        public float[] BoundaryPosZ { get; set; }
+    }
+
     public static class Program
     {
         // Copy of the mod's MessagePackExtensions.BetterGraphOf (same walker → same wire format).
@@ -444,6 +501,58 @@ namespace CS2MTests
             RoundTrip(opts, new RouteColorCommand { SyncId = 42UL, PrefabName = "Bus Line", Number = 7, ColorR = 200, ColorG = 100, ColorB = 50, ColorA = 255 }, c => c.Number == 7 && c.ColorR == 200);
             RoundTrip(opts, new DeleteCommand { SyncId = 0UL, TargetKind = 1, PrefabName = "Bus Line", Number = 7 }, c => c.TargetKind == 1 && c.Number == 7);
             RoundTrip(opts, new PolicyCommand { PolicyType = "PolicyPrefab", PolicyName = "Recycling", Active = true, Adjustment = 0f, TargetKind = 1, TargetSyncId = 99UL, TargetX = 10f, TargetZ = 20f, TargetName = "" }, c => c.TargetKind == 1 && c.TargetSyncId == 99UL);
+
+            // --- AtomicBatch (the widest wire shape: ~50 parallel arrays incl. ulong/bool/string) ---
+            RoundTrip(opts, new NetBatchCommand
+            {
+                NodeIds = new[] { 11UL, 12UL },
+                NodePosX = new[] { 100f, 200f }, NodePosY = new[] { 478f, 478f }, NodePosZ = new[] { -50f, -60f },
+                NodeRotX = new[] { 0f, 0f }, NodeRotY = new[] { 0f, 0f }, NodeRotZ = new[] { 0f, 0f }, NodeRotW = new[] { 1f, 1f },
+                NodePrefabTypes = new[] { "RoadPrefab", "RoadPrefab" }, NodePrefabNames = new[] { "Small Road", "Small Road" },
+                NodeHasStandalone = new[] { false, true },
+                NodeHasElevation = new[] { true, false }, NodeElevX = new[] { 2.5f, 0f }, NodeElevY = new[] { 2.5f, 0f },
+                NodeSeeds = new[] { 41, 42 },
+                EdgeStartNodeIds = new[] { 11UL }, EdgeEndNodeIds = new[] { 12UL },
+                EdgeAX = new[] { 100f }, EdgeAY = new[] { 478f }, EdgeAZ = new[] { -50f },
+                EdgeBX = new[] { 133f }, EdgeBY = new[] { 478f }, EdgeBZ = new[] { -53f },
+                EdgeCX = new[] { 166f }, EdgeCY = new[] { 478f }, EdgeCZ = new[] { -57f },
+                EdgeDX = new[] { 200f }, EdgeDY = new[] { 478f }, EdgeDZ = new[] { -60f },
+                EdgePrefabTypes = new[] { "RoadPrefab" }, EdgePrefabNames = new[] { "Small Road" },
+                EdgeHasUpgraded = new[] { true }, EdgeUpgradedG = new[] { 4u }, EdgeUpgradedL = new[] { 0x1000u }, EdgeUpgradedR = new[] { 0u },
+                EdgeHasElevation = new[] { false }, EdgeElevX = new[] { 0f }, EdgeElevY = new[] { 0f },
+                EdgeSeeds = new[] { 77 },
+                EdgeBuildOrderStart = new[] { 160u }, EdgeBuildOrderEnd = new[] { 175u },
+                DelStartNodeIds = new[] { 5UL }, DelEndNodeIds = new[] { 6UL },
+                DelStartX = new[] { 90f }, DelStartZ = new[] { -40f }, DelEndX = new[] { 95f }, DelEndZ = new[] { -45f },
+                BoundaryNodeIds = new[] { 9UL }, BoundaryPosX = new[] { 88f }, BoundaryPosY = new[] { 478f }, BoundaryPosZ = new[] { -33f },
+            }, c => c.NodeIds.Length == 2 && c.NodeIds[1] == 12UL && c.NodeHasStandalone[1] && !c.NodeHasStandalone[0]
+                    && c.EdgeStartNodeIds[0] == 11UL && Math.Abs(c.EdgeDX[0] - 200f) < 0.01f
+                    && c.EdgeHasUpgraded[0] && c.EdgeUpgradedL[0] == 0x1000u
+                    && c.EdgeBuildOrderEnd[0] == 175u && c.DelStartNodeIds[0] == 5UL
+                    && c.BoundaryNodeIds[0] == 9UL && Math.Abs(c.BoundaryPosZ[0] - (-33f)) < 0.01f);
+
+            // Empty-arrays shape (a pure-delete or node-only batch; also what the selftest fabricates).
+            RoundTrip(opts, new NetBatchCommand
+            {
+                NodeIds = new ulong[0], NodePosX = new float[0], NodePosY = new float[0], NodePosZ = new float[0],
+                NodeRotX = new float[0], NodeRotY = new float[0], NodeRotZ = new float[0], NodeRotW = new float[0],
+                NodePrefabTypes = new string[0], NodePrefabNames = new string[0],
+                NodeHasStandalone = new bool[0], NodeHasElevation = new bool[0], NodeElevX = new float[0], NodeElevY = new float[0],
+                NodeSeeds = new int[0],
+                EdgeStartNodeIds = new ulong[0], EdgeEndNodeIds = new ulong[0],
+                EdgeAX = new float[0], EdgeAY = new float[0], EdgeAZ = new float[0],
+                EdgeBX = new float[0], EdgeBY = new float[0], EdgeBZ = new float[0],
+                EdgeCX = new float[0], EdgeCY = new float[0], EdgeCZ = new float[0],
+                EdgeDX = new float[0], EdgeDY = new float[0], EdgeDZ = new float[0],
+                EdgePrefabTypes = new string[0], EdgePrefabNames = new string[0],
+                EdgeHasUpgraded = new bool[0], EdgeUpgradedG = new uint[0], EdgeUpgradedL = new uint[0], EdgeUpgradedR = new uint[0],
+                EdgeHasElevation = new bool[0], EdgeElevX = new float[0], EdgeElevY = new float[0],
+                EdgeSeeds = new int[0], EdgeBuildOrderStart = new uint[0], EdgeBuildOrderEnd = new uint[0],
+                DelStartNodeIds = new[] { 3UL }, DelEndNodeIds = new[] { 4UL },
+                DelStartX = new[] { 1f }, DelStartZ = new[] { 2f }, DelEndX = new[] { 3f }, DelEndZ = new[] { 4f },
+                BoundaryNodeIds = new ulong[0], BoundaryPosX = new float[0], BoundaryPosY = new float[0], BoundaryPosZ = new float[0],
+            }, c => c.NodeIds.Length == 0 && c.EdgeStartNodeIds.Length == 0 && c.DelStartNodeIds.Length == 1
+                    && c.DelEndNodeIds[0] == 4UL && c.BoundaryNodeIds.Length == 0);
 
             Console.WriteLine($"\n=== {_pass} passed, {_fail} failed ===");
             return _fail == 0 ? 0 : 1;
