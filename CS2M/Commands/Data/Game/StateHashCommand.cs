@@ -32,5 +32,26 @@ namespace CS2M.Commands.Data.Game
         public long ZoneHash { get; set; }
         public long AreaHash { get; set; }
         public int Money { get; set; }
+
+        // v55: transport lines — count + a fingerprint over each line's number and waypoint positions.
+        // Routes were fully invisible to the radar, so a reroute/create/delete that failed to sync (e.g.
+        // the save-loaded-line reroute gap) produced no drift warning. Waypoint positions are world coords,
+        // identical across machines like every other fingerprint here.
+        public int Routes { get; set; }
+        public long RouteHash { get; set; }
+
+        // v55: City ServiceFee buffer fingerprint — a fee-only divergence moves no entity, so it was
+        // invisible before; fees drive consumption/happiness/income so a drift here is a real sim desync.
+        public long FeeHash { get; set; }
+
+        // v55: tax rates (per-category) — a tax desync would only surface slowly via money before.
+        public long TaxHash { get; set; }
+
+        // v55: City policy buffer (active + adjustment by prefab name) — policies drove the sim invisibly
+        // to the radar; a policy toggled on one PC but not the other now shows as drift.
+        public long PolicyHash { get; set; }
+
+        // v55: water source POSITIONS — the count alone missed a relocated source (water-move).
+        public long WaterHash { get; set; }
     }
 }

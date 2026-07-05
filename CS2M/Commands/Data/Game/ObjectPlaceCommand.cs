@@ -67,5 +67,14 @@ namespace CS2M.Commands.Data.Game
         /// <summary>v44: 0 = player-placed; 1 = spawned by the HOST's zone simulation (growable).
         /// Sim spawns replace any overlapping older building on the receiver (level-up flow).</summary>
         public byte Source { get; set; }
+
+        /// <summary>v55: for a tree/plant, its growth STATE + growth byte (Game.Objects.Tree). The base
+        /// Object Tool's AgeMask (and the Tree Controller mod) lets a player force the age independent of
+        /// RandomSeed, so a tree planted "Adult"/age-locked arrived young on the other PC. HasTree gates it
+        /// (non-tree objects leave it false, so the apply never touches a Tree component that isn't there).</summary>
+        public bool HasTree { get; set; }
+
+        public byte TreeState { get; set; }
+        public byte TreeGrowth { get; set; }
     }
 }

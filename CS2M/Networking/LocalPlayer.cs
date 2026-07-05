@@ -425,9 +425,11 @@ namespace CS2M.Networking
 
             // Drop synced-entity id map + all queued sync state.
             Sync.CS2M_SyncIdSystem.Clear();
+            Sync.CS2M_NodeSyncIds.Clear();
             Sync.RemoteMoneyQueue.Clear();
             Sync.RemoteEditQueue.Clear();
             Sync.RemoteNetQueue.Clear();
+            Sync.RemoteReplayQueue.Clear();
             Sync.RemoteNetEcho.Clear();
             Sync.RemoteProgressionQueue.Clear();
             Sync.RemoteZoneQueue.Clear();
@@ -463,6 +465,9 @@ namespace CS2M.Networking
             Sync.WaterSync.Clear();
             Sync.WorkAreaHash.Clear();
             Sync.DemandSync.Clear();
+            Sync.RemoteFeeQueue.Clear();
+            Sync.FeeSync.Clear();
+            Sync.DistrictReshapeSync.Clear();
             UI.ChatPanel.RefreshPlayerList();
 
             PlayerStatus = PlayerStatus.INACTIVE;

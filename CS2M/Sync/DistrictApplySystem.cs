@@ -49,6 +49,20 @@ namespace CS2M.Sync
                 return;
             }
 
+            // v55: a RESHAPE rewrites an existing district in place (was always creating a duplicate).
+            // Resolve by the shared centroid + prefab; only create fresh if no match (e.g. it never arrived).
+            if (cmd.Replace)
+            {
+                Entity existing = FindDistrictByCenter(cmd.CenterX, cmd.CenterZ, cmd.PrefabName);
+                if (existing != Entity.Null)
+                {
+                    RewriteDistrict(existing, cmd);
+                    return;
+                }
+
+                CS2M.Log.Info($"[District] reshape target missing at ({cmd.CenterX:F0},{cmd.CenterZ:F0}) — creating fresh");
+            }
+
             var prefabId = new PrefabID(cmd.PrefabType, cmd.PrefabName, default(Colossal.Hash128));
             if (!_prefabSystem.TryGetPrefab(prefabId, out PrefabBase prefab) || prefab == null)
             {
@@ -90,7 +104,114 @@ namespace CS2M.Sync
             if (!EntityManager.HasComponent<Created>(area)) { EntityManager.AddComponent<Created>(area); }
             if (!EntityManager.HasComponent<Updated>(area)) { EntityManager.AddComponent<Updated>(area); }
 
+            SetReshapeSnapshot(area); // baseline so our reshape scanner adopts it silently (echo guard)
             CS2M.Log.Info($"[District] APPLIED name={cmd.PrefabName} entity={area.Index} points={n}");
+        }
+
+        /// <summary>Reshape path: rewrite the district's boundary buffer + option mask in place (what a
+        /// player drag does), mark it Updated so the area systems re-triangulate, and refresh the shared
+        /// reshape snapshot so our detector doesn't bounce the rewrite back.</summary>
+        private void RewriteDistrict(Entity area, DistrictCommand cmd)
+        {
+            if (EntityManager.HasComponent<District>(area))
+            {
+                SetOrAdd(area, new District { m_OptionMask = cmd.OptionMask });
+            }
+
+            DynamicBuffer<Node> nodes = EntityManager.HasBuffer<Node>(area)
+                ? EntityManager.GetBuffer<Node>(area)
+                : EntityManager.AddBuffer<Node>(area);
+            nodes.Clear();
+            int n = math.min(cmd.Xs.Length, math.min(cmd.Ys.Length, cmd.Zs.Length));
+            for (int i = 0; i < n; i++)
+            {
+                nodes.Add(new Node { m_Position = new float3(cmd.Xs[i], cmd.Ys[i], cmd.Zs[i]), m_Elevation = 0f });
+            }
+
+            if (!EntityManager.HasComponent<Updated>(area))
+            {
+                EntityManager.AddComponent<Updated>(area);
+            }
+
+            SetReshapeSnapshot(area);
+            CS2M.Log.Info($"[District] APPLIED reshape entity={area.Index} points={n}");
+        }
+
+        /// <summary>Nearest district (same prefab) whose centroid is within ~40 m of (x,z) — the centroid
+        /// both PCs share from the last synced state. Prefab match guards against grabbing a neighbour.</summary>
+        private Entity FindDistrictByCenter(float x, float z, string prefabName)
+        {
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.District>(),
+                    ComponentType.ReadOnly<Node>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Game.Tools.Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+
+            Entity best = Entity.Null;
+            float bestD = 1600f; // 40 m²
+            Unity.Collections.NativeArray<Entity> ents = q.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!string.IsNullOrEmpty(prefabName))
+                    {
+                        if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(e).m_Prefab,
+                                out PrefabBase pb) || pb == null || pb.name != prefabName)
+                        {
+                            continue;
+                        }
+                    }
+
+                    DynamicBuffer<Node> nb = EntityManager.GetBuffer<Node>(e, true);
+                    if (nb.Length == 0) { continue; }
+
+                    float cx = 0f, cz = 0f;
+                    for (int i = 0; i < nb.Length; i++) { cx += nb[i].m_Position.x; cz += nb[i].m_Position.z; }
+                    cx /= nb.Length;
+                    cz /= nb.Length;
+
+                    float dx = cx - x, dz = cz - z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = e;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return best;
+        }
+
+        private void SetReshapeSnapshot(Entity area)
+        {
+            if (!EntityManager.HasBuffer<Node>(area))
+            {
+                return;
+            }
+
+            DynamicBuffer<Node> nb = EntityManager.GetBuffer<Node>(area, true);
+            if (nb.Length == 0)
+            {
+                return;
+            }
+
+            float cx = 0f, cz = 0f;
+            for (int i = 0; i < nb.Length; i++) { cx += nb[i].m_Position.x; cz += nb[i].m_Position.z; }
+            DistrictReshapeSync.Snapshot[area] = new DistrictReshapeSync.Snap
+            {
+                Hash = WorkAreaHash.Compute(nb), Cx = cx / nb.Length, Cz = cz / nb.Length,
+            };
         }
 
         private void SetOrAdd<T>(Entity e, T data) where T : unmanaged, IComponentData

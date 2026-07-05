@@ -151,6 +151,11 @@ namespace CS2M
             updateSystem.UpdateBefore<BudgetDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<BudgetApplySystem>(SystemUpdatePhase.Modification5);
 
+            // Service-FEE sync (fee sliders + Reset — SetFee on the City's ServiceFee buffer by
+            // PlayerResource enum). Distinct from the funding % above; fees drive consumption/income.
+            updateSystem.UpdateBefore<FeeDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<FeeApplySystem>(SystemUpdatePhase.Modification5);
+
             // District sync (paint a district area — boundary polygon via AreaData archetype).
             updateSystem.UpdateBefore<DistrictDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             // v41: BEFORE Modification1 so the area consumers (triangulation/labels) see Created/Updated.
@@ -179,6 +184,20 @@ namespace CS2M
             // with no geometry/mesh/zone blocks). The injected Permanent definitions are consumed by
             // GenerateNodesSystem@Mod1/GenerateEdgesSystem@Mod2 and the full pipeline runs this frame.
             updateSystem.UpdateBefore<NetPlaceApplySystem>(SystemUpdatePhase.Modification1);
+
+            // Host-authoritative node geometry (gated CS2M_NODEPIN=1): on the client, snap identified nodes
+            // back to the host's coord so the <1 m junction drift (CS2 non-determinism) that breaks zone-block
+            // matching converges. Same slot so GenerateNodes/Edges re-derive geometry from the pin this frame.
+            updateSystem.UpdateBefore<NodePinSystem>(SystemUpdatePhase.Modification1);
+
+            // v56 INPUT-REPLAY: replays a remote net-tool action through the game's own
+            // CreateDefinitionsJob (snap/split/junction done by the game → identical topology by
+            // construction). Same slot as NetPlaceApplySystem so GenerateNodes/Edges consume it this frame.
+            updateSystem.UpdateBefore<NetToolReplaySystem>(SystemUpdatePhase.Modification1);
+
+            // v56 INPUT-REPLAY capture (gated CS2M_REPLAY=1): grabs the tool's ControlPoints on Apply.
+            // ModificationEnd is a first guess for the phase; runtime-verify applyMode==Apply lands here.
+            updateSystem.UpdateAt<NetToolCaptureSystem>(SystemUpdatePhase.ModificationEnd);
 
             // Net bulldoze + upgrade sync (delete / composition flags, edges addressed by position).
             updateSystem.UpdateBefore<NetEditDetectorSystem>(SystemUpdatePhase.ModificationEnd);
@@ -249,6 +268,8 @@ namespace CS2M
             // Host detects sim spawns before ModificationEnd; clients suppress their zone spawning.
             updateSystem.UpdateBefore<GrowableDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<GrowableSuppressSystem>(SystemUpdatePhase.Rendering);
+            // v56: clients suppress their own AreaSpawnSystem (fields/surfaces) — host-authoritative areas.
+            updateSystem.UpdateAt<AreaSpawnSuppressSystem>(SystemUpdatePhase.Rendering);
 
             // v50: host-authoritative fires (CS2M_FIRE_SYNC=0 disables). Host detects OnFire /
             // Destroyed transitions; clients suppress local fire sim and mirror the events.

@@ -64,9 +64,33 @@ namespace CS2M.Sync
                 {
                     current.Add(e);
                     float3 pos = EntityManager.GetComponentData<Transform>(e).m_Position;
-                    if (_seen.ContainsKey(e))
+                    if (_seen.TryGetValue(e, out float3 last))
                     {
-                        _seen[e] = pos; // keep the address fresh (tool can nudge sources)
+                        // A relocation keeps the same entity, so the create/delete paths never fire. Sync a
+                        // MOVE once the source has drifted past a threshold from the last position the remotes
+                        // know about (_seen is only updated on send, so a slow drag accumulates; sub-threshold
+                        // tool/terrain nudges never trigger). Skip a move we just applied from the network.
+                        if (math.distancesq(pos.xz, last.xz) > 4f) // > 2 m from the last-broadcast spot
+                        {
+                            if (WaterSync.ConsumeRemoteMove(pos, 4f))
+                            {
+                                _seen[e] = pos; // this relocation came FROM the network — adopt, don't echo
+                                continue;
+                            }
+
+                            WaterSourceData wm = EntityManager.GetComponentData<WaterSourceData>(e);
+                            Command.SendToAll?.Invoke(new WaterCommand
+                            {
+                                Move = true,
+                                OldX = last.x, OldZ = last.z,
+                                PosX = pos.x, PosY = pos.y, PosZ = pos.z,
+                                Radius = wm.m_Radius, Height = wm.m_Height, Multiplier = wm.m_Multiplier,
+                                Polluted = wm.m_Polluted, ConstantDepth = wm.m_ConstantDepth,
+                            });
+                            CS2M.Log.Info($"[Water] DETECT+SEND move ({last.x:F0},{last.z:F0})->({pos.x:F0},{pos.z:F0})");
+                            _seen[e] = pos; // remotes now have it here
+                        }
+
                         continue;
                     }
 
@@ -122,10 +146,13 @@ namespace CS2M.Sync
         }
     }
 
-    /// <summary>Echo bookkeeping for synced water-source removals.</summary>
+    /// <summary>Echo bookkeeping for synced water-source removals AND moves.</summary>
     public static class WaterSync
     {
         private static readonly HashSet<Entity> RemoteDeletes = new HashSet<Entity>();
+        // Positions a remote MOVE just repositioned a source to; the detector consumes the nearest match
+        // so it doesn't bounce the relocation back (the moved source has no CS2M_RemotePlaced to exclude).
+        private static readonly List<float3> RemoteMoves = new List<float3>();
         private static readonly object Lock = new object();
 
         public static void MarkRemoteDelete(Entity e)
@@ -138,9 +165,33 @@ namespace CS2M.Sync
             lock (Lock) { return RemoteDeletes.Remove(e); }
         }
 
+        public static void MarkRemoteMove(float3 pos)
+        {
+            lock (Lock) { RemoteMoves.Add(pos); }
+        }
+
+        /// <summary>Consume the marked remote-move whose target is within <paramref name="epsSq"/> (m²) of
+        /// <paramref name="pos"/>. Returns true if this move originated from the network.</summary>
+        public static bool ConsumeRemoteMove(float3 pos, float epsSq)
+        {
+            lock (Lock)
+            {
+                for (int i = 0; i < RemoteMoves.Count; i++)
+                {
+                    if (math.distancesq(RemoteMoves[i].xz, pos.xz) <= epsSq)
+                    {
+                        RemoteMoves.RemoveAt(i);
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
         public static void Clear()
         {
-            lock (Lock) { RemoteDeletes.Clear(); }
+            lock (Lock) { RemoteDeletes.Clear(); RemoteMoves.Clear(); }
         }
     }
 }

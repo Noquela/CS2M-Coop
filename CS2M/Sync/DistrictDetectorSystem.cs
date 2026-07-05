@@ -19,12 +19,34 @@ namespace CS2M.Sync
     ///     mask. Echo guard: districts recreated from a remote command carry <c>CS2M_RemotePlaced</c>,
     ///     which this query excludes.
     /// </summary>
+    /// <summary>v55: per-district (polygon hash + centroid) snapshot for RESHAPE detection. The centroid
+    /// is the resolve key both PCs share from the last synced state, so a reshape can be addressed without
+    /// a SyncId. The apply refreshes it (echo guard) so a remotely-applied rewrite isn't bounced back.</summary>
+    public static class DistrictReshapeSync
+    {
+        public struct Snap
+        {
+            public int Hash;
+            public float Cx;
+            public float Cz;
+        }
+
+        public static readonly Dictionary<Entity, Snap> Snapshot = new Dictionary<Entity, Snap>();
+
+        public static void Clear()
+        {
+            Snapshot.Clear();
+        }
+    }
+
     public partial class DistrictDetectorSystem : GameSystemBase
     {
         private PrefabSystem _prefabSystem;
         private EntityQuery _appliedDistricts;
+        private EntityQuery _allDistricts;
         private readonly HashSet<Entity> _sent = new HashSet<Entity>();
         private int _clearCounter;
+        private int _reshapeFrame;
 
         protected override void OnCreate()
         {
@@ -44,7 +66,20 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<CS2M_RemotePlaced>(),
                 },
             });
-            RequireForUpdate(_appliedDistricts);
+            // Reshape scan runs over ALL live districts (a reshape marks the area Updated, never Applied,
+            // and it must work on remote-created districts too — the polygon hash is the echo guard here,
+            // not CS2M_RemotePlaced). No RequireForUpdate so the ~1 Hz scanner always runs.
+            _allDistricts = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Area>(),
+                    ComponentType.ReadOnly<District>(),
+                    ComponentType.ReadOnly<Node>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
             CS2M.Log.Info("[District] DistrictDetectorSystem created");
         }
 
@@ -92,12 +127,18 @@ namespace CS2M.Sync
                     var xs = new float[n];
                     var ys = new float[n];
                     var zs = new float[n];
+                    float cx = 0f, cz = 0f;
                     for (int i = 0; i < n; i++)
                     {
                         xs[i] = nodes[i].m_Position.x;
                         ys[i] = nodes[i].m_Position.y;
                         zs[i] = nodes[i].m_Position.z;
+                        cx += xs[i];
+                        cz += zs[i];
                     }
+
+                    cx /= n;
+                    cz /= n;
 
                     uint mask = EntityManager.HasComponent<District>(e)
                         ? EntityManager.GetComponentData<District>(e).m_OptionMask : 0u;
@@ -108,8 +149,100 @@ namespace CS2M.Sync
                         PrefabName = prefab.name,
                         OptionMask = mask,
                         Xs = xs, Ys = ys, Zs = zs,
+                        CenterX = cx, CenterZ = cz,
                     });
+                    // Baseline the reshape snapshot for our freshly-painted district so the scanner adopts
+                    // it silently (both PCs now hold the same polygon + centroid).
+                    DistrictReshapeSync.Snapshot[e] = new DistrictReshapeSync.Snap
+                    {
+                        Hash = WorkAreaHash.Compute(nodes), Cx = cx, Cz = cz,
+                    };
                     CS2M.Log.Info($"[District] DETECT+SEND name={prefab.name} points={n}");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            if (++_reshapeFrame >= 60)
+            {
+                _reshapeFrame = 0;
+                ScanDistrictReshapes();
+            }
+        }
+
+        /// <summary>~1 Hz polygon-hash diff over every live district — the only signal for a RESHAPE
+        /// (vanilla marks the area Updated, never Applied). First sight is a silent baseline; the apply
+        /// refreshes the snapshot so a remotely-applied rewrite is never bounced back.</summary>
+        private void ScanDistrictReshapes()
+        {
+            NativeArray<Entity> ents = _allDistricts.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    DynamicBuffer<Node> nodes = EntityManager.GetBuffer<Node>(e, true);
+                    int n = nodes.Length;
+                    if (n < 3)
+                    {
+                        continue;
+                    }
+
+                    int hash = WorkAreaHash.Compute(nodes);
+                    float cx = 0f, cz = 0f;
+                    for (int i = 0; i < n; i++)
+                    {
+                        cx += nodes[i].m_Position.x;
+                        cz += nodes[i].m_Position.z;
+                    }
+
+                    cx /= n;
+                    cz /= n;
+
+                    if (!DistrictReshapeSync.Snapshot.TryGetValue(e, out DistrictReshapeSync.Snap prev))
+                    {
+                        DistrictReshapeSync.Snapshot[e] = new DistrictReshapeSync.Snap { Hash = hash, Cx = cx, Cz = cz };
+                        continue; // baseline (save load / just painted / just applied)
+                    }
+
+                    if (prev.Hash == hash)
+                    {
+                        continue;
+                    }
+
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(e).m_Prefab,
+                            out PrefabBase prefab) || prefab == null)
+                    {
+                        continue;
+                    }
+
+                    var xs = new float[n];
+                    var ys = new float[n];
+                    var zs = new float[n];
+                    for (int i = 0; i < n; i++)
+                    {
+                        xs[i] = nodes[i].m_Position.x;
+                        ys[i] = nodes[i].m_Position.y;
+                        zs[i] = nodes[i].m_Position.z;
+                    }
+
+                    uint mask = EntityManager.GetComponentData<District>(e).m_OptionMask;
+
+                    // Address by the PREVIOUS centroid — the spot the remotes currently have this district
+                    // (their copy hasn't been reshaped yet). After they rewrite to the same polygon, their
+                    // centroid matches ours again, so the next reshape's old-centre still resolves.
+                    Command.SendToAll?.Invoke(new DistrictCommand
+                    {
+                        Replace = true,
+                        PrefabType = prefab.GetType().Name,
+                        PrefabName = prefab.name,
+                        OptionMask = mask,
+                        Xs = xs, Ys = ys, Zs = zs,
+                        CenterX = prev.Cx, CenterZ = prev.Cz,
+                    });
+                    DistrictReshapeSync.Snapshot[e] = new DistrictReshapeSync.Snap { Hash = hash, Cx = cx, Cz = cz };
+                    CS2M.Log.Info($"[District] DETECT+SEND reshape name={prefab.name} points={n} oldC=({prev.Cx:F0},{prev.Cz:F0})");
                 }
             }
             finally

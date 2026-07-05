@@ -195,6 +195,16 @@ namespace CS2M.Sync
                         }
                     }
 
+                    // v55: trees carry a growth state the tool can force (AgeMask) independent of the
+                    // RandomSeed — ship it so the receiver's copy is the same age, not the default.
+                    if (EntityManager.HasComponent<Game.Objects.Tree>(entity))
+                    {
+                        Game.Objects.Tree tree = EntityManager.GetComponentData<Game.Objects.Tree>(entity);
+                        cmd.HasTree = true;
+                        cmd.TreeState = (byte) tree.m_State;
+                        cmd.TreeGrowth = tree.m_Growth;
+                    }
+
                     // Stamp a cross-PC id on our own entity and ship it so the other PC's copy
                     // gets the same id (enables later move/delete of this object).
                     cmd.SyncId = CS2M_SyncIdSystem.Allocate();

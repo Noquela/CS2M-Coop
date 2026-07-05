@@ -192,8 +192,18 @@ namespace CS2M.Sync
             {
                 FireIdentity id = _burning[e];
                 _burning.Remove(e);
-                Send(1, id, 0f);
-                CS2M.Log.Info($"[Fire] DETECT end prefab={id.PrefabName} pos=({id.Position.x:F0},{id.Position.z:F0})");
+
+                // A COLLAPSE removes OnFire AND destroys the entity together — indistinguishable from a plain
+                // extinguish if we only look at "OnFire gone". Using the identity cached at ignition (when the
+                // entity was healthy), send Kind 2 (collapse) when the building is now Destroyed/gone so the
+                // receiver DESTROYS it — else a building that burns DOWN on one PC survives on every other
+                // (a persistent buildings-count divergence the radar flags; reproduced in the 2-sim). This
+                // is why ScanDestroyed missed it: its TryIdentify fails on the torn-down entity (no
+                // PrefabRef/Transform), so no Kind 2 was ever sent — the cached identity fixes that.
+                bool collapsed = !EntityManager.Exists(e) || EntityManager.HasComponent<Destroyed>(e);
+                Send(collapsed ? (byte) 2 : (byte) 1, id, 0f);
+                CS2M.Log.Info($"[Fire] DETECT {(collapsed ? "collapse" : "end")} prefab={id.PrefabName} " +
+                              $"pos=({id.Position.x:F0},{id.Position.z:F0})");
             }
         }
 

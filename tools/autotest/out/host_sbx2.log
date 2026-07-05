@@ -1,0 +1,4 @@
+20:53:15.703 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=False log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_sbx2.log
+20:53:33.671 [Auto] loadingComplete purpose=LoadGame mode=Game
+20:53:33.672 [Auto] city loaded -> arming StartServer
+20:53:35.754 [Auto] StartServer on :1111 status=PLAYING

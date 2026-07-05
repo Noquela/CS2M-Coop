@@ -147,6 +147,17 @@ namespace CS2M.Sync
                 EntityManager.AddComponentData(obj, new PseudoRandomSeed((ushort) cmd.RandomSeed));
             }
 
+            // v55: force the tree's growth state to match the sender (AgeMask / age-lock), overriding the
+            // archetype default so a tree planted "Adult"/aged doesn't arrive young on this PC.
+            if (cmd.HasTree && EntityManager.HasComponent<Game.Objects.Tree>(obj))
+            {
+                SetOrAdd(obj, new Game.Objects.Tree
+                {
+                    m_State = (Game.Objects.TreeState) cmd.TreeState,
+                    m_Growth = cmd.TreeGrowth,
+                });
+            }
+
             // Vertical offset for elevated placements (0 for ground objects).
             if (cmd.Elevation != 0f || cmd.ElevationFlags != 0)
             {

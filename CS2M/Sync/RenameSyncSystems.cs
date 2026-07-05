@@ -22,6 +22,11 @@ namespace CS2M.Sync
         public static readonly Dictionary<Entity, string> Snapshot = new Dictionary<Entity, string>();
         public static bool BaselineBuilt;
 
+        // v55: the CITY name is a managed property on CityConfigurationSystem, NOT a CustomName on any
+        // entity, so the entity scan never saw it. Diffed separately; this is its snapshot + echo guard.
+        public static string CityNameSnapshot;
+        public static bool CityBaselineBuilt;
+
         public static void Enqueue(RenameCommand cmd)
         {
             lock (Lock) { Queue.Enqueue(cmd); }
@@ -47,6 +52,8 @@ namespace CS2M.Sync
             lock (Lock) { Queue.Clear(); }
             Snapshot.Clear();
             BaselineBuilt = false;
+            CityNameSnapshot = null;
+            CityBaselineBuilt = false;
         }
     }
 
@@ -60,6 +67,7 @@ namespace CS2M.Sync
 
         private NameSystem _nameSystem;
         private PrefabSystem _prefabSystem;
+        private Game.City.CityConfigurationSystem _cityConfig;
         private EntityQuery _named;
         private int _frame;
 
@@ -68,6 +76,7 @@ namespace CS2M.Sync
             base.OnCreate();
             _nameSystem = World.GetOrCreateSystemManaged<NameSystem>();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            _cityConfig = World.GetOrCreateSystemManaged<Game.City.CityConfigurationSystem>();
             _named = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<CustomName>() },
@@ -121,6 +130,20 @@ namespace CS2M.Sync
             }
 
             RenameSync.BaselineBuilt = true;
+
+            // City name (managed property, not a CustomName entity — diffed separately).
+            string cityName = _cityConfig.cityName;
+            if (!RenameSync.CityBaselineBuilt)
+            {
+                RenameSync.CityNameSnapshot = cityName;
+                RenameSync.CityBaselineBuilt = true;
+            }
+            else if (cityName != RenameSync.CityNameSnapshot)
+            {
+                RenameSync.CityNameSnapshot = cityName;
+                Command.SendToAll?.Invoke(new RenameCommand { TargetKind = 4, Name = cityName });
+                CS2M.Log.Info($"[Rename] DETECT+SEND city name=\"{cityName}\"");
+            }
         }
 
         private void SendRename(Entity e, string name)
@@ -208,6 +231,7 @@ namespace CS2M.Sync
     {
         private NameSystem _nameSystem;
         private PrefabSystem _prefabSystem;
+        private Game.City.CityConfigurationSystem _cityConfig;
         private EntityQuery _buildings;
         private EntityQuery _districts;
 
@@ -216,6 +240,7 @@ namespace CS2M.Sync
             base.OnCreate();
             _nameSystem = World.GetOrCreateSystemManaged<NameSystem>();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            _cityConfig = World.GetOrCreateSystemManaged<Game.City.CityConfigurationSystem>();
             _buildings = GetEntityQuery(
                 ComponentType.ReadOnly<Game.Buildings.Building>(),
                 ComponentType.ReadOnly<Game.Objects.Transform>(),
@@ -244,6 +269,15 @@ namespace CS2M.Sync
 
         private void ApplyOne(RenameCommand cmd)
         {
+            if (cmd.TargetKind == 4)
+            {
+                // City name — a global singleton managed property, no entity to address.
+                RenameSync.CityNameSnapshot = cmd.Name; // echo guard before the detector's next scan
+                _cityConfig.cityName = cmd.Name;
+                CS2M.Log.Info($"[Rename] APPLIED city name=\"{cmd.Name}\"");
+                return;
+            }
+
             Entity target = Resolve(cmd);
             if (target == Entity.Null)
             {

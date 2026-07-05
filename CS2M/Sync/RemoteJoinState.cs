@@ -8,6 +8,7 @@ namespace CS2M.Sync
     {
         private static readonly object Lock = new object();
         private static readonly HashSet<string> Joining = new HashSet<string>();
+        private static int _completedJoins;
 
         public static void Update(string username, bool joining)
         {
@@ -19,7 +20,10 @@ namespace CS2M.Sync
                 }
                 else
                 {
-                    Joining.Remove(username ?? "");
+                    // A remote that WAS joining is now PLAYING — count the completed join so the
+                    // over-the-wire host roteiro starts only once the client is live (it used to gate
+                    // on PlayerListJoined, which only ever holds the local host — so it never fired).
+                    if (Joining.Remove(username ?? "")) { _completedJoins++; }
                 }
             }
         }
@@ -35,11 +39,26 @@ namespace CS2M.Sync
             }
         }
 
+        /// <summary>How many remote clients finished joining (joining=true -&gt; false) this session.
+        /// The over-the-wire host roteiro waits on this instead of PlayerListJoined (which only holds
+        /// the local host — the bug that kept the roteiro from ever firing with two real sims).</summary>
+        public static int CompletedJoins
+        {
+            get
+            {
+                lock (Lock)
+                {
+                    return _completedJoins;
+                }
+            }
+        }
+
         public static void Clear()
         {
             lock (Lock)
             {
                 Joining.Clear();
+                _completedJoins = 0;
             }
         }
     }

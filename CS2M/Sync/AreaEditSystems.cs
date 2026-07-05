@@ -59,6 +59,11 @@ namespace CS2M.Sync
         private readonly HashSet<Entity> _recentlySent = new HashSet<Entity>();
         private int _clearCounter;
         private int _scanCounter;
+        private int _scanPasses;
+        // ~4 scan passes (at ~1 Hz) of grace: a save's work-area fields are identical on both PCs, so their
+        // first sighting at world-load needs no sync. A first-sight field AFTER warmup is a farm placed this
+        // session whose field spawned divergently → the host ships its shape.
+        private const int WarmupScans = 4;
         private EntityQuery _workAreas;
 
         protected override void OnCreate()
@@ -69,12 +74,18 @@ namespace CS2M.Sync
             // v51 FIELD FIX: editing an existing work area only marks it Updated — never Applied —
             // so the Applied-based query below NEVER saw real edits ("my farm field doesn't show up
             // until /resync"). Poll owned areas at ~1 Hz and diff their polygon hash instead.
+            // SCOPE (fix 04/07): only RESOURCE FIELDS (Game.Areas.Extractor = farm/forestry/ore/oil/fish
+            // fields — the work area the PLAYER draws). Was matching EVERY owned area, which shipped 90+
+            // cosmetic Surface/Space sub-areas (Grass/Sand/Walking/Hangaround/Park) per building — those are
+            // regenerated locally by the SUBAREAS handler when the owner syncs, so re-shipping them just
+            // caused unmatchable rewrites/deletes on the client (the "farm didn't sync" mess Bruno saw).
             _workAreas = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
                 {
                     ComponentType.ReadOnly<Game.Areas.Area>(),
                     ComponentType.ReadOnly<Game.Areas.Node>(),
+                    ComponentType.ReadOnly<Game.Areas.Extractor>(),
                     ComponentType.ReadOnly<Owner>(),
                     ComponentType.ReadOnly<PrefabRef>(),
                 },
@@ -86,12 +97,14 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Game.Areas.MapTile>(),
                 },
             });
+            // Same scope as _workAreas: only resource FIELDS (Extractor), never cosmetic Surface/Space.
             _appliedAreas = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
                 {
                     ComponentType.ReadOnly<Game.Areas.Area>(),
                     ComponentType.ReadOnly<Game.Areas.Node>(),
+                    ComponentType.ReadOnly<Game.Areas.Extractor>(),
                     ComponentType.ReadOnly<Owner>(),
                     ComponentType.ReadOnly<PrefabRef>(),
                     ComponentType.ReadOnly<Applied>(),
@@ -171,15 +184,11 @@ namespace CS2M.Sync
                         continue;
                     }
 
-                    Entity owner = EntityManager.GetComponentData<Owner>(area).m_Owner;
-                    if (!EntityManager.HasComponent<Game.Buildings.Building>(owner)
-                        || !EntityManager.HasComponent<Game.Objects.Transform>(owner)
-                        || !EntityManager.HasComponent<PrefabRef>(owner))
-                    {
-                        continue;
-                    }
-
-                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
+                    // Anchor up the owner chain to a Transform (building, or a farm's placeholder) — same
+                    // stable address used by the resize scanner, so a farm FIELD (placeholder-owned) syncs.
+                    Entity owner = FindAnchor(EntityManager.GetComponentData<Owner>(area).m_Owner);
+                    if (owner == Entity.Null
+                        || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
                             out PrefabBase prefab) || prefab == null
                         || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(owner).m_Prefab,
                             out PrefabBase ownerPrefab) || ownerPrefab == null)
@@ -238,6 +247,8 @@ namespace CS2M.Sync
         /// applied rewrite is never bounced back.</summary>
         private void ScanWorkAreaEdits()
         {
+            _scanPasses++;
+            bool isServer = NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER;
             NativeArray<Entity> areas = _workAreas.ToEntityArray(Allocator.Temp);
             try
             {
@@ -250,34 +261,57 @@ namespace CS2M.Sync
                     }
 
                     int hash = WorkAreaHash.Compute(nodes);
-                    if (!WorkAreaHash.TryGet(area, out int known))
-                    {
-                        WorkAreaHash.Set(area, hash); // baseline (building placement, world load…)
-                        continue;
-                    }
-
-                    if (known == hash)
-                    {
-                        continue;
-                    }
-
+                    bool firstSight = !WorkAreaHash.TryGet(area, out int known);
                     WorkAreaHash.Set(area, hash);
 
-                    Entity owner = EntityManager.GetComponentData<Owner>(area).m_Owner;
-                    if (!EntityManager.HasComponent<Game.Buildings.Building>(owner)
-                        || !EntityManager.HasComponent<Game.Objects.Transform>(owner)
-                        || !EntityManager.HasComponent<PrefabRef>(owner))
+                    // Known area, no polygon change → nothing to ship.
+                    if (!firstSight && known == hash)
                     {
                         continue;
                     }
 
-                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
+                    // AUTHORITY (Fase 1): the HOST is the single source of truth for a building-owned work-area
+                    // (farm/extractor FIELD) shape. Each PC's own AreaSpawnSystem spawns the field locally and
+                    // DIVERGENTLY; if the client also shipped its shape, the two would ping-pong forever (the
+                    // 585-vs-593 areas drift). So only the host ships — the client keeps its locally-spawned
+                    // field but gets rewritten to the host's polygon via the identity apply (owner+prefab).
+                    // This is why the client is never field-less: no AREASUPPRESS needed.
+                    //
+                    // KNOWN TRADE-OFF (adversarial review, Fase 1): this ALSO means a CLIENT-initiated field
+                    // RESHAPE does not propagate to the host — the host owns the shape. Common cases still work
+                    // (host places/edits a farm → syncs; client places a farm → host spawns+ships its field), so
+                    // this is an accepted Fase-1 limitation, not a bug. Lifting it (let known-change reshapes
+                    // ship from either side, guarded by WorkAreaHash echo) needs a 2-sim to confirm no ping-pong.
+                    if (!isServer)
+                    {
+                        continue;
+                    }
+
+                    // First-sight fields at WORLD-LOAD are identical on both PCs (loaded from the same save) →
+                    // no need to ship. But a first-sight field AFTER warmup is a farm the host placed THIS
+                    // session, whose field spawned with a shape the client can't match → ship the baseline so
+                    // the client rewrites to the host's exact polygon. This is the real "farm field never syncs" fix.
+                    if (firstSight && _scanPasses <= WarmupScans)
+                    {
+                        continue;
+                    }
+
+                    // Anchor = the nearest ancestor up the owner chain that has a Transform (a building, or
+                    // a farm's "Agriculture Area Placeholder"). Using the OWNER anchor (not the polygon
+                    // centre) is what makes a RESIZE sync: the field's centroid MOVES when you redraw it, but
+                    // its owner does not. Old code skipped any non-Building owner outright, so the farm work-
+                    // area never synced. Walk up to 4 links to reach a Transform.
+                    Entity anchor = FindAnchor(EntityManager.GetComponentData<Owner>(area).m_Owner);
+                    if (anchor == Entity.Null
+                        || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
                             out PrefabBase prefab) || prefab == null
-                        || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(owner).m_Prefab,
+                        || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(anchor).m_Prefab,
                             out PrefabBase ownerPrefab) || ownerPrefab == null)
                     {
                         continue;
                     }
+
+                    Entity owner = anchor;
 
                     var xs = new float[nodes.Length];
                     var ys = new float[nodes.Length];
@@ -312,6 +346,36 @@ namespace CS2M.Sync
             {
                 areas.Dispose();
             }
+        }
+
+        /// <summary>Nearest ancestor up the owner chain with a Transform+PrefabRef (a building, or a farm's
+        /// "Agriculture Area Placeholder"). This is the STABLE address for a work-area edit — it doesn't move
+        /// when the polygon is resized. Entity.Null if none within 5 links.</summary>
+        private Entity FindAnchor(Entity owner)
+        {
+            Entity e = owner;
+            for (int guard = 0; e != Entity.Null && guard < 5; guard++)
+            {
+                if (!EntityManager.Exists(e))
+                {
+                    return Entity.Null;
+                }
+
+                if (EntityManager.HasComponent<Game.Objects.Transform>(e)
+                    && EntityManager.HasComponent<PrefabRef>(e))
+                {
+                    return e;
+                }
+
+                if (!EntityManager.HasComponent<Owner>(e))
+                {
+                    return Entity.Null;
+                }
+
+                e = EntityManager.GetComponentData<Owner>(e).m_Owner;
+            }
+
+            return Entity.Null;
         }
 
         private void DetectStandalone()
@@ -491,6 +555,16 @@ namespace CS2M.Sync
         private EntityQuery _buildings;
         private readonly List<Entity> _pendingDefinitions = new List<Entity>();
 
+        // A building-owned area (farm field, surface) can arrive BEFORE the owner building's SUBAREAS
+        // handler has regenerated it locally. The old code SKIPPED create then (to avoid duplicating the
+        // SUBAREAS copy) — but if the shipped shape differs from the regenerated one, that host-authoritative
+        // shape was LOST and the field drifted forever (both sides baseline their own). Now we PARK the
+        // command and retry: once the SUBAREAS area appears we rewrite it to the host's exact polygon; only
+        // if it never appears within the window do we create it ourselves (SUBAREAS genuinely produced none).
+        private struct PendingArea { public AreaEditCommand Cmd; public int FramesLeft; }
+        private readonly List<PendingArea> _pendingAreas = new List<PendingArea>();
+        private const int AreaRetryTtlFrames = 300; // ~5 s at 60 fps
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -544,37 +618,79 @@ namespace CS2M.Sync
                 return;
             }
 
+            // Retry parked owned-area rewrites first (owner/area may have materialised since).
+            RetryPendingAreas();
+
             while (RemoteAreaQueue.TryDequeue(out AreaEditCommand cmd))
             {
-                try { ApplyOne(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] area apply failed: {ex.Message}"); }
+                try
+                {
+                    if (!ApplyOne(cmd, lastTry: false))
+                    {
+                        _pendingAreas.Add(new PendingArea { Cmd = cmd, FramesLeft = AreaRetryTtlFrames });
+                    }
+                }
+                catch (System.Exception ex) { CS2M.Log.Info($"[Guard] area apply failed: {ex.Message}"); }
             }
         }
 
-        private void ApplyOne(AreaEditCommand cmd)
+        /// <summary>Retry parked owned-area commands; on TTL expiry force the create (SUBAREAS never made it).</summary>
+        private void RetryPendingAreas()
+        {
+            for (int i = _pendingAreas.Count - 1; i >= 0; i--)
+            {
+                PendingArea p = _pendingAreas[i];
+                p.FramesLeft--;
+                bool last = p.FramesLeft <= 0;
+                bool handled;
+                try { handled = ApplyOne(p.Cmd, last); }
+                catch (System.Exception ex) { CS2M.Log.Info($"[Guard] area retry failed: {ex.Message}"); handled = true; }
+
+                if (handled || last)
+                {
+                    _pendingAreas.RemoveAt(i);
+                }
+                else
+                {
+                    _pendingAreas[i] = p;
+                }
+            }
+        }
+
+        /// <summary>Returns true when handled (applied/created/invalid); false only when retryable
+        /// (owner or its SUBAREAS-regenerated area not present yet). <paramref name="lastTry"/> forces the
+        /// create path when the retry window is exhausted.</summary>
+        private bool ApplyOne(AreaEditCommand cmd, bool lastTry)
         {
             if (cmd.Delete)
             {
                 ApplyDelete(cmd);
-                return;
+                return true;
             }
 
             if (cmd.Xs == null || cmd.Zs == null || cmd.Xs.Length < 3)
             {
-                return;
+                return true;
             }
 
             // v46: standalone area (surface/pavement — no owner shipped).
             if (cmd.OwnerSyncId == 0 && string.IsNullOrEmpty(cmd.OwnerPrefabName))
             {
                 ApplyStandalone(cmd);
-                return;
+                return true;
             }
 
             Entity owner = ResolveOwner(cmd);
             if (owner == Entity.Null)
             {
-                CS2M.Log.Info($"[Area] SKIP noOwner owner={cmd.OwnerPrefabName} at=({cmd.OwnerX:F0},{cmd.OwnerZ:F0})");
-                return;
+                // The owner building may not be placed on this PC yet — retry unless the window is spent.
+                if (!lastTry)
+                {
+                    return false;
+                }
+
+                CS2M.Log.Info($"[Area] DROP noOwner owner={cmd.OwnerPrefabName} at=({cmd.OwnerX:F0},{cmd.OwnerZ:F0}) after retries");
+                return true;
             }
 
             // Existing owned area of the same prefab → rewrite its polygon in place.
@@ -584,7 +700,10 @@ namespace CS2M.Sync
             {
                 foreach (Entity area in areas)
                 {
-                    if (EntityManager.GetComponentData<Owner>(area).m_Owner != owner)
+                    // Match by ANCHOR, not direct owner: a farm FIELD is owned by a placeholder whose owner
+                    // is the building, and ResolveOwner may have resolved either — walking both sides to the
+                    // same anchor makes them meet regardless of which level carried the Transform.
+                    if (FindAnchorApply(EntityManager.GetComponentData<Owner>(area).m_Owner) != owner)
                     {
                         continue;
                     }
@@ -627,16 +746,28 @@ namespace CS2M.Sync
                 WorkAreaHash.Set(target, WorkAreaHash.Compute(nodes));
 
                 CS2M.Log.Info($"[Area] APPLIED rewrite name={cmd.PrefabName} nodes={cmd.Xs.Length} entity={target.Index}");
-                return;
+                return true;
             }
 
-            // No such area yet → create it via the vanilla Permanent-definition path.
+            // The owner BUILDING regenerates its sub-areas itself on the receiver (the object-place
+            // SUBAREAS handler — same as sub-nets), so CREATING them here too would DUPLICATE every field/
+            // surface. But the SUBAREAS-generated area may not EXIST yet when this command arrives, and its
+            // regenerated shape can differ from the host's — so we PARK and retry: once it materialises the
+            // rewrite path above stamps the host's exact polygon onto it. Only when the retry window is spent
+            // (SUBAREAS genuinely produced nothing) do we fall through and create it ourselves — the fix for
+            // "farm field never syncs / areas(hash) drifts forever". Non-building owners create immediately.
+            if (EntityManager.HasComponent<Game.Buildings.Building>(owner) && !lastTry)
+            {
+                return false; // retry: wait for SUBAREAS, then rewrite to the host's shape
+            }
+
+            // No such area yet (or window spent) → create it via the vanilla Permanent-definition path.
             var prefabId = new PrefabID(cmd.PrefabType, cmd.PrefabName, default(Colossal.Hash128));
             if (!_prefabSystem.TryGetPrefab(prefabId, out PrefabBase areaPrefab) || areaPrefab == null
                 || !_prefabSystem.TryGetEntity(areaPrefab, out Entity areaPrefabEntity))
             {
                 CS2M.Log.Info($"[Area] RESOLVE-FAIL name={cmd.PrefabName}");
-                return;
+                return true;
             }
 
             Entity def = EntityManager.CreateEntity();
@@ -657,6 +788,7 @@ namespace CS2M.Sync
 
             _pendingDefinitions.Add(def);
             CS2M.Log.Info($"[Area] APPLIED-DEF create name={cmd.PrefabName} nodes={cmd.Xs.Length}");
+            return true;
         }
 
         /// <summary>Finds any non-tile area of the same prefab whose polygon center is nearest the
@@ -797,6 +929,34 @@ namespace CS2M.Sync
             CS2M.Log.Info($"[Area] APPLIED-DEF standalone create name={cmd.PrefabName} nodes={cmd.Xs.Length}");
         }
 
+        /// <summary>Same walk as the detector's FindAnchor: nearest ancestor with Transform+PrefabRef.</summary>
+        private Entity FindAnchorApply(Entity owner)
+        {
+            Entity e = owner;
+            for (int guard = 0; e != Entity.Null && guard < 5; guard++)
+            {
+                if (!EntityManager.Exists(e))
+                {
+                    return Entity.Null;
+                }
+
+                if (EntityManager.HasComponent<Game.Objects.Transform>(e)
+                    && EntityManager.HasComponent<PrefabRef>(e))
+                {
+                    return e;
+                }
+
+                if (!EntityManager.HasComponent<Owner>(e))
+                {
+                    return Entity.Null;
+                }
+
+                e = EntityManager.GetComponentData<Owner>(e).m_Owner;
+            }
+
+            return Entity.Null;
+        }
+
         private Entity ResolveOwner(AreaEditCommand cmd)
         {
             if (cmd.OwnerSyncId != 0 && CS2M_SyncIdSystem.Map.TryGetValue(cmd.OwnerSyncId, out Entity byId)
@@ -826,6 +986,57 @@ namespace CS2M.Sync
             finally
             {
                 ents.Dispose();
+            }
+
+            if (best != Entity.Null)
+            {
+                return best;
+            }
+
+            // FALLBACK: non-building anchor (a farm's "Agriculture Area Placeholder"). Match a nearby object
+            // of the shipped prefab name — this is what lets the farm FIELD resolve its owner and sync.
+            if (string.IsNullOrEmpty(cmd.OwnerPrefabName))
+            {
+                return Entity.Null;
+            }
+
+            EntityQuery anchors = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Objects.Transform>(), ComponentType.ReadOnly<PrefabRef>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                    ComponentType.ReadOnly<Game.Net.Edge>(), ComponentType.ReadOnly<Game.Net.Node>(),
+                    ComponentType.ReadOnly<Game.Areas.Area>(),
+                },
+            });
+            float bestD2 = 25f; // 5 m — placeholders sit a little off the field footprint
+            NativeArray<Entity> cands = anchors.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in cands)
+                {
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(cand).m_Prefab,
+                            out PrefabBase p) || p == null || p.name != cmd.OwnerPrefabName)
+                    {
+                        continue;
+                    }
+
+                    var tf = EntityManager.GetComponentData<Game.Objects.Transform>(cand).m_Position;
+                    float dx = tf.x - cmd.OwnerX;
+                    float dz = tf.z - cmd.OwnerZ;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD2)
+                    {
+                        bestD2 = d;
+                        best = cand;
+                    }
+                }
+            }
+            finally
+            {
+                cands.Dispose();
             }
 
             return best;

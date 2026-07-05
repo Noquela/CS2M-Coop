@@ -37,6 +37,11 @@ namespace CS2M.Sync
         private EntityQuery _liveNodes;
         private readonly List<Entity> _pendingDefinitions = new List<Entity>();
 
+        // Nodes created from last frame's courses whose stable id must be stamped once GenerateNodes has
+        // built them, so sibling edges (this batch or a later one) fuse onto the SAME node by identity.
+        private struct PendingStamp { public ulong Id; public float3 Pos; public int Age; }
+        private readonly List<PendingStamp> _pendingNodeStamps = new List<PendingStamp>();
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -70,6 +75,10 @@ namespace CS2M.Sync
             }
 
             _pendingDefinitions.Clear();
+
+            // Stamp the node ids of last frame's freshly-built nodes BEFORE applying the next net, so a
+            // sibling edge arriving now resolves its shared endpoint by identity instead of proximity.
+            ProcessPendingStamps();
 
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
@@ -115,6 +124,69 @@ namespace CS2M.Sync
                 new float3(cmd.Cx, cmd.Cy, cmd.Cz),
                 new float3(cmd.Dx, cmd.Dy, cmd.Dz));
 
+            // JUNCTION FIX (topology-authoritative): the host already split every road at its junctions
+            // and sends each piece carrying its authoritative node coords (StartNode/EndNode). So when
+            // HasNodes we snap the endpoints to those coords and DON'T re-split (no SnapOrSplitAt /
+            // FindMidSpanCrossings): the receiver used to GUESS a second topology on top of the host's
+            // pieces — that is the +roads X-crossing drift. Adjacent pieces resolve the SAME node
+            // position, so junctions emerge from shared nodes. Paired with the emitter now propagating
+            // the delete of the split original (NetEditDetectorSystem), the client matches the host
+            // edge-for-edge. Legacy/relayed commands (HasNodes=false) fall through to the guess path.
+            if (cmd.HasNodes)
+            {
+                // Snap the endpoints to the host's authoritative node coords. EMPIRICAL (selftest): on the
+                // client's Permanent-course path the created node sits AT the curve endpoint — it is NOT
+                // decoupled from the curve the way the host's post-geometry pullback separates them. So to
+                // land the shared junction node at the host's coord we put the curve endpoint there.
+                // (A prior attempt to keep the pulled-back curve and pass the node coord separately made
+                // the node land on the curve endpoint 6 m off-centre and the arms failed to fuse — reverted.)
+                bezier.a = new float3(cmd.StartNodeX, cmd.StartNodeY, cmd.StartNodeZ);
+                bezier.d = new float3(cmd.EndNodeX, cmd.EndNodeY, cmd.EndNodeZ);
+
+                // Share junction nodes by STABLE IDENTITY (id), falling back to the authoritative-coord
+                // proximity search only for pre-existing/save nodes never id-stamped. Identity is immune
+                // to the order-dependence that made proximity forge phantom nodes: a junction re-centres
+                // as roads connect, so a later piece's coord lands 5-7 m from where this sim first placed
+                // the node and the wide fallback (degree>=2 only) misses it — because the pieces that make
+                // it a junction have not arrived yet. Same sender node → same id → one shared node here.
+                Entity aStart = ResolveNode(cmd.StartNodeId, bezier.a);
+                Entity aEnd = ResolveNode(cmd.EndNodeId, bezier.d);
+
+                // Degenerate guard: a short piece must never collapse BOTH ends onto one node (that would
+                // build a looping/zero-span edge and lose a node).
+                if (aStart != Entity.Null && aStart == aEnd)
+                {
+                    aEnd = Entity.Null;
+                }
+
+                if (aStart != Entity.Null && aEnd != Entity.Null && EdgeExists(aStart, aEnd, netPrefab))
+                {
+                    CS2M.Log.Info($"[Net] SKIP duplicate (auth) name={cmd.PrefabName} " +
+                                  $"start=({bezier.a.x:F1},{bezier.a.z:F1}) end=({bezier.d.x:F1},{bezier.d.z:F1})");
+                    return;
+                }
+
+                // Delete the un-split ORIGINAL this piece replaces (an edge that spans it). The sender
+                // split it into pieces and its position-addressed NetDelete can MISS on the receiver
+                // (FindEdge needs both node coords within ~3 m), leaving the original stacked under the
+                // pieces — the +roads X-crossing drift. Deleting the covering edge here is deterministic
+                // and fires exactly once (the first piece deletes it; later pieces find it already gone).
+                // NOTE: we delete the ORIGINAL and keep the piece — the opposite of CoveredByExistingEdge,
+                // which would drop the piece and keep the original (a hole).
+                Entity covering = FindCoveringEdge(bezier, netPrefab);
+                if (covering != Entity.Null && !EntityManager.HasComponent<Deleted>(covering))
+                {
+                    EntityManager.AddComponent<Deleted>(covering);
+                    CS2M.Log.Info($"[Net] DELETE split-original edge={covering.Index} (piece {cmd.PrefabName} replaces it)");
+                }
+
+                EmitCourse(netPrefab, cmd.PrefabName, bezier, aStart, aEnd,
+                    new float2(cmd.StartElevX, cmd.StartElevY), new float2(cmd.EndElevX, cmd.EndElevY),
+                    cmd.RandomSeed);
+                return;
+            }
+
+            // ---- legacy path (HasNodes=false): receiver guesses splits/junctions by proximity ----
             // Connect to the existing net where the endpoints already have nodes (cross-PC snapping).
             Entity startNode = FindExistingNode(bezier.a);
             Entity endNode = FindExistingNode(bezier.d);
@@ -197,19 +269,27 @@ namespace CS2M.Sync
             CS2M.Log.Info($"[Net] X-CROSS name={cmd.PrefabName} cuts={cutTs.Count} (new road sliced at each junction)");
         }
 
-        /// <summary>Emits one Permanent course for a (piece of the) synced road, with echo marking.</summary>
+        /// <summary>Emits one Permanent course for a (piece of the) synced road, with echo marking.
+        /// The node COORDS (<paramref name="startNodePos"/>/<paramref name="endNodePos"/>) are where the
+        /// junction node is placed/fused; they are DECOUPLED from the curve endpoints because at a
+        /// junction the node sits at the intersection centre while the edge curve is pulled back. When
+        /// null (legacy path) they default to the curve endpoints (node == curve end, no pullback).</summary>
         private void EmitCourse(Entity netPrefab, string prefabName, Bezier4x3 bezier,
-            Entity startNode, Entity endNode, float2 startElev, float2 endElev, int seed)
+            Entity startNode, Entity endNode, float2 startElev, float2 endElev, int seed,
+            float3? startNodePos = null, float3? endNodePos = null)
         {
             int segHash = RemoteNetEcho.SegHash(bezier.a, bezier.d, prefabName);
             RemoteNetEcho.Mark(segHash);
+
+            float3 sPos = startNodePos ?? bezier.a;
+            float3 ePos = endNodePos ?? bezier.d;
 
             NetCourse course = default;
             course.m_Curve = bezier;
             course.m_Length = MathUtils.Length(bezier);
             course.m_FixedIndex = -1;
 
-            course.m_StartPosition.m_Position = bezier.a;
+            course.m_StartPosition.m_Position = sPos;
             course.m_StartPosition.m_Rotation = NetUtils.GetNodeRotation(MathUtils.StartTangent(bezier));
             course.m_StartPosition.m_CourseDelta = 0f;
             course.m_StartPosition.m_Elevation = startElev;
@@ -217,7 +297,7 @@ namespace CS2M.Sync
             course.m_StartPosition.m_Flags = CoursePosFlags.IsFirst;
             course.m_StartPosition.m_Entity = startNode;
 
-            course.m_EndPosition.m_Position = bezier.d;
+            course.m_EndPosition.m_Position = ePos;
             course.m_EndPosition.m_Rotation = NetUtils.GetNodeRotation(MathUtils.EndTangent(bezier));
             course.m_EndPosition.m_CourseDelta = 1f;
             course.m_EndPosition.m_Elevation = endElev;
@@ -493,6 +573,178 @@ namespace CS2M.Sync
             _pendingDefinitions.Add(def);
         }
 
+        /// <summary>Resolve an edge endpoint to a node, IDENTITY-first. (1) A live node already stamped
+        /// with this id → reuse it exactly, regardless of arrival order or how far it re-centred. (2) Else
+        /// a pre-existing/save node at the coord → adopt it under this id so siblings fuse exactly. (3)
+        /// Else Null (GenerateNodes creates a fresh node) and we schedule its id-stamp for next frame.</summary>
+        private Entity ResolveNode(ulong id, float3 pos)
+        {
+            // Record the host's authoritative coord for this node id so NodePinSystem can snap the local
+            // node back to it (fixes the <1 m junction drift that breaks zone-block matching).
+            CS2M_NodeSyncIds.SetAuthPos(id, pos);
+
+            if (CS2M_NodeSyncIds.TryResolve(EntityManager, id, out Entity byId))
+            {
+                return byId;
+            }
+
+            Entity byPos = FindJunctionNode(pos);
+            if (byPos != Entity.Null)
+            {
+                if (id != 0)
+                {
+                    CS2M_NodeSyncIds.Register(EntityManager, byPos, id);
+                }
+
+                return byPos;
+            }
+
+            if (id != 0)
+            {
+                _pendingNodeStamps.Add(new PendingStamp { Id = id, Pos = pos, Age = 0 });
+            }
+
+            return Entity.Null;
+        }
+
+        /// <summary>Stamp the id onto each node GenerateNodes built from last frame's Null-ended courses.
+        /// The node sits at the scheduled coord (Permanent path: node == curve end, and we apply one net
+        /// per frame so nothing re-centred it yet). Drop an entry once stamped, resolved elsewhere, or aged
+        /// out (the node never materialised — a skipped duplicate).</summary>
+        private void ProcessPendingStamps()
+        {
+            for (int i = _pendingNodeStamps.Count - 1; i >= 0; i--)
+            {
+                PendingStamp ps = _pendingNodeStamps[i];
+                if (CS2M_NodeSyncIds.TryResolve(EntityManager, ps.Id, out _))
+                {
+                    _pendingNodeStamps.RemoveAt(i);
+                    continue;
+                }
+
+                Entity node = FindUnstampedNodeAt(ps.Pos);
+                if (node != Entity.Null)
+                {
+                    CS2M_NodeSyncIds.Register(EntityManager, node, ps.Id);
+                    _pendingNodeStamps.RemoveAt(i);
+                }
+                else if (++ps.Age > 6)
+                {
+                    _pendingNodeStamps.RemoveAt(i);
+                }
+                else
+                {
+                    _pendingNodeStamps[i] = ps;
+                }
+            }
+        }
+
+        /// <summary>Nearest live standalone node within 2.5 m of <paramref name="pos"/> that has no id yet,
+        /// or Null — the node just built for a scheduled stamp (closest-wins guards a rare near neighbour).</summary>
+        private Entity FindUnstampedNodeAt(float3 pos)
+        {
+            NativeArray<Entity> nodes = _liveNodes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                Entity best = Entity.Null;
+                float bestSq = 6.25f; // 2.5 m
+                foreach (Entity n in nodes)
+                {
+                    if (EntityManager.HasComponent<CS2M_NodeSyncId>(n))
+                    {
+                        continue; // already owned by another id
+                    }
+
+                    float3 p = EntityManager.GetComponentData<Node>(n).m_Position;
+                    float dx = p.x - pos.x;
+                    float dz = p.z - pos.z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestSq)
+                    {
+                        bestSq = d;
+                        best = n;
+                    }
+                }
+
+                return best;
+            }
+            finally
+            {
+                nodes.Dispose();
+            }
+        }
+
+        /// <summary>Nearest live standalone node within a JUNCTION-scale radius (3.5 m XZ) of the
+        /// host's authoritative node coord, or Null. Used ONLY on the topology-authoritative path:
+        /// the host says "this endpoint is a node at P", so the closest local node to P is that same
+        /// junction even if it settled a couple of metres off (the intersection re-centres as roads
+        /// join). Wide enough to catch the moved sibling, tight enough not to swallow a neighbouring
+        /// junction (Small Road nodes sit ~8 m apart). Closest-wins guards against grabbing the wrong
+        /// one when two are in range.</summary>
+        private Entity FindJunctionNode(float3 pos)
+        {
+            NativeArray<Entity> nodes = _liveNodes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                Entity best = Entity.Null;
+                float bestSq = 12.25f; // 3.5 m — any node (the normal case)
+                Entity bestJunc = Entity.Null;
+                float bestJuncSq = 64f; // 8 m — but ONLY an existing junction (degree >= 2)
+                foreach (Entity n in nodes)
+                {
+                    float3 p = EntityManager.GetComponentData<Node>(n).m_Position;
+                    float dx = p.x - pos.x;
+                    float dz = p.z - pos.z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestSq)
+                    {
+                        bestSq = d;
+                        best = n;
+                    }
+
+                    if (d < bestJuncSq && IsJunctionNode(n))
+                    {
+                        bestJuncSq = d;
+                        bestJunc = n;
+                    }
+                }
+
+                // Prefer the tight 3.5 m match. If it misses, fall back to a nearby EXISTING junction
+                // (degree >= 2) within 8 m: a busy junction re-centres MORE than 3.5 m as roads join over
+                // time, so the host's authoritative coord for a LATER road lands >3.5 m from where this sim
+                // first placed the node — the "+nodes on incremental junctions" drift Bruno saw. Requiring
+                // degree >= 2 means we never fuse a road that merely ENDS near a junction (a dead-end is
+                // degree 1 and won't match wide), so distinct dead-ends stay distinct.
+                return best != Entity.Null ? best : bestJunc;
+            }
+            finally
+            {
+                nodes.Dispose();
+            }
+        }
+
+        /// <summary>True when a node has 2+ live connected edges (a real junction, not a dead-end).</summary>
+        private bool IsJunctionNode(Entity node)
+        {
+            if (!EntityManager.HasBuffer<ConnectedEdge>(node))
+            {
+                return false;
+            }
+
+            DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(node, true);
+            int live = 0;
+            for (int i = 0; i < ce.Length; i++)
+            {
+                Entity e = ce[i].m_Edge;
+                if (EntityManager.Exists(e) && !EntityManager.HasComponent<Deleted>(e))
+                {
+                    if (++live >= 2) { return true; }
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>Nearest live standalone node within 0.5 m (XZ) of <paramref name="pos"/>, or Null.</summary>
         private Entity FindExistingNode(float3 pos)
         {
@@ -557,6 +809,7 @@ namespace CS2M.Sync
                 {
                     ComponentType.ReadOnly<Temp>(),
                     ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(), // never suppress against a building sub-net
                 },
             });
 
@@ -605,6 +858,79 @@ namespace CS2M.Sync
             }
 
             return false;
+        }
+
+        /// <summary>Returns a LIVE same-prefab edge that CONTAINS this piece: every sample of the piece
+        /// lies on it AND it is meaningfully longer than the piece (so it is the un-split ORIGINAL the
+        /// sender broke into pieces, not a same-length duplicate). The receiver deletes it while
+        /// building the piece — deterministic, unlike the position-addressed NetDelete that missed on
+        /// the X-crossings (its FindEdge needs the two node coords within ~3 m). Entity.Null if none.</summary>
+        private Entity FindCoveringEdge(Bezier4x3 bezier, Entity netPrefab)
+        {
+            const float tolSq = 2.25f; // 1.5 m
+            const int N = 5;
+            float pieceLen = MathUtils.Length(bezier);
+            float pieceMidY = MathUtils.Position(bezier, 0.5f).y;
+            var samples = new float3[N];
+            for (int i = 0; i < N; i++) { samples[i] = MathUtils.Position(bezier, i / (float)(N - 1)); }
+
+            EntityQuery edges = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Edge>(),
+                    ComponentType.ReadOnly<Curve>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(), // never delete a building sub-net
+                },
+            });
+
+            Unity.Collections.NativeArray<Entity> ents = edges.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    if (EntityManager.GetComponentData<PrefabRef>(cand).m_Prefab != netPrefab)
+                    {
+                        continue;
+                    }
+
+                    Bezier4x3 c = EntityManager.GetComponentData<Curve>(cand).m_Bezier;
+                    // Only a longer edge can be the un-split original that spans this piece; a same-
+                    // length edge is a duplicate (EdgeExists owns those) — never delete it.
+                    if (MathUtils.Length(c) < pieceLen * 1.15f)
+                    {
+                        continue;
+                    }
+
+                    // Different elevation layer (e.g. a bridge over a ground road that only overlaps in
+                    // XZ): the un-split original shares this piece's elevation, so reject far-Y edges —
+                    // DistSqXZ ignores Y and would otherwise delete the road underneath.
+                    if (math.abs(MathUtils.Position(c, 0.5f).y - pieceMidY) > 3f)
+                    {
+                        continue;
+                    }
+
+                    bool all = true;
+                    for (int i = 0; i < N; i++)
+                    {
+                        if (DistSqXZ(c, samples[i]) >= tolSq) { all = false; break; }
+                    }
+
+                    if (all) { return cand; }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return Entity.Null;
         }
 
         private static float DistSqXZ(Bezier4x3 curve, float3 p)

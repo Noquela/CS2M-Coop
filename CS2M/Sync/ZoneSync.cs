@@ -68,6 +68,14 @@ namespace CS2M.Sync
             return NameToIndex.TryGetValue(name, out ushort i) ? i : (ushort) 0;
         }
 
+        /// <summary>Is this a name the local registry KNOWS? True for "Unzoned" (the None zone, index 0) and
+        /// every real zone; false ONLY for a genuinely unresolvable name. Lets the apply distinguish a legit
+        /// DEZONE ("Unzoned"/index 0) from an unknown zone it must NOT write (which would wrongly dezone).</summary>
+        public static bool IsKnown(string name)
+        {
+            return string.IsNullOrEmpty(name) || NameToIndex.ContainsKey(name);
+        }
+
         public static void Clear()
         {
             Snapshot.Clear();

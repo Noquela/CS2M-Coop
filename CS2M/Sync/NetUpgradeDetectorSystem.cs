@@ -22,7 +22,9 @@ namespace CS2M.Sync
     public partial class NetUpgradeDetectorSystem : GameSystemBase
     {
         private EntityQuery _upgradedEdges;
+        private EntityQuery _upgradedNodes;
         private readonly Dictionary<Entity, uint3> _snap = new Dictionary<Entity, uint3>();
+        private readonly Dictionary<Entity, uint3> _snapNodes = new Dictionary<Entity, uint3>();
         private bool _baselineDone;
 
         protected override void OnCreate()
@@ -32,6 +34,19 @@ namespace CS2M.Sync
             {
                 All = new[] { ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Upgraded>() },
                 None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+            // Junction upgrades (traffic lights / stop signs / roundabout / crosswalks) live as Upgraded
+            // General flags on the NODE, which the edge query above can't see. Exclude Edge so this is
+            // strictly nodes.
+            _upgradedNodes = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Node>(), ComponentType.ReadOnly<Upgraded>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Edge>(),
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
             });
             CS2M.Log.Info("[NetEdit] NetUpgradeDetectorSystem created");
         }
@@ -44,6 +59,7 @@ namespace CS2M.Sync
             }
 
             NativeArray<Entity> edges = _upgradedEdges.ToEntityArray(Allocator.Temp);
+            NativeArray<Entity> nodes = _upgradedNodes.ToEntityArray(Allocator.Temp);
             try
             {
                 if (!_baselineDone)
@@ -51,6 +67,11 @@ namespace CS2M.Sync
                     foreach (Entity e in edges)
                     {
                         _snap[e] = Flags(e);
+                    }
+
+                    foreach (Entity n in nodes)
+                    {
+                        _snapNodes[n] = Flags(n);
                     }
 
                     _baselineDone = true;
@@ -80,18 +101,55 @@ namespace CS2M.Sync
                         continue;
                     }
 
+                    ulong upS = EntityManager.HasComponent<CS2M_NodeSyncId>(ed.m_Start)
+                        ? EntityManager.GetComponentData<CS2M_NodeSyncId>(ed.m_Start).m_Id : 0UL;
+                    ulong upE = EntityManager.HasComponent<CS2M_NodeSyncId>(ed.m_End)
+                        ? EntityManager.GetComponentData<CS2M_NodeSyncId>(ed.m_End).m_Id : 0UL;
+
                     Command.SendToAll?.Invoke(new NetUpgradeCommand
                     {
                         StartX = s.x, StartY = s.y, StartZ = s.z,
                         EndX = en.x, EndY = en.y, EndZ = en.z,
                         General = cur.x, Left = cur.y, Right = cur.z,
+                        StartNodeId = upS, EndNodeId = upE,
                     });
                     CS2M.Log.Info($"[NetEdit] DETECT+SEND upgrade edge={e.Index} g={cur.x} l={cur.y} r={cur.z}");
+                }
+
+                // Junction upgrades: diff the node's Upgraded flags and ship them addressed by node position.
+                foreach (Entity n in nodes)
+                {
+                    uint3 cur = Flags(n);
+                    if (_snapNodes.TryGetValue(n, out uint3 prev) && math.all(prev == cur))
+                    {
+                        continue;
+                    }
+
+                    _snapNodes[n] = cur;
+
+                    float3 p = EntityManager.GetComponentData<Node>(n).m_Position;
+                    if (RemoteNetEcho.IsRecent(RemoteNetEcho.SegHash(p, p, "upgNode")))
+                    {
+                        continue;
+                    }
+
+                    ulong nId = EntityManager.HasComponent<CS2M_NodeSyncId>(n)
+                        ? EntityManager.GetComponentData<CS2M_NodeSyncId>(n).m_Id : 0UL;
+
+                    Command.SendToAll?.Invoke(new NetUpgradeCommand
+                    {
+                        IsNode = true,
+                        StartX = p.x, StartY = p.y, StartZ = p.z,
+                        General = cur.x, Left = cur.y, Right = cur.z,
+                        NodeId = nId,
+                    });
+                    CS2M.Log.Info($"[NetEdit] DETECT+SEND node-upgrade node={n.Index} g={cur.x} pos=({p.x:F0},{p.z:F0})");
                 }
             }
             finally
             {
                 edges.Dispose();
+                nodes.Dispose();
             }
         }
 

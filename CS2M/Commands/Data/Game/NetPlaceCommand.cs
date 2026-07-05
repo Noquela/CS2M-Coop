@@ -40,6 +40,25 @@ namespace CS2M.Commands.Data.Game
         public float EndElevX { get; set; }
         public float EndElevY { get; set; }
 
+        // Authoritative node positions: Node.m_Position of Edge.m_Start / m_End on the HOST — the
+        // SNAPPED junction vertices, which can differ from the raw bezier ends. The receiver
+        // shares/creates junction nodes at THESE coords instead of guessing topology by proximity
+        // (the fix for junction drift: two triangle vertices getting fused by the 4 m snap radius).
+        // HasNodes=false on legacy/relayed commands → receiver falls back to the old bezier path.
+        public bool HasNodes { get; set; }
+        public float StartNodeX { get; set; }
+        public float StartNodeY { get; set; }
+        public float StartNodeZ { get; set; }
+        public float EndNodeX { get; set; }
+        public float EndNodeY { get; set; }
+        public float EndNodeZ { get; set; }
+
+        // Stable cross-PC node identities (0 = unknown/legacy). Edges that share a node on the sender
+        // carry the SAME id, so the receiver fuses them onto ONE node by identity instead of guessing
+        // by proximity — the definitive fix for the "host forged a phantom node at a junction" drift.
+        public ulong StartNodeId { get; set; }
+        public ulong EndNodeId { get; set; }
+
         public int RandomSeed { get; set; }
     }
 }

@@ -23,5 +23,13 @@ namespace CS2M.Commands.Data.Game
 
         /// <summary>v50: true = remove the source nearest to (PosX, PosZ) instead of creating.</summary>
         public bool Delete { get; set; }
+
+        /// <summary>v55: true = MOVE the source nearest to (OldX, OldZ) to (PosX, PosZ) in place — a
+        /// relocation keeps the same entity, so the create/delete detectors never fired and the source
+        /// stayed at the old spot (still simulating) on every remote.</summary>
+        public bool Move { get; set; }
+
+        public float OldX { get; set; }
+        public float OldZ { get; set; }
     }
 }

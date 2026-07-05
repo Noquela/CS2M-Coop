@@ -25,5 +25,17 @@ namespace CS2M.Commands.Data.Game
         public float OldX { get; set; }
         public float OldY { get; set; }
         public float OldZ { get; set; }
+
+        /// <summary>v55: relocating an installed service UPGRADE/extension (an Owner-bearing sub-object the
+        /// SyncId/native paths both exclude). The upgrade carries no shared id, so the receiver resolves the
+        /// OWNER (SyncId else prefab+position) then picks the child whose prefab is <see cref="PrefabName"/>
+        /// nearest the OLD position, and sets its transform.</summary>
+        public bool IsOwnedUpgrade { get; set; }
+
+        public ulong OwnerSyncId { get; set; }
+        public string OwnerPrefabName { get; set; }
+        public float OwnerX { get; set; }
+        public float OwnerY { get; set; }
+        public float OwnerZ { get; set; }
     }
 }

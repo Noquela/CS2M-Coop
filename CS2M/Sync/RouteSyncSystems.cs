@@ -23,9 +23,19 @@ namespace CS2M.Sync
     {
         private static readonly Queue<RouteCreateCommand> Creates = new Queue<RouteCreateCommand>();
         private static readonly Queue<RouteColorCommand> Colors = new Queue<RouteColorCommand>();
+        private static readonly Queue<RouteVisibilityCommand> Visibilities = new Queue<RouteVisibilityCommand>();
         private static readonly object Lock = new object();
 
+        // v55: per-route HiddenRoute presence snapshot for the visibility diff + echo guard.
+        public static readonly Dictionary<Entity, bool> VisibilitySnapshot = new Dictionary<Entity, bool>();
+
         public static readonly Dictionary<ulong, ulong> Snapshot = new Dictionary<ulong, ulong>();
+
+        // v55: echo guard for SAVE-loaded lines rerouted by prefab+number (they have no SyncId, exactly
+        // like color/delete which already address by number). Keyed "prefab#number" -> last content hash.
+        // The receiver rebuilds to the sender's geometry and stamps this key, so its own reroute detector
+        // sees an unchanged hash and never pings the command back — no id allocation, no identity race.
+        public static readonly Dictionary<string, ulong> SnapshotByNumber = new Dictionary<string, ulong>();
 
         public static void EnqueueCreate(RouteCreateCommand cmd)
         {
@@ -57,6 +67,21 @@ namespace CS2M.Sync
             }
         }
 
+        public static void EnqueueVisibility(RouteVisibilityCommand cmd)
+        {
+            lock (Lock) { Visibilities.Enqueue(cmd); }
+        }
+
+        public static bool TryDequeueVisibility(out RouteVisibilityCommand cmd)
+        {
+            lock (Lock)
+            {
+                if (Visibilities.Count > 0) { cmd = Visibilities.Dequeue(); return true; }
+                cmd = null;
+                return false;
+            }
+        }
+
         // Echo guard for deletes: remote-applied line deletions register a key here so the local
         // detector doesn't send them back (the RemotePlaced tag can't be the guard — lines created
         // remotely carry it forever, and deleting a friend's line MUST sync).
@@ -83,10 +108,13 @@ namespace CS2M.Sync
             {
                 Creates.Clear();
                 Colors.Clear();
+                Visibilities.Clear();
                 DeleteEcho.Clear();
             }
 
             Snapshot.Clear();
+            SnapshotByNumber.Clear();
+            VisibilitySnapshot.Clear();
         }
 
         /// <summary>FNV-1a over rounded waypoint positions + stop flags (+ Complete).</summary>
@@ -172,9 +200,12 @@ namespace CS2M.Sync
         private Game.Prefabs.PrefabSystem _prefabSystem;
         private EntityQuery _createdRoutes;
         private EntityQuery _updatedRoutes;
+        private EntityQuery _updatedSaveRoutes; // v55: rerouted lines that came from the SAVE (no SyncId yet)
         private EntityQuery _colorEvents;
+        private EntityQuery _allRoutes; // v55: for the visibility (HiddenRoute) snapshot diff
         private readonly HashSet<Entity> _sentEvents = new HashSet<Entity>();
         private int _eventClear;
+        private int _visFrame;
 
         protected override void OnCreate()
         {
@@ -216,6 +247,30 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Created>(),
                 },
             });
+            // v55: same as _updatedRoutes but for SAVE-loaded lines that never got a CS2M_SyncId (only
+            // in-session creates do). Editing such a line was silently dropped (delete/color/rename fall
+            // back to prefab+RouteNumber, but reroute required a SyncId). We assign+broadcast a SyncId on
+            // the first edit so both sims share identity, then it follows the normal id-based path. Exclude
+            // CS2M_RemotePlaced so a remotely-applied reroute (which stamps id+RemotePlaced) never re-enters.
+            _updatedSaveRoutes = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Route>(),
+                    ComponentType.ReadOnly<TransportLine>(),
+                    ComponentType.ReadOnly<RouteWaypoint>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Updated>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Created>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                    ComponentType.ReadOnly<CS2M_SyncId>(),
+                },
+            });
             _colorEvents = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -227,6 +282,16 @@ namespace CS2M.Sync
                 {
                     ComponentType.ReadOnly<CS2M_RemotePlaced>(),
                 },
+            });
+            _allRoutes = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Route>(),
+                    ComponentType.ReadOnly<TransportLine>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
             });
             CS2M.Log.Info("[Route] RouteDetectorSystem created");
         }
@@ -246,7 +311,99 @@ namespace CS2M.Sync
 
             DetectCreated();
             DetectRerouted();
+            DetectSaveRouteReroutes();
             DetectColorChanges();
+
+            if (++_visFrame >= 60)
+            {
+                _visFrame = 0;
+                DetectVisibility();
+            }
+        }
+
+        /// <summary>v55: hide/show a line in the Transportation Overview toggles the HiddenRoute tag with no
+        /// Updated/event, so a snapshot diff (~1 Hz) is the only signal. Addressed like colour (SyncId else
+        /// prefab+RouteNumber). The apply refreshes the snapshot, so a remotely-applied toggle isn't echoed.</summary>
+        private void DetectVisibility()
+        {
+            NativeArray<Entity> ents = _allRoutes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    bool hidden = EntityManager.HasComponent<HiddenRoute>(e);
+                    if (RouteSync.VisibilitySnapshot.TryGetValue(e, out bool prev) && prev == hidden)
+                    {
+                        continue;
+                    }
+
+                    bool firstSight = !RouteSync.VisibilitySnapshot.ContainsKey(e);
+                    RouteSync.VisibilitySnapshot[e] = hidden;
+                    if (firstSight)
+                    {
+                        continue; // baseline silently (save load / freshly created)
+                    }
+
+                    GetIdentity(e, out ulong id, out string prefabName, out int number);
+                    if (id == 0 && number == 0)
+                    {
+                        continue; // unresolvable on the other side
+                    }
+
+                    Command.SendToAll?.Invoke(new RouteVisibilityCommand
+                    {
+                        SyncId = id, PrefabName = prefabName, Number = number, Hidden = hidden,
+                    });
+                    CS2M.Log.Info($"[Route] DETECT+SEND visibility id={id} number={number} hidden={hidden}");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+        }
+
+        /// <summary>v55: a rerouted SAVE-loaded line has no CS2M_SyncId, so the id-based DetectRerouted
+        /// skips it and the reroute was silently dropped (yet delete/color/rename synced — they address by
+        /// prefab+number). Mirror that: send the reroute addressed by prefab+number (SyncId=0, Replace=true)
+        /// and let the receiver resolve by RouteNumber. A per-(prefab#number) content-hash guard stops the
+        /// received-then-Updated line from pinging the command back. No SyncId allocation → no identity race
+        /// between two sims touching the same untouched line in the same frame.</summary>
+        private void DetectSaveRouteReroutes()
+        {
+            if (_updatedSaveRoutes.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> ents = _updatedSaveRoutes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    RouteCreateCommand cmd = BuildCommand(e, 0, replace: true);
+                    if (cmd == null || cmd.Number == 0)
+                    {
+                        continue; // number==0 is unresolvable on the other side
+                    }
+
+                    string key = RouteSync.DeleteKey(0, cmd.PrefabName, cmd.Number);
+                    ulong hash = RouteSync.Hash(cmd);
+                    if (RouteSync.SnapshotByNumber.TryGetValue(key, out ulong prev) && prev == hash)
+                    {
+                        continue; // unchanged since our last send / a remote apply — not a real reroute
+                    }
+
+                    RouteSync.SnapshotByNumber[key] = hash;
+                    Command.SendToAll?.Invoke(cmd);
+                    CS2M.Log.Info($"[Route] DETECT+SEND reroute (save-line by number) number={cmd.Number} " +
+                                  $"prefab={cmd.PrefabName} wps={cmd.WpX.Length}");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
         }
 
         private void DetectCreated()
@@ -544,6 +701,35 @@ namespace CS2M.Sync
             {
                 try { ApplyColor(cmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] route color apply failed: {ex.Message}"); }
             }
+
+            while (RouteSync.TryDequeueVisibility(out RouteVisibilityCommand vcmd))
+            {
+                try { ApplyVisibility(vcmd); } catch (System.Exception ex) { CS2M.Log.Info($"[Guard] route visibility apply failed: {ex.Message}"); }
+            }
+        }
+
+        private void ApplyVisibility(RouteVisibilityCommand cmd)
+        {
+            Entity route = RouteResolver.Resolve(EntityManager, _routesByNumber, _prefabSystem,
+                cmd.SyncId, cmd.PrefabName, cmd.Number);
+            if (route == Entity.Null)
+            {
+                CS2M.Log.Info($"[Route] SKIP visibility noTarget id={cmd.SyncId} number={cmd.Number}");
+                return;
+            }
+
+            bool isHidden = EntityManager.HasComponent<HiddenRoute>(route);
+            if (cmd.Hidden && !isHidden)
+            {
+                EntityManager.AddComponent<HiddenRoute>(route);
+            }
+            else if (!cmd.Hidden && isHidden)
+            {
+                EntityManager.RemoveComponent<HiddenRoute>(route);
+            }
+
+            RouteSync.VisibilitySnapshot[route] = cmd.Hidden; // echo guard before the detector's next scan
+            CS2M.Log.Info($"[Route] APPLIED visibility id={cmd.SyncId} number={cmd.Number} hidden={cmd.Hidden} entity={route.Index}");
         }
 
         /// <summary>The game's InitializeSystem numbers Created routes this same frame — writing the
@@ -723,8 +909,18 @@ namespace CS2M.Sync
             {
                 RouteSync.Snapshot[cmd.SyncId] = RouteSync.Hash(cmd);
             }
+            else if (cmd.Number != 0 && !string.IsNullOrEmpty(cmd.PrefabName))
+            {
+                // v55: save-line reroute addressed by prefab+number. Stamp the by-number guard to the
+                // geometry we just rebuilt so this receiver's DetectSaveRouteReroutes sees the freshly
+                // Updated line as unchanged and doesn't ping the reroute back (echo loop). No SyncId is
+                // registered — the line stays number-addressed and either player can reroute it again.
+                RouteSync.SnapshotByNumber[RouteSync.DeleteKey(0, cmd.PrefabName, cmd.Number)] =
+                    RouteSync.Hash(cmd);
+            }
 
-            CS2M.Log.Info($"[Route] APPLIED reroute id={cmd.SyncId} wps={cmd.WpX.Length} entity={route.Index}");
+            CS2M.Log.Info($"[Route] APPLIED reroute id={cmd.SyncId} number={cmd.Number} " +
+                          $"wps={cmd.WpX.Length} entity={route.Index}");
         }
 
         /// <summary>Creates the waypoint/segment entities and rewrites the route's buffers.

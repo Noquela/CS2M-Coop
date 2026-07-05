@@ -32,6 +32,7 @@ namespace CS2M.Sync
         private EntityQuery _movedQuery;
         private EntityQuery _moveTemps;
         private EntityQuery _movedNativeQuery;
+        private EntityQuery _movedOwnedUpgrades; // v55: installed service upgrades (Owner-bearing) being relocated
         private readonly Dictionary<Entity, float3> _lastPos = new Dictionary<Entity, float3>();
 
         // v48: while the move tool drags, the Temp copy points at the original via Temp.m_Original —
@@ -96,7 +97,29 @@ namespace CS2M.Sync
                 },
             });
 
-            RequireAnyForUpdate(_movedQuery, _moveTemps, _movedNativeQuery);
+            // v55: installed service upgrades/extensions being relocated. They carry Owner (so both the
+            // id and native queries above exclude them) but no shared SyncId. Gated on the SAME _preMove
+            // cache (only entities the move tool actually dragged) — that gate is the echo guard: a
+            // remotely-applied move never creates a Temp, so it never enters _preMove.
+            _movedOwnedUpgrades = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Updated>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                    ComponentType.ReadOnly<Game.Prefabs.PrefabRef>(),
+                    ComponentType.ReadOnly<Owner>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Created>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                    ComponentType.ReadOnly<CS2M_SyncId>(),
+                },
+            });
+
+            RequireAnyForUpdate(_movedQuery, _moveTemps, _movedNativeQuery, _movedOwnedUpgrades);
             CS2M.Log.Info("[Move] MoveDetectorSystem created");
         }
 
@@ -161,6 +184,82 @@ namespace CS2M.Sync
             }
 
             DetectNativeMoves();
+            DetectOwnedUpgradeMoves();
+        }
+
+        /// <summary>v55: an installed service upgrade the move tool relocated. Only entities in the
+        /// _preMove cache (populated by a real move-tool drag) are considered, which is the echo guard.
+        /// Addressed by owner (SyncId else prefab+pos) + the upgrade prefab + its OLD position.</summary>
+        private void DetectOwnedUpgradeMoves()
+        {
+            if (_movedOwnedUpgrades.IsEmptyIgnoreFilter || _preMove.Count == 0)
+            {
+                return;
+            }
+
+            NativeArray<Entity> ents = _movedOwnedUpgrades.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!_preMove.TryGetValue(e, out Game.Objects.Transform oldTf))
+                    {
+                        continue; // game-driven Updated, not a player relocation
+                    }
+
+                    Game.Objects.Transform tf = EntityManager.GetComponentData<Game.Objects.Transform>(e);
+                    if (math.distance(oldTf.m_Position, tf.m_Position) <= MoveEpsilon)
+                    {
+                        continue; // drag still in progress (or cancelled)
+                    }
+
+                    Entity prefabEnt = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(e).m_Prefab;
+                    // Real service upgrades/extensions only — other owned sub-objects are derived on both PCs.
+                    if (!EntityManager.HasComponent<Game.Prefabs.ServiceUpgradeData>(prefabEnt)
+                        && !EntityManager.HasComponent<Game.Prefabs.BuildingExtensionData>(prefabEnt))
+                    {
+                        _preMove.Remove(e);
+                        continue;
+                    }
+
+                    _preMove.Remove(e);
+                    Entity owner = EntityManager.GetComponentData<Owner>(e).m_Owner;
+                    if (!EntityManager.Exists(owner)
+                        || !EntityManager.HasComponent<Game.Objects.Transform>(owner)
+                        || !EntityManager.HasComponent<Game.Prefabs.PrefabRef>(owner))
+                    {
+                        continue;
+                    }
+
+                    if (!_prefabSystem.TryGetPrefab(prefabEnt, out Game.Prefabs.PrefabBase prefab) || prefab == null
+                        || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(owner).m_Prefab,
+                            out Game.Prefabs.PrefabBase ownerPrefab) || ownerPrefab == null)
+                    {
+                        continue;
+                    }
+
+                    Game.Objects.Transform ownerTf = EntityManager.GetComponentData<Game.Objects.Transform>(owner);
+                    Command.SendToAll?.Invoke(new MoveCommand
+                    {
+                        IsOwnedUpgrade = true,
+                        OwnerSyncId = EntityManager.HasComponent<CS2M_SyncId>(owner)
+                            ? EntityManager.GetComponentData<CS2M_SyncId>(owner).m_Id : 0,
+                        OwnerPrefabName = ownerPrefab.name,
+                        OwnerX = ownerTf.m_Position.x, OwnerY = ownerTf.m_Position.y, OwnerZ = ownerTf.m_Position.z,
+                        PrefabType = prefab.GetType().Name, PrefabName = prefab.name,
+                        OldX = oldTf.m_Position.x, OldY = oldTf.m_Position.y, OldZ = oldTf.m_Position.z,
+                        PosX = tf.m_Position.x, PosY = tf.m_Position.y, PosZ = tf.m_Position.z,
+                        RotX = tf.m_Rotation.value.x, RotY = tf.m_Rotation.value.y,
+                        RotZ = tf.m_Rotation.value.z, RotW = tf.m_Rotation.value.w,
+                    });
+                    CS2M.Log.Info($"[Move] DETECT+SEND owned-upgrade name={prefab.name} owner={ownerPrefab.name} " +
+                                  $"old=({oldTf.m_Position.x:F1},{oldTf.m_Position.z:F1}) new=({tf.m_Position.x:F1},{tf.m_Position.z:F1})");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
         }
 
         /// <summary>While the move tool drags, remember each original's still-unchanged transform.</summary>

@@ -80,6 +80,13 @@ namespace CS2M.Sync
                 return;
             }
 
+            // v56: when input-replay owns net placement, don't ALSO ship the resulting Applied edges
+            // (that would double-sync). Deletes/upgrades stay on their own detectors.
+            if (NetToolReplay.Enabled)
+            {
+                return;
+            }
+
             if (++_clearCounter >= 120)
             {
                 _clearCounter = 0;
@@ -129,6 +136,30 @@ namespace CS2M.Sync
                     Bezier4x3 bezier = curveData.m_Bezier;
                     string name = prefab.name;
 
+                    // Authoritative node positions (the SNAPPED vertices) so the receiver shares junction
+                    // nodes at the host's exact coords instead of guessing by proximity. Computed up front
+                    // because it also decides whether the split-piece skip below applies.
+                    float3 startNodePos = bezier.a;
+                    float3 endNodePos = bezier.d;
+                    ulong startNodeId = 0;
+                    ulong endNodeId = 0;
+                    bool hasNodes = false;
+                    if (EntityManager.HasComponent<Game.Net.Edge>(e))
+                    {
+                        Game.Net.Edge ed = EntityManager.GetComponentData<Game.Net.Edge>(e);
+                        if (EntityManager.HasComponent<Game.Net.Node>(ed.m_Start)
+                            && EntityManager.HasComponent<Game.Net.Node>(ed.m_End))
+                        {
+                            startNodePos = EntityManager.GetComponentData<Game.Net.Node>(ed.m_Start).m_Position;
+                            endNodePos = EntityManager.GetComponentData<Game.Net.Node>(ed.m_End).m_Position;
+                            // Stable identity so the receiver fuses shared junction nodes by id, not by the
+                            // order-dependent proximity guess. Same node entity → same id on every edge.
+                            startNodeId = CS2M_NodeSyncIds.Ensure(EntityManager, ed.m_Start);
+                            endNodeId = CS2M_NodeSyncIds.Ensure(EntityManager, ed.m_End);
+                            hasNodes = true;
+                        }
+                    }
+
                     bool isSplitPiece = false;
                     foreach (Curve original in deletedCurves)
                     {
@@ -139,9 +170,15 @@ namespace CS2M.Sync
                         }
                     }
 
-                    if (isSplitPiece)
+                    // Skip a derived split piece ONLY on the legacy model: there the receiver re-splits the
+                    // crossed road itself when the causal road arrives, so re-sending the halves would
+                    // duplicate them. On the AUTHORITATIVE (HasNodes) model the receiver does NOT re-split,
+                    // so the halves MUST be sent — they carry authoritative node coords and fuse at the
+                    // shared junction node. Paired with NetEditDetectorSystem propagating the original's
+                    // delete: without the halves the client would LOSE the crossed road entirely.
+                    if (isSplitPiece && !hasNodes)
                     {
-                        CS2M.Log.Info($"[Net] SKIP reason=split name={name} edge={e.Index} (derived, remote splits on its own)");
+                        CS2M.Log.Info($"[Net] SKIP reason=split name={name} edge={e.Index} (legacy: remote re-splits on its own)");
                         continue;
                     }
 
@@ -179,6 +216,10 @@ namespace CS2M.Sync
                         Dx = bezier.d.x, Dy = bezier.d.y, Dz = bezier.d.z,
                         StartElevX = startElev.x, StartElevY = startElev.y,
                         EndElevX = endElev.x, EndElevY = endElev.y,
+                        HasNodes = hasNodes,
+                        StartNodeX = startNodePos.x, StartNodeY = startNodePos.y, StartNodeZ = startNodePos.z,
+                        EndNodeX = endNodePos.x, EndNodeY = endNodePos.y, EndNodeZ = endNodePos.z,
+                        StartNodeId = startNodeId, EndNodeId = endNodeId,
                         RandomSeed = seed,
                     };
 

@@ -16,5 +16,11 @@ namespace CS2M.Commands.Data.Game
         public float EndX { get; set; }
         public float EndY { get; set; }
         public float EndZ { get; set; }
+
+        // Cross-PC identity of the two endpoint nodes (CS2M_NodeSyncId). The receiver resolves the edge by
+        // this node PAIR first — immune to the "two roads within ~10 m → proximity picks the wrong one, so a
+        // couple of deletes survive" bug. 0 = legacy/save-loaded node → receiver falls back to position.
+        public ulong StartNodeId { get; set; }
+        public ulong EndNodeId { get; set; }
     }
 }

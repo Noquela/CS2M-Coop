@@ -196,6 +196,12 @@ namespace CS2M.Sync
 
         private void ApplyMove(MoveCommand cmd)
         {
+            if (cmd.IsOwnedUpgrade)
+            {
+                ApplyOwnedUpgradeMove(cmd);
+                return;
+            }
+
             Entity e;
             bool nativeFirstTouch = false;
             if (!_idSystem.TryResolve(cmd.SyncId, out e) || !EntityManager.Exists(e))
@@ -253,6 +259,75 @@ namespace CS2M.Sync
 
             CS2M.Log.Info($"[Move] APPLIED id={cmd.SyncId} pos=({cmd.PosX:F1},{cmd.PosY:F1},{cmd.PosZ:F1}) entity={e.Index}" +
                           (nativeFirstTouch ? " (native first-touch)" : ""));
+        }
+
+        /// <summary>v55: relocate an installed service upgrade — resolve the OWNER (SyncId else prefab+pos),
+        /// then the child sub-object whose prefab matches nearest the OLD position, and set its transform.</summary>
+        private void ApplyOwnedUpgradeMove(MoveCommand cmd)
+        {
+            Entity owner = Entity.Null;
+            if (cmd.OwnerSyncId != 0 && _idSystem.TryResolve(cmd.OwnerSyncId, out owner) && EntityManager.Exists(owner))
+            {
+                // resolved by id
+            }
+            else if (!string.IsNullOrEmpty(cmd.OwnerPrefabName))
+            {
+                owner = FindNative(new DeleteCommand
+                {
+                    PrefabName = cmd.OwnerPrefabName, PosX = cmd.OwnerX, PosY = cmd.OwnerY, PosZ = cmd.OwnerZ,
+                });
+            }
+
+            if (owner == Entity.Null || !EntityManager.HasBuffer<Game.Objects.SubObject>(owner))
+            {
+                CS2M.Log.Info($"[Move] SKIP owned-upgrade noOwner name={cmd.PrefabName} owner={cmd.OwnerPrefabName}");
+                return;
+            }
+
+            var oldPos = new float3(cmd.OldX, cmd.OldY, cmd.OldZ);
+            Entity best = Entity.Null;
+            float bestD = 9f; // 3 m²
+            DynamicBuffer<Game.Objects.SubObject> subs = EntityManager.GetBuffer<Game.Objects.SubObject>(owner, true);
+            for (int i = 0; i < subs.Length; i++)
+            {
+                Entity child = subs[i].m_SubObject;
+                if (!EntityManager.Exists(child)
+                    || !EntityManager.HasComponent<Game.Objects.Transform>(child)
+                    || !EntityManager.HasComponent<Game.Prefabs.PrefabRef>(child))
+                {
+                    continue;
+                }
+
+                if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(child).m_Prefab,
+                        out Game.Prefabs.PrefabBase pb) || pb == null || pb.name != cmd.PrefabName)
+                {
+                    continue;
+                }
+
+                float3 cp = EntityManager.GetComponentData<Game.Objects.Transform>(child).m_Position;
+                float d = math.distancesq(cp.xz, oldPos.xz);
+                if (d < bestD)
+                {
+                    bestD = d;
+                    best = child;
+                }
+            }
+
+            if (best == Entity.Null)
+            {
+                CS2M.Log.Info($"[Move] SKIP owned-upgrade noChild name={cmd.PrefabName} nearOld=({cmd.OldX:F0},{cmd.OldZ:F0})");
+                return;
+            }
+
+            var tf = EntityManager.GetComponentData<Game.Objects.Transform>(best);
+            tf.m_Position = new float3(cmd.PosX, cmd.PosY, cmd.PosZ);
+            tf.m_Rotation = new quaternion(cmd.RotX, cmd.RotY, cmd.RotZ, cmd.RotW);
+            EntityManager.SetComponentData(best, tf);
+            if (!EntityManager.HasComponent<Updated>(best)) { EntityManager.AddComponent<Updated>(best); }
+            if (!EntityManager.HasComponent<BatchesUpdated>(best)) { EntityManager.AddComponent<BatchesUpdated>(best); }
+
+            CS2M.Log.Info($"[Move] APPLIED owned-upgrade name={cmd.PrefabName} owner={cmd.OwnerPrefabName} " +
+                          $"pos=({cmd.PosX:F1},{cmd.PosZ:F1}) entity={best.Index}");
         }
     }
 }

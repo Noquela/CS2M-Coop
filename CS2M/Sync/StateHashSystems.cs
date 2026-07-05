@@ -42,6 +42,12 @@ namespace CS2M.Sync
         public int WaterSources;
         public int SyncedObjects;
         public int Money;
+        public int Routes;
+        public long RouteHash;
+        public long FeeHash;
+        public long TaxHash;
+        public long PolicyHash;
+        public long WaterHash;
 
         public StateHashCommand ToCommand()
         {
@@ -60,6 +66,12 @@ namespace CS2M.Sync
                 WaterSources = WaterSources,
                 SyncedObjects = SyncedObjects,
                 Money = Money,
+                Routes = Routes,
+                RouteHash = RouteHash,
+                FeeHash = FeeHash,
+                TaxHash = TaxHash,
+                PolicyHash = PolicyHash,
+                WaterHash = WaterHash,
             };
         }
 
@@ -80,6 +92,12 @@ namespace CS2M.Sync
                 WaterSources = c.WaterSources,
                 SyncedObjects = c.SyncedObjects,
                 Money = c.Money,
+                Routes = c.Routes,
+                RouteHash = c.RouteHash,
+                FeeHash = c.FeeHash,
+                TaxHash = c.TaxHash,
+                PolicyHash = c.PolicyHash,
+                WaterHash = c.WaterHash,
             };
         }
     }
@@ -156,9 +174,20 @@ namespace CS2M.Sync
             None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
         };
 
+        public static EntityQueryDesc RouteDesc() => new EntityQueryDesc
+        {
+            All = new[]
+            {
+                ComponentType.ReadOnly<Game.Routes.Route>(),
+                ComponentType.ReadOnly<Game.Routes.RouteWaypoint>(),
+            },
+            None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+        };
+
         public static HashBundle Compute(EntityManager em, EntityQuery edges, EntityQuery nodes,
             EntityQuery buildings, EntityQuery blocks, EntityQuery areas, EntityQuery districts,
-            EntityQuery water, Game.Simulation.CitySystem city)
+            EntityQuery water, EntityQuery routes, Game.Simulation.CitySystem city,
+            Game.Simulation.TaxSystem tax, Game.Prefabs.PrefabSystem prefabs)
         {
             var b = new HashBundle();
             b.EdgeHash = AccEdges(em, edges, out b.Edges);
@@ -166,11 +195,127 @@ namespace CS2M.Sync
             b.BuildingHash = AccBuildings(em, buildings, out b.Buildings);
             b.ZoneHash = AccBlocks(em, blocks, out b.ZoneBlocks);
             b.AreaHash = AccAreas(em, areas, out int _);
+            b.RouteHash = AccRoutes(em, routes, out b.Routes);
             b.Districts = districts.CalculateEntityCount();
-            b.WaterSources = water.CalculateEntityCount();
+            b.WaterHash = AccWater(em, water, out b.WaterSources);
             b.SyncedObjects = CS2M_SyncIdSystem.Map.Count;
             b.Money = ReadMoney(em, city);
+            b.FeeHash = AccFees(em, city);
+            b.TaxHash = AccTax(tax);
+            b.PolicyHash = AccPolicies(em, city, prefabs);
             return b;
+        }
+
+        // City policy buffer (active flag + adjustment) keyed by policy prefab NAME (cross-machine stable,
+        // unlike the prefab entity index). A policy toggled on one PC but not the other now shows as drift;
+        // before, policies drove the sim invisibly to the radar.
+        private static long AccPolicies(EntityManager em, Game.Simulation.CitySystem city,
+            Game.Prefabs.PrefabSystem prefabs)
+        {
+            Entity c = city.City;
+            if (c == Entity.Null || !em.HasBuffer<Game.Policies.Policy>(c))
+            {
+                return 0;
+            }
+
+            DynamicBuffer<Game.Policies.Policy> buf = em.GetBuffer<Game.Policies.Policy>(c, true);
+            long acc = 0;
+            for (int i = 0; i < buf.Length; i++)
+            {
+                if (!prefabs.TryGetPrefab(buf[i].m_Policy, out Game.Prefabs.PrefabBase pb) || pb == null)
+                {
+                    continue;
+                }
+
+                bool active = (buf[i].m_Flags & Game.Policies.PolicyFlags.Active) != 0;
+                // Order-independent: fold each policy by name so buffer order never matters. StableHash
+                // (NOT string.GetHashCode, which .NET may randomize per-process → false cross-machine drift).
+                acc = unchecked(acc + Mix(Mix(StableHash(pb.name), active ? 1 : 0),
+                    (long) math.round(buf[i].m_Adjustment * 100f)));
+            }
+
+            return acc;
+        }
+
+        // Tax rates (per-category ints from TaxSystem) — cross-machine stable. A tax desync would only show
+        // up SLOWLY via money before; folding the rates makes it an immediate drift signal.
+        private static long AccTax(Game.Simulation.TaxSystem tax)
+        {
+            if (tax == null)
+            {
+                return 0;
+            }
+
+            NativeArray<int> rates = tax.GetTaxRates();
+            if (!rates.IsCreated)
+            {
+                return 0;
+            }
+
+            long acc = 0;
+            for (int i = 0; i < rates.Length; i++)
+            {
+                acc = unchecked(acc + Mix(i, rates[i]));
+            }
+
+            return acc;
+        }
+
+        // City ServiceFee buffer folded per (PlayerResource, fee). Fees drive consumption/happiness/income
+        // but never move any entity, so a fee-only divergence was invisible to the radar before this.
+        private static long AccFees(EntityManager em, Game.Simulation.CitySystem city)
+        {
+            Entity c = city.City;
+            if (c == Entity.Null || !em.HasBuffer<Game.City.ServiceFee>(c))
+            {
+                return 0;
+            }
+
+            DynamicBuffer<Game.City.ServiceFee> fees = em.GetBuffer<Game.City.ServiceFee>(c, true);
+            long acc = 0;
+            for (int i = 0; i < fees.Length; i++)
+            {
+                acc = unchecked(acc + Mix((int) fees[i].m_Resource, (long) math.round(fees[i].m_Fee * 1000f)));
+            }
+
+            return acc;
+        }
+
+        // Per-line fingerprint: RouteNumber folded with each waypoint's world position. Catches a reroute,
+        // a line created on one PC only, or a deletion that didn't cross over — none of which move any edge
+        // or node, so they were previously invisible to the radar.
+        private static long AccRoutes(EntityManager em, EntityQuery q, out int count)
+        {
+            NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
+            count = arr.Length;
+            long acc = 0;
+            try
+            {
+                foreach (Entity e in arr)
+                {
+                    long r = em.HasComponent<Game.Routes.RouteNumber>(e)
+                        ? em.GetComponentData<Game.Routes.RouteNumber>(e).m_Number
+                        : 0;
+
+                    // v55: fold visibility (HiddenRoute) so a hide/show that failed to sync shows as drift.
+                    r = Mix(r, em.HasComponent<Game.Routes.HiddenRoute>(e) ? 1 : 0);
+
+                    DynamicBuffer<Game.Routes.RouteWaypoint> wps = em.GetBuffer<Game.Routes.RouteWaypoint>(e, true);
+                    for (int i = 0; i < wps.Length; i++)
+                    {
+                        Entity w = wps[i].m_Waypoint;
+                        if (w != Entity.Null && em.HasComponent<Game.Routes.Position>(w))
+                        {
+                            r = Mix(r, Pt(em.GetComponentData<Game.Routes.Position>(w).m_Position));
+                        }
+                    }
+
+                    acc = unchecked(acc + r);
+                }
+            }
+            finally { arr.Dispose(); }
+
+            return acc;
         }
 
         private static long AccEdges(EntityManager em, EntityQuery q, out int count)
@@ -183,7 +328,18 @@ namespace CS2M.Sync
                 foreach (Entity e in arr)
                 {
                     Curve c = em.GetComponentData<Curve>(e);
-                    acc = unchecked(acc + Seg(c.m_Bezier.a, c.m_Bezier.d));
+                    // Fold in the edge's COMPOSITION flags (trees/sidewalks/sound barriers/quays…). Upgrades
+                    // change the composition, not the bezier — without this a road-upgrade desync is invisible
+                    // to the radar. NetCompositionData.m_Flags is a semantic uint identical across machines
+                    // (like Cell.m_Zone.m_Index), unlike the composition entity index. Edge Upgraded itself is
+                    // transient (baked into composition same-frame), so the composition is the stable input.
+                    long up = 0;
+                    if (em.HasComponent<Composition>(e))
+                    {
+                        up = CompFlags(em, em.GetComponentData<Composition>(e).m_Edge);
+                    }
+
+                    acc = unchecked(acc + Mix(Seg(c.m_Bezier.a, c.m_Bezier.d), up));
                 }
             }
             finally { arr.Dispose(); }
@@ -200,12 +356,121 @@ namespace CS2M.Sync
             {
                 foreach (Entity e in arr)
                 {
-                    acc = unchecked(acc + Pt(em.GetComponentData<Node>(e).m_Position));
+                    // Fold in the node's junction upgrade flags (traffic lights / stop signs / roundabout /
+                    // crosswalks). These live as persistent Upgraded.General on the node and never move it,
+                    // so without this a junction-control desync is invisible to the radar.
+                    long up = 0;
+                    if (em.HasComponent<Upgraded>(e))
+                    {
+                        up = (uint) em.GetComponentData<Upgraded>(e).m_Flags.m_General;
+                    }
+
+                    acc = unchecked(acc + Mix(Pt(em.GetComponentData<Node>(e).m_Position), up));
                 }
             }
             finally { arr.Dispose(); }
 
             return acc;
+        }
+
+        // DIAGNOSTIC (roads): dump every node's XZ position as one sorted line to CS2M.log so a host/client
+        // node-count divergence can be pinned to the EXACT phantom node (diff the two [NodeDump] lines).
+        // Gated on env CS2M_NODEDUMP=1 so it never runs in normal play. Removed once the junction bug is closed.
+        public static bool NodeDumpOn =>
+            System.Environment.GetEnvironmentVariable("CS2M_NODEDUMP") == "1";
+
+        public static void DumpNodes(EntityManager em, EntityQuery q, string tag)
+        {
+            NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                var list = new List<string>(arr.Length);
+                foreach (Entity e in arr)
+                {
+                    Unity.Mathematics.float3 p = em.GetComponentData<Node>(e).m_Position;
+                    int deg = 0;
+                    if (em.HasBuffer<Game.Net.ConnectedEdge>(e))
+                    {
+                        DynamicBuffer<Game.Net.ConnectedEdge> ce = em.GetBuffer<Game.Net.ConnectedEdge>(e, true);
+                        for (int i = 0; i < ce.Length; i++)
+                        {
+                            Entity ed = ce[i].m_Edge;
+                            if (em.Exists(ed) && !em.HasComponent<Deleted>(ed)) { deg++; }
+                        }
+                    }
+
+                    list.Add($"{p.x:F1}/{p.z:F1}:{deg}"); // pos + live degree (junction vs dead-end)
+                }
+
+                list.Sort();
+                CS2M.Log.Info($"[NodeDump:{tag}] count={list.Count} {string.Join(" ", list)}");
+            }
+            finally { arr.Dispose(); }
+        }
+
+        // DIAGNOSTIC (roads): dump every edge as its canonical endpoint pair so a host/client edge-COUNT
+        // divergence (roads NvsM) can be pinned to the exact phantom edge. Env-gated like DumpNodes.
+        public static void DumpEdges(EntityManager em, EntityQuery q, string tag)
+        {
+            NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                var list = new List<string>(arr.Length);
+                foreach (Entity e in arr)
+                {
+                    if (!em.HasComponent<Game.Net.Curve>(e))
+                    {
+                        continue;
+                    }
+
+                    Unity.Mathematics.float3 a = em.GetComponentData<Game.Net.Curve>(e).m_Bezier.a;
+                    Unity.Mathematics.float3 d = em.GetComponentData<Game.Net.Curve>(e).m_Bezier.d;
+                    // Canonicalise endpoint order so both PCs render the same string regardless of edge dir.
+                    bool aFirst = a.x < d.x || (a.x == d.x && a.z <= d.z);
+                    list.Add(aFirst
+                        ? $"{a.x:F0}/{a.z:F0}-{d.x:F0}/{d.z:F0}"
+                        : $"{d.x:F0}/{d.z:F0}-{a.x:F0}/{a.z:F0}");
+                }
+
+                list.Sort();
+                CS2M.Log.Info($"[EdgeDump:{tag}] count={list.Count} {string.Join(" ", list)}");
+            }
+            finally { arr.Dispose(); }
+        }
+
+        // DIAGNOSTIC (areas): dump every area as center + node-count + owned-flag so an areas(hash)
+        // divergence pins to the exact area present/shaped-differently on one side. Env-gated.
+        public static void DumpAreas(EntityManager em, EntityQuery q, string tag)
+        {
+            NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                var list = new List<string>(arr.Length);
+                foreach (Entity e in arr)
+                {
+                    Unity.Mathematics.float3 c = em.GetComponentData<Game.Areas.Geometry>(e).m_CenterPosition;
+                    int nodes = em.HasBuffer<Game.Areas.Node>(e) ? em.GetBuffer<Game.Areas.Node>(e, true).Length : 0;
+                    int owned = em.HasComponent<Game.Common.Owner>(e) ? 1 : 0;
+                    list.Add($"{c.x:F0}/{c.z:F0}:n{nodes}:o{owned}");
+                }
+
+                list.Sort();
+                CS2M.Log.Info($"[AreaDump:{tag}] count={list.Count} {string.Join(" ", list)}");
+            }
+            finally { arr.Dispose(); }
+        }
+
+        // Semantic composition flags (General/Left/Right) of a net composition entity — cross-machine stable
+        // because they are the same enum bits on both PCs, unlike the composition entity's index.
+        private static long CompFlags(EntityManager em, Entity comp)
+        {
+            if (comp == Entity.Null || !em.HasComponent<Game.Prefabs.NetCompositionData>(comp))
+            {
+                return 0;
+            }
+
+            Game.Prefabs.CompositionFlags f = em.GetComponentData<Game.Prefabs.NetCompositionData>(comp).m_Flags;
+            return Mix((uint) f.m_General, Mix((uint) f.m_Left, (uint) f.m_Right));
         }
 
         private static long AccBuildings(EntityManager em, EntityQuery q, out int count)
@@ -248,6 +513,28 @@ namespace CS2M.Sync
                     }
 
                     acc = unchecked(acc + Mix(Pt(b.m_Position), Mix(Mix(b.m_Size.x, b.m_Size.y), cells)));
+                }
+            }
+            finally { arr.Dispose(); }
+
+            return acc;
+        }
+
+        // Water source POSITIONS (not just the count) — a relocated source (v55 water-move) is a same-count
+        // change the count alone never caught. Transform is added by the apply, so guard for it.
+        private static long AccWater(EntityManager em, EntityQuery q, out int count)
+        {
+            NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
+            count = arr.Length;
+            long acc = 0;
+            try
+            {
+                foreach (Entity e in arr)
+                {
+                    if (em.HasComponent<Game.Objects.Transform>(e))
+                    {
+                        acc = unchecked(acc + Pt(em.GetComponentData<Game.Objects.Transform>(e).m_Position));
+                    }
                 }
             }
             finally { arr.Dispose(); }
@@ -310,6 +597,27 @@ namespace CS2M.Sync
         {
             unchecked { return a * 1099511628211L + b; }
         }
+
+        // FNV-1a over the string's chars — deterministic across machines/processes, unlike
+        // string.GetHashCode() (which .NET can randomize per-process, breaking a cross-machine compare).
+        private static long StableHash(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+            {
+                return 0;
+            }
+
+            unchecked
+            {
+                long h = 1469598103934665603L;
+                for (int i = 0; i < s.Length; i++)
+                {
+                    h = (h ^ s[i]) * 1099511628211L;
+                }
+
+                return h;
+            }
+        }
     }
 
     /// <summary>Host: broadcast the world fingerprint every ~10 s.</summary>
@@ -317,8 +625,10 @@ namespace CS2M.Sync
     {
         private const int SendEveryNFrames = 600;
 
-        private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water;
+        private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water, _routes;
         private Game.Simulation.CitySystem _city;
+        private Game.Simulation.TaxSystem _tax;
+        private Game.Prefabs.PrefabSystem _prefabs;
         private int _frame;
 
         protected override void OnCreate()
@@ -331,7 +641,10 @@ namespace CS2M.Sync
             _areas = GetEntityQuery(StateHash.AreaDesc());
             _districts = GetEntityQuery(StateHash.DistrictDesc());
             _water = GetEntityQuery(StateHash.WaterDesc());
+            _routes = GetEntityQuery(StateHash.RouteDesc());
             _city = World.GetOrCreateSystemManaged<Game.Simulation.CitySystem>();
+            _tax = World.GetOrCreateSystemManaged<Game.Simulation.TaxSystem>();
+            _prefabs = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
             CS2M.Log.Info($"[Hash] StateHashSenderSystem created (enabled={StateHash.Enabled})");
         }
 
@@ -351,8 +664,15 @@ namespace CS2M.Sync
 
             _frame = 0;
             HashBundle b = StateHash.Compute(EntityManager, _edges, _nodes, _buildings, _blocks,
-                _areas, _districts, _water, _city);
+                _areas, _districts, _water, _routes, _city, _tax, _prefabs);
             Command.SendToAll?.Invoke(b.ToCommand());
+
+            if (StateHash.NodeDumpOn)
+            {
+                StateHash.DumpNodes(EntityManager, _nodes, "HOST");
+                StateHash.DumpEdges(EntityManager, _edges, "HOST");
+                StateHash.DumpAreas(EntityManager, _areas, "HOST");
+            }
         }
     }
 
@@ -365,8 +685,10 @@ namespace CS2M.Sync
     /// </summary>
     public partial class StateHashApplySystem : GameSystemBase
     {
-        private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water;
+        private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water, _routes;
         private Game.Simulation.CitySystem _city;
+        private Game.Simulation.TaxSystem _tax;
+        private Game.Prefabs.PrefabSystem _prefabs;
 
         private HashBundle _lastLocal;
         private HashBundle _lastHost;
@@ -384,7 +706,10 @@ namespace CS2M.Sync
             _areas = GetEntityQuery(StateHash.AreaDesc());
             _districts = GetEntityQuery(StateHash.DistrictDesc());
             _water = GetEntityQuery(StateHash.WaterDesc());
+            _routes = GetEntityQuery(StateHash.RouteDesc());
             _city = World.GetOrCreateSystemManaged<Game.Simulation.CitySystem>();
+            _tax = World.GetOrCreateSystemManaged<Game.Simulation.TaxSystem>();
+            _prefabs = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
             CS2M.Log.Info($"[Hash] StateHashApplySystem created (enabled={StateHash.Enabled})");
         }
 
@@ -403,7 +728,7 @@ namespace CS2M.Sync
             }
 
             HashBundle local = StateHash.Compute(EntityManager, _edges, _nodes, _buildings, _blocks,
-                _areas, _districts, _water, _city);
+                _areas, _districts, _water, _routes, _city, _tax, _prefabs);
             HashBundle host = HashBundle.FromCommand(cmd);
 
             if (_haveLast)
@@ -414,15 +739,36 @@ namespace CS2M.Sync
                 Check(drifts, "buildings", local.BuildingHash, host.BuildingHash, _lastLocal.BuildingHash, _lastHost.BuildingHash, local.Buildings, host.Buildings);
                 Check(drifts, "zones", local.ZoneHash, host.ZoneHash, _lastLocal.ZoneHash, _lastHost.ZoneHash, local.ZoneBlocks, host.ZoneBlocks);
                 Check(drifts, "areas", local.AreaHash, host.AreaHash, _lastLocal.AreaHash, _lastHost.AreaHash, -1, -1);
+                Check(drifts, "routes", local.RouteHash, host.RouteHash, _lastLocal.RouteHash, _lastHost.RouteHash, local.Routes, host.Routes);
+                Check(drifts, "fees", local.FeeHash, host.FeeHash, _lastLocal.FeeHash, _lastHost.FeeHash, -1, -1);
+                Check(drifts, "tax", local.TaxHash, host.TaxHash, _lastLocal.TaxHash, _lastHost.TaxHash, -1, -1);
+                Check(drifts, "policies", local.PolicyHash, host.PolicyHash, _lastLocal.PolicyHash, _lastHost.PolicyHash, -1, -1);
                 Check(drifts, "synced", local.SyncedObjects, host.SyncedObjects, _lastLocal.SyncedObjects, _lastHost.SyncedObjects, local.SyncedObjects, host.SyncedObjects);
                 Check(drifts, "districts", local.Districts, host.Districts, _lastLocal.Districts, _lastHost.Districts, local.Districts, host.Districts);
-                Check(drifts, "water", local.WaterSources, host.WaterSources, _lastLocal.WaterSources, _lastHost.WaterSources, local.WaterSources, host.WaterSources);
+                Check(drifts, "water", local.WaterHash, host.WaterHash, _lastLocal.WaterHash, _lastHost.WaterHash, local.WaterSources, host.WaterSources);
 
                 if (drifts.Count > 0)
                 {
                     _strikes++;
                     CS2M.Log.Info($"[Hash] DRIFT strike={_strikes} [{string.Join(", ", drifts)}] " +
                                   $"money {local.Money}vs{host.Money}");
+
+                    // DIAGNOSTIC: on a node/road divergence, dump this side's nodes+edges so the phantom
+                    // node/edge is pinpointable by diffing against the host's [NodeDump/EdgeDump:HOST] lines.
+                    if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("nodes")))
+                    {
+                        StateHash.DumpNodes(EntityManager, _nodes, "CLIENT");
+                    }
+
+                    if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("roads") || d.StartsWith("nodes")))
+                    {
+                        StateHash.DumpEdges(EntityManager, _edges, "CLIENT");
+                    }
+
+                    if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("areas")))
+                    {
+                        StateHash.DumpAreas(EntityManager, _areas, "CLIENT");
+                    }
                     if (_strikes >= 2)
                     {
                         SyncHealth.SetDrift(true, string.Join(", ", drifts));

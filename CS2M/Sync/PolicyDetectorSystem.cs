@@ -203,6 +203,30 @@ namespace CS2M.Sync
                             syncId = EntityManager.GetComponentData<CS2M_SyncId>(m.m_Entity).m_Id;
                         }
                     }
+                    else if (EntityManager.HasComponent<Game.Buildings.Extension>(m.m_Entity)
+                             && EntityManager.HasComponent<Game.Objects.Transform>(m.m_Entity)
+                             && EntityManager.HasComponent<PrefabRef>(m.m_Entity))
+                    {
+                        // v55: service-building EXTENSION disable/enable (the power button on an installed
+                        // upgrade). The flag lives on the extension sub-entity — which has Transform but NOT
+                        // Building, so the kind-1 branch above never matched it and the toggle was dropped.
+                        // Extensions carry no shared SyncId (remotes derive them from the owner), so address
+                        // by the extension's prefab name + its world position (both cross-PC stable).
+                        kind = 4;
+                        var p = EntityManager.GetComponentData<Game.Objects.Transform>(m.m_Entity).m_Position;
+                        tx = p.x;
+                        tz = p.z;
+                        if (_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(m.m_Entity).m_Prefab,
+                                out PrefabBase extPb) && extPb != null)
+                        {
+                            targetName = extPb.name;
+                        }
+
+                        if (string.IsNullOrEmpty(targetName))
+                        {
+                            continue; // unresolvable on the other side
+                        }
+                    }
                     else
                     {
                         continue; // unknown target kind

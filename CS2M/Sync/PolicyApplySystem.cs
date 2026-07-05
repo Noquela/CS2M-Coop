@@ -115,6 +115,13 @@ namespace CS2M.Sync
                     cmd.TargetX, cmd.TargetZ, 9f, useGeometry: false);
             }
 
+            if (cmd.TargetKind == 4)
+            {
+                // v55: service-building extension — nearest Extension with the matching prefab name near
+                // the sent world position (extensions carry no shared SyncId, so name+position addresses it).
+                return FindNearestExtension(cmd.TargetName, cmd.TargetX, cmd.TargetZ, 9f);
+            }
+
             // districts: match by area center
             return FindNearest(GetEntityQuery(
                     ComponentType.ReadOnly<Game.Areas.District>(),
@@ -122,6 +129,54 @@ namespace CS2M.Sync
                     ComponentType.Exclude<Game.Tools.Temp>(),
                     ComponentType.Exclude<Deleted>()),
                 cmd.TargetX, cmd.TargetZ, 2500f, useGeometry: true);
+        }
+
+        /// <summary>Nearest live Extension sub-object whose prefab name matches, within maxDistSq of (x,z).</summary>
+        private Entity FindNearestExtension(string prefabName, float x, float z, float maxDistSq)
+        {
+            if (string.IsNullOrEmpty(prefabName))
+            {
+                return Entity.Null;
+            }
+
+            EntityQuery query = GetEntityQuery(
+                ComponentType.ReadOnly<Game.Buildings.Extension>(),
+                ComponentType.ReadOnly<Game.Objects.Transform>(),
+                ComponentType.ReadOnly<PrefabRef>(),
+                ComponentType.Exclude<Game.Tools.Temp>(),
+                ComponentType.Exclude<Deleted>());
+
+            Entity best = Entity.Null;
+            float bestD = maxDistSq;
+            Unity.Collections.NativeArray<Entity> ents =
+                query.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(cand).m_Prefab,
+                            out PrefabBase pb) || pb == null || pb.name != prefabName)
+                    {
+                        continue;
+                    }
+
+                    Unity.Mathematics.float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(cand).m_Position;
+                    float dx = p.x - x;
+                    float dz = p.z - z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = cand;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return best;
         }
 
         private Entity FindNearest(EntityQuery query, float x, float z, float maxDistSq, bool useGeometry)

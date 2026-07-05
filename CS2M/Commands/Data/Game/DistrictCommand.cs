@@ -16,5 +16,15 @@ namespace CS2M.Commands.Data.Game
         public float[] Xs { get; set; }
         public float[] Ys { get; set; }
         public float[] Zs { get; set; }
+
+        /// <summary>v55: true = RESHAPE an existing district in place instead of creating a new one. A
+        /// reshape marks the area Updated (never Applied), so it was invisible; and the apply always
+        /// created a fresh entity → a duplicate. The receiver resolves the district nearest to
+        /// (CenterX, CenterZ) — the centroid BOTH sides share from the last synced state — and rewrites
+        /// its boundary buffer.</summary>
+        public bool Replace { get; set; }
+
+        public float CenterX { get; set; }
+        public float CenterZ { get; set; }
     }
 }

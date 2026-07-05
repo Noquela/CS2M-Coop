@@ -32,4 +32,18 @@ namespace CS2M.Commands.Handler.Game
             RouteSync.EnqueueColor(command);
         }
     }
+
+    public class RouteVisibilityHandler : CommandHandler<RouteVisibilityCommand>
+    {
+        public RouteVisibilityHandler()
+        {
+            TransactionCmd = false;
+        }
+
+        protected override void Handle(RouteVisibilityCommand command)
+        {
+            CS2M.Log.Verbose($"[Route] RECV visibility id={command.SyncId} number={command.Number} hidden={command.Hidden}");
+            RouteSync.EnqueueVisibility(command);
+        }
+    }
 }

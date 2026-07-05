@@ -92,8 +92,10 @@ namespace CS2M.Sync
 
                 if (p.FramesLeft <= 0)
                 {
-                    CS2M.Log.Info($"[Zone] DROP noBlock at=({p.Cmd.BlockX:F0},{p.Cmd.BlockZ:F0}) after retries " +
-                                  "(block never appeared — /resync reconciles)");
+                    string z0 = p.Cmd.ZoneNames != null && p.Cmd.ZoneNames.Length > 0 ? p.Cmd.ZoneNames[0] : "?";
+                    CS2M.Log.Info($"[Zone] DROP noBlock at=({p.Cmd.BlockX:F0},{p.Cmd.BlockZ:F0}) " +
+                                  $"size=({p.Cmd.SizeX}x{p.Cmd.SizeY}) cells={p.Cmd.CellIndices?.Length} zone0={z0} " +
+                                  "after retries (block never appeared — the road block diverged; /resync reconciles)");
                     _pending.RemoveAt(i);
                     continue;
                 }
@@ -145,8 +147,19 @@ namespace CS2M.Sync
                     continue;
                 }
 
+                string zn = cmd.ZoneNames[k];
+                // Skip ONLY a genuinely unknown zone (a name not in the registry) — writing it would dezone
+                // the cell. "Unzoned" (the None zone, index 0) and "" ARE known → they legitimately dezone.
+                // The earlier `zi==0 && !empty` check wrongly skipped "Unzoned", so DEZONE never synced — the
+                // persistent zones 322vs328 drift (6 dezoned cells) Bruno saw.
+                if (!ZoneSync.IsKnown(zn))
+                {
+                    CS2M.Log.Info($"[Zone] SKIP unknownZone name={zn} cell={idx}");
+                    continue;
+                }
+
                 Cell c = cells[idx];
-                c.m_Zone = new ZoneType { m_Index = ZoneSync.Index(cmd.ZoneNames[k]) };
+                c.m_Zone = new ZoneType { m_Index = ZoneSync.Index(zn) };
                 cells[idx] = c;
                 applied++;
             }
@@ -179,6 +192,16 @@ namespace CS2M.Sync
                 {
                     Block b = EntityManager.GetComponentData<Block>(e);
                     if (b.m_Size.x != cmd.SizeX || b.m_Size.y != cmd.SizeY)
+                    {
+                        continue;
+                    }
+
+                    // Direction-consistency gate: a road generates TWO blocks (one per side) at nearly the
+                    // same center, facing OPPOSITE ways. Position+size alone can pick the mirror block, so
+                    // cells land in a flipped frame — paint looks mirrored while the index-keyed radar reads
+                    // green. Require the block to face the same way as the shipped one. Guard legacy (0,0).
+                    if ((cmd.DirX != 0f || cmd.DirZ != 0f)
+                        && b.m_Direction.x * cmd.DirX + b.m_Direction.y * cmd.DirZ <= 0f)
                     {
                         continue;
                     }

@@ -113,31 +113,27 @@ namespace CS2M.Sync
                         continue; // echo of a delete we just applied
                     }
 
-                    if (appliedCurves.Count > 0 && EntityManager.HasComponent<Curve>(e))
-                    {
-                        Curve original = EntityManager.GetComponentData<Curve>(e);
-                        bool splitDeletion = false;
-                        foreach (Curve piece in appliedCurves)
-                        {
-                            if (NetSplitUtil.IsSplitPiece(piece.m_Bezier, piece.m_Length,
-                                    original.m_Bezier, original.m_Length))
-                            {
-                                splitDeletion = true;
-                                break;
-                            }
-                        }
-
-                        if (splitDeletion)
-                        {
-                            CS2M.Log.Info($"[NetEdit] SKIP delete reason=split edge={e.Index} (derived, remote splits on its own)");
-                            continue;
-                        }
-                    }
+                    // TOPOLOGY-AUTHORITATIVE MODEL: with HasNodes the receiver no longer re-splits, so
+                    // the host MUST propagate the deletion of an edge the tool split at a junction (its
+                    // pieces arrive as their own HasNodes courses and fuse at shared nodes). The old
+                    // splitDeletion skip trusted the client to split itself — which left the ORIGINAL
+                    // road stacked under the new pieces on the client (the +roads X-crossing drift, made
+                    // worse by IsSplitPiece failing on the same-frame race). Always send the delete; on a
+                    // legacy client it is a harmless no-op (it already marked the original Deleted while
+                    // splitting, and FindEdge excludes Deleted).
+                    // Ship the endpoint nodes' shared identity (read-only — a session-placed road's nodes
+                    // are already stamped at placement; save-loaded nodes ship 0 and the receiver falls back
+                    // to position). Read-only on purpose: no structural change during the delete scan.
+                    ulong sId = EntityManager.HasComponent<CS2M_NodeSyncId>(ed.m_Start)
+                        ? EntityManager.GetComponentData<CS2M_NodeSyncId>(ed.m_Start).m_Id : 0UL;
+                    ulong eId = EntityManager.HasComponent<CS2M_NodeSyncId>(ed.m_End)
+                        ? EntityManager.GetComponentData<CS2M_NodeSyncId>(ed.m_End).m_Id : 0UL;
 
                     Command.SendToAll?.Invoke(new NetDeleteCommand
                     {
                         StartX = s.x, StartY = s.y, StartZ = s.z,
                         EndX = en.x, EndY = en.y, EndZ = en.z,
+                        StartNodeId = sId, EndNodeId = eId,
                     });
                     CS2M.Log.Info($"[NetEdit] DETECT+SEND delete start=({s.x:F0},{s.z:F0}) end=({en.x:F0},{en.z:F0}) edge={e.Index}");
                 }
