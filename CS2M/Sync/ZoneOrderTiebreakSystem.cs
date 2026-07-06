@@ -84,11 +84,14 @@ namespace CS2M.Sync
     /// </summary>
     public partial class ZoneOrderTiebreakSystem : GameSystemBase
     {
-        private const int CleanupEveryNFrames = 600;
+        private const int FullSweepEveryNFrames = 120;
+        private const int CleanupEverySweeps = 5;
 
         private EntityQuery _updatedBlocks;
+        private EntityQuery _allBlocks;
         private readonly Dictionary<Entity, uint> _stamped = new Dictionary<Entity, uint>();
         private int _frameCounter;
+        private int _sweepCounter;
         private bool _overflowWarned;
 
         protected override void OnCreate()
@@ -108,6 +111,19 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Deleted>(),
                 },
             });
+            _allBlocks = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadWrite<Block>(),
+                    ComponentType.ReadWrite<BuildOrder>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
+            });
             CS2M.Log.Info("[ZoneAuth] ZoneOrderTiebreakSystem created");
         }
 
@@ -118,12 +134,13 @@ namespace CS2M.Sync
                 return;
             }
 
+            // Per-frame: whatever just (re)derived. Cheap — Updated blocks only.
             NativeArray<Entity> blocks = _updatedBlocks.ToEntityArray(Allocator.Temp);
             try
             {
                 foreach (Entity e in blocks)
                 {
-                    Stamp(e);
+                    Stamp(e, requeueContest: false); // it's already Updated — contest re-runs anyway
                 }
             }
             finally
@@ -131,19 +148,53 @@ namespace CS2M.Sync
                 blocks.Dispose();
             }
 
-            // Periodic sweep so _stamped doesn't grow unbounded across a long session as blocks
-            // get deleted (Entity.Index gets recycled with a new Version, so a stale entry would
-            // just sit there unused forever rather than corrupt anything — this is pure hygiene).
-            if (++_frameCounter >= CleanupEveryNFrames)
+            // v56.2 FIELD FIX (round-5 evidence: host o1666056 vs client o7413 on old-save blocks):
+            // stamping ONLY Updated blocks leaves a MIXED world — any stamped value (base<<8) beats
+            // any raw value, so a stamped block near an unstamped one flips contests it should lose,
+            // and the two machines stamp DIFFERENT subsets (whatever happened to be Updated on each
+            // side). The invariant must be ALL-OR-NOTHING: a periodic full sweep stamps every block
+            // whose current value isn't our own last write, and re-queues the newly-stamped ones for
+            // a next-frame contest re-run (DeferredUpdated) so historical overlap outcomes converge
+            // under the now-uniform ordering — one avalanche on the first sweep, idempotent after.
+            if (++_frameCounter >= FullSweepEveryNFrames)
             {
                 _frameCounter = 0;
-                CleanupStaleEntries();
+                NativeArray<Entity> all = _allBlocks.ToEntityArray(Allocator.Temp);
+                int restamped = 0;
+                try
+                {
+                    foreach (Entity e in all)
+                    {
+                        if (Stamp(e, requeueContest: true))
+                        {
+                            restamped++;
+                        }
+                    }
+                }
+                finally
+                {
+                    all.Dispose();
+                }
+
+                if (restamped > 0)
+                {
+                    CS2M.Log.Info($"[ZoneOrderTiebreak] full sweep restamped={restamped}");
+                }
+
+                if (++_sweepCounter >= CleanupEverySweeps)
+                {
+                    _sweepCounter = 0;
+                    CleanupStaleEntries();
+                }
             }
         }
 
-        /// <summary>Re-stamps one block's BuildOrder.m_Order if needed. See the class doc for the
-        /// full raw-vs-stamped detection strategy.</summary>
-        private void Stamp(Entity e)
+        /// <summary>Re-stamps one block's BuildOrder.m_Order if needed; returns true when the value
+        /// actually changed. With <paramref name="requeueContest"/>, a changed block is queued into
+        /// <see cref="DeferredUpdated"/> so next frame's CellCheck re-contests its overlaps under the
+        /// new uniform ordering (used by the full sweep — per-frame Updated blocks re-contest anyway).
+        /// See the class doc for the raw-vs-stamped detection strategy.</summary>
+        private bool Stamp(Entity e, bool requeueContest)
         {
             BuildOrder buildOrder = EntityManager.GetComponentData<BuildOrder>(e);
             uint current = buildOrder.m_Order;
@@ -181,13 +232,19 @@ namespace CS2M.Sync
             byte posHash = PosHash(block.m_Position);
             uint stamped = (orderBase << 8) | posHash;
 
-            if (stamped != current)
+            bool changed = stamped != current;
+            if (changed)
             {
                 buildOrder.m_Order = stamped;
                 EntityManager.SetComponentData(e, buildOrder);
+                if (requeueContest)
+                {
+                    DeferredUpdated.Enqueue(e);
+                }
             }
 
             _stamped[e] = stamped;
+            return changed;
         }
 
         /// <summary>Deterministic FNV-1a hash of the block's own position quantized to 0.5 m, low
