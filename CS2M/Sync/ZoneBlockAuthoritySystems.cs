@@ -617,8 +617,12 @@ namespace CS2M.Sync
             // células Unzoned Visible num PC e Blocked no outro (o padrão branco-vs-verde que o olho
             // pega e o radar não). O skip idempotente antigo ignorava posição e deixava exatamente esse
             // caso passar sem heal.
+            // v57 (rodada ZoneOrderTiebreak): 0.25f -> 0.05f. Blocos sub-25cm ainda passavam o skip e
+            // ainda assim flipavam o contest de célula de borda (CellCheckHelpers.FindOverlappingBlocksJob
+            // usa a posição do bloco para decidir vizinhança/overlap — um resíduo de poucos cm já é
+            // suficiente para virar o resultado do contest perto da borda de uma célula).
             bool posMatches = math.distance(localBlock.m_Position,
-                new float3(cmd.PosX[idx], cmd.PosY[idx], cmd.PosZ[idx])) <= 0.25f;
+                new float3(cmd.PosX[idx], cmd.PosY[idx], cmd.PosZ[idx])) <= 0.05f;
 
             if (sizeMatches && cellsMatch && posMatches)
             {

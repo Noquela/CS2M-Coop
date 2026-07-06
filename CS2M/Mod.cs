@@ -258,6 +258,19 @@ namespace CS2M
             updateSystem.UpdateBefore<ZoneBlockAuthoritySystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<ZoneBlockAuthorityApplySystem>(SystemUpdatePhase.Modification5);
 
+            // ZoneOrderTiebreakSystem (gated CS2M_ZONEAUTH=1, same flag): re-stamps
+            // Zones.BuildOrder.m_Order with a cross-machine-stable low-byte tie-break (position
+            // hash) so CellCheckHelpers.BlockOverlap's last-resort Entity.Index tie-break
+            // (per-machine!) never actually gets exercised on a genuine tie between two blocks'
+            // own max(edge, neighbor) order values (BlockSystem.cs:190,285-288,403-404;
+            // CellCheckHelpers.cs:38-43). MUST run after BlockSystem@Modification4 (raw order
+            // write, drained by ModificationBarrier4) and before CellCheckSystem@Modification5
+            // (order read for the overlap contest) -- Modification4B is the exact phase boundary
+            // between them (SystemUpdatePhase enum; SystemOrder.cs:156 BlockSystem,
+            // :215 CellCheckSystem). Single-type UpdateAt overload only (see the double-register
+            // warning elsewhere in this file).
+            updateSystem.UpdateAt<ZoneOrderTiebreakSystem>(SystemUpdatePhase.Modification4B);
+
             // Pause the sim for everyone while a player is joining (+ chat notice).
             updateSystem.UpdateAt<JoinPauseSystem>(SystemUpdatePhase.Rendering);
 
