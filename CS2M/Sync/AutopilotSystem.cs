@@ -58,7 +58,11 @@ namespace CS2M.Sync
         // adds a 4-control-point S-curve through the same area (see TriRepro_Phase3_Curve doc for why
         // no change to NetToolReplaySystems.cs was needed). PHASE4 "OVERDRAW" redraws exactly over half
         // of a PHASE1 triangle side (same endpoints as an existing edge). PHASE5 paints zoning around
-        // the X-CROSS and logs the final DONE marker.
+        // the X-CROSS. PHASE6 "FARM" places a real agricultural extractor BUILDING (the same
+        // ObjectPlaceCommand primitive the selftest's "object:building" step uses) so the game's own
+        // AreaSpawnSystem generates an Extractor work-area field around it — the "campo de fazenda não
+        // bate" repro (docs/game-map/dossiers/area.md) — then the final DONE marker every runner/bot
+        // greps for is logged by TriRepro_Finish.
         private bool _triRepro;
         private int _triStep;
         private int _triTimer;
@@ -3337,12 +3341,14 @@ namespace CS2M.Sync
         // a true 4-control-point S-curve through that same area (see TriRepro_Phase3_Curve for why the
         // existing N-control-point replay primitive already covers this with no changes needed to
         // NetToolReplaySystems.cs); PHASE4 "OVERDRAW" (step 8) redraws exactly over half of PHASE1's
-        // triangle; PHASE5 (step 9) paints zoning around the X-CROSS and logs the final DONE marker.
+        // triangle; PHASE5 (step 9) paints zoning around the X-CROSS; PHASE6 "FARM" (step 10) places a
+        // real agricultural extractor building to reproduce the AreaSpawnSystem field-divergence bug;
+        // TriRepro_Finish (step 11) logs the final DONE marker.
         private void RunTriReproStep()
         {
-            if (_triStep > 9) { return; }
+            if (_triStep > 11) { return; }
             if (_triTimer > 0) { _triTimer--; return; }
-            _triTimer = 180; // ~3s between traces, as requested
+            _triTimer = 180; // ~3s between traces, as requested (phases can override this — see PHASE6)
 
             switch (_triStep)
             {
@@ -3356,6 +3362,8 @@ namespace CS2M.Sync
                 case 7: TriRepro_Phase3_Curve(); break;
                 case 8: TriRepro_Phase4_Overdraw(); break;
                 case 9: TriRepro_Phase5_ZoneAndFinish(); break;
+                case 10: TriRepro_Phase6_FarmPlace(); break;
+                case 11: TriRepro_Finish(); break;
             }
 
             _triStep++;
@@ -3370,14 +3378,15 @@ namespace CS2M.Sync
             if (!TryAnchor(out float3 anchor))
             {
                 L("[Auto] TRIREPRO SKIP no anchor point in city");
-                _triStep = 9; // skip straight to a harmless finish
+                _triStep = 8; // -> Phase5(SKIP)->Phase6(SKIP)->Finish(DONE); RunTriReproStep's trailing
+                              // _triStep++ makes this land on case 9 (Phase5) next call, not case 8 again.
                 return;
             }
 
             if (!TryGetRoadPrefab(out _triRoadType, out _triRoadName))
             {
                 L("[Auto] TRIREPRO SKIP no Road prefab found");
-                _triStep = 9;
+                _triStep = 8; // same landing as the no-anchor SKIP above
                 return;
             }
 
@@ -3642,17 +3651,16 @@ namespace CS2M.Sync
         }
 
         /// <summary>Step 9: PHASE5 — paint zoning around the X-CROSS intersection (reuses the same
-        /// <see cref="PaintZoneNear"/> helper PHASE1 used near the triangle), then logs the final
-        /// "TRIREPRO DONE" marker every runner/bot greps for, plus a phase-count summary line.</summary>
+        /// <see cref="PaintZoneNear"/> helper PHASE1 used near the triangle). The scenario continues into
+        /// PHASE6 (farm building, step 10); the final "TRIREPRO DONE" marker now comes from
+        /// <see cref="TriRepro_Finish"/> (step 11), not from here.</summary>
         private void TriRepro_Phase5_ZoneAndFinish()
         {
             if (_triRoadName == null)
             {
                 // Reached here via an early SKIP in TriRepro_Setup (no anchor / no Road prefab) — nothing
-                // was ever built, so there is nothing to zone. Log and finish harmlessly.
+                // was ever built, so there is nothing to zone. Log and fall through to PHASE6/Finish.
                 L("[Auto] TRIREPRO PHASE5 SKIP (setup never ran — nothing to zone)");
-                L("[Auto] TRIREPRO DONE");
-                L($"[Auto] TRIREPRO PHASES={_triPhasesDone}");
                 return;
             }
 
@@ -3668,6 +3676,90 @@ namespace CS2M.Sync
             }
 
             _triPhasesDone = 5;
+        }
+
+        /// <summary>Step 10: PHASE6 "FARM" — place a real resource-extractor BUILDING (BuildingPrefab
+        /// whose name contains "Agricultur"/"Farm"/"Extractor") using the exact same primitive the
+        /// selftest's "object:building" step exercises: build an <see cref="ObjectPlaceCommand"/> by hand
+        /// (SyncId + PrefabType/PrefabName + world transform + seed) and hand it to
+        /// <see cref="RemotePlacementQueue"/>.EnqueueObject — see <see cref="InjectObject"/> (line ~622,
+        /// used by selftest step 3 "object:building") and <see cref="SendObject"/> (line ~4105, the 2-sim
+        /// variant that also does Command.SendToAll) for the two existing call sites of this exact
+        /// primitive. RemotePlacementApplySystem.ApplyOne (the queue's only consumer) then
+        /// direct-archetype-instantiates the prefab — the same Created+Updated archetype instantiation
+        /// path the vanilla ObjectToolSystem/BuildingConstructionSystem uses for a real player build — so
+        /// on the client side (over the wire) this is indistinguishable from a mouse-driven placement.
+        ///
+        /// Placing an extractor building is what makes the game's OWN AreaSpawnSystem
+        /// (GameSimulation phase, every 64 frames — decomp Simulation/AreaSpawnSystem.cs:755-758) generate
+        /// a Game.Areas.Extractor work-area polygon around it next frame-batch, using its OWN per-process
+        /// RandomSeed.Next() (AreaSpawnSystem.cs:811) — the exact non-deterministic step
+        /// docs/game-map/dossiers/area.md pins as the suspected root of "campo de fazenda não bate". This
+        /// phase only PLACES the building (host-authoritative); it does not touch CS2M_AREASUPPRESS or
+        /// any area-shape rewrite — that is what the bug being reproduced is supposed to fix downstream.
+        /// Skips gracefully (WARN + no-op, falls through to Finish) if no matching BuildingPrefab exists
+        /// in this ruleset build, or if Setup never ran.</summary>
+        private void TriRepro_Phase6_FarmPlace()
+        {
+            if (_triRoadName == null)
+            {
+                L("[Auto] TRIREPRO PHASE6 FARM SKIP (setup never ran)");
+                return;
+            }
+
+            if (!TryGetFarmPrefab(out string farmType, out string farmName))
+            {
+                L("[Auto] TRIREPRO PHASE6 FARM WARN skipped (no Agricultur/Farm/Extractor " +
+                  "BuildingPrefab found in this ruleset)");
+                return;
+            }
+
+            // A quadrant-local spot south-west of _triOrigin: clear of the triangle (PHASE1, east/north
+            // of origin), the X-CROSS (PHASE2, origin+400 on X) and the curve (PHASE3, same area as
+            // X-CROSS). IsQuadrantFree (built for TriRepro_Setup's virgin-ground search) only checks
+            // road-edge midpoints, but that is exactly what surrounds this scene, so it doubles here as a
+            // "not sitting on top of one of our own roads" check with a smaller radius (buildings are much
+            // smaller than a fresh quadrant). If a previous CI round's farm building already occupies the
+            // default spot, walk a small local grid (same shape as Setup's quadrant search, tighter step)
+            // until a free spot is found.
+            const float placeRadius = 150f;
+            float3 candidate = _triOrigin + new float3(200f, 0f, -300f);
+            for (int k = 0; k < 8 && !IsQuadrantFree(candidate, placeRadius); k++)
+            {
+                candidate = _triOrigin + new float3(200f + (k % 4) * 180f, 0f, -300f - (k / 4) * 180f);
+            }
+
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            float y = TerrainUtils.SampleHeight(ref hd, candidate);
+            var pos = new float3(candidate.x, y, candidate.z);
+
+            var cmd = new ObjectPlaceCommand
+            {
+                SyncId = CS2M_SyncIdSystem.Allocate(),
+                PrefabType = farmType, PrefabName = farmName,
+                PosX = pos.x, PosY = pos.y, PosZ = pos.z,
+                RotX = 0f, RotY = 0f, RotZ = 0f, RotW = 1f, // identity rotation — footprint/RNG matter, not facing
+                RandomSeed = 5099,
+            };
+            L($"[Auto] TRIREPRO PHASE6 farm object INJECT name={cmd.PrefabName} " +
+              $"pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) syncId={cmd.SyncId}");
+            Command.SendToAll?.Invoke(cmd);          // client builds the SAME farm over the wire
+            RemotePlacementQueue.EnqueueObject(cmd); // host applies too, so BOTH sides spawn a field
+
+            _triPhasesDone = 6;
+            L($"[Auto] TRIREPRO FARM PLACED name={farmName} pos=({pos.x:F0},{pos.z:F0}) syncId={cmd.SyncId}");
+
+            // Give AreaSpawnSystem (every 64f) a couple of passes to generate + settle the Extractor
+            // field before Finish's DONE marker — 600f (~10s) instead of the usual 180f (~3s) gap.
+            _triTimer = 600;
+        }
+
+        /// <summary>Step 11: final step of the TRIREPRO scenario — logs the "TRIREPRO DONE" marker every
+        /// runner/bot greps for (moved here from the old PHASE5 so PHASE6's farm placement, and its
+        /// 600-frame settle wait, run BEFORE the scenario is declared done), plus the phase-count summary
+        /// line.</summary>
+        private void TriRepro_Finish()
+        {
             L("[Auto] TRIREPRO DONE");
             L($"[Auto] TRIREPRO PHASES={_triPhasesDone}");
         }
@@ -3707,6 +3799,49 @@ namespace CS2M.Sync
             type = fbType;
             name = fbName;
             return true;
+        }
+
+        /// <summary>Any live BuildingPrefab (Game.Prefabs.BuildingData query, mirroring TryGetRoadPrefab's
+        /// NetGeometryData query for nets) whose name contains "Agricultur"/"Farm"/"Extractor" — the
+        /// vanilla resource-extractor buildings that own a Game.Areas.Extractor work area grown by
+        /// AreaSpawnSystem (docs/game-map/dossiers/area.md). Logs every candidate found (via the
+        /// "[Auto] TRIREPRO farm prefab=" line, per the task's requirement) and returns the FIRST one that
+        /// also has a valid placeable ObjectData archetype (what RemotePlacementApplySystem.ApplyOne
+        /// needs to direct-archetype-instantiate it).</summary>
+        private bool TryGetFarmPrefab(out string type, out string name)
+        {
+            type = null;
+            name = null;
+            EntityQuery q = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.BuildingData>());
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!_prefabSystem.TryGetPrefab(e, out PrefabBase pb) || pb == null) { continue; }
+
+                    bool matches =
+                        pb.name.IndexOf("Agricultur", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        pb.name.IndexOf("Farm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        pb.name.IndexOf("Extractor", StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (!matches) { continue; }
+
+                    L($"[Auto] TRIREPRO farm prefab='{pb.name}' type={pb.GetType().Name}");
+
+                    if (type != null) { continue; } // already locked in the first VALID candidate below —
+                                                      // keep looping only to finish logging the rest
+
+                    if (!EntityManager.HasComponent<Game.Prefabs.ObjectData>(e)) { continue; }
+                    Game.Prefabs.ObjectData od = EntityManager.GetComponentData<Game.Prefabs.ObjectData>(e);
+                    if (!od.m_Archetype.Valid) { continue; }
+
+                    type = pb.GetType().Name;
+                    name = pb.name;
+                }
+            }
+            finally { ents.Dispose(); }
+
+            return type != null;
         }
 
         /// <summary>Enqueues a straight 2-point NetToolReplayCommand into RemoteReplayQueue LOCALLY (never
