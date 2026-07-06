@@ -644,6 +644,12 @@ namespace CS2M.Sync
                 EntityManager.AddComponent<Updated>(target);
             }
 
+            // Same Modification5 dead-zone as ZonePaintApplySystem.ApplyOne (DeferredUpdateMarker.cs
+            // docs the full chain): Mod1-4 consumers already ran this frame and CleanUpSystem strips
+            // Updated before the next frame's Mod1-4 get a look, so also re-stamp at the start of the
+            // NEXT frame — otherwise a healed block's cells never get re-lit (m_State stays 0).
+            DeferredUpdated.Enqueue(target);
+
             // 3) Authoritative cells (fresh buffer handle, taken AFTER the structural change above).
             // Flags/height are left for the local CellCheckSystem to recompute on the Updated pass that
             // follows — the same pipeline a locally-derived block goes through.

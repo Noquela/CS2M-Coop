@@ -136,6 +136,12 @@ namespace CS2M.Sync
                 EntityManager.AddComponent<Updated>(target);
             }
 
+            // This system runs at Modification5 — every Mod1-4 consumer (BlockSystem/CellCheckSystem
+            // etc.) already ran this frame, and CleanUpSystem strips Updated before next frame's Mod1-4
+            // ever see it (DeferredUpdateMarker.cs docs the full chain). Re-stamp at the START of the
+            // NEXT frame too so the cell-visibility recompute actually runs and sees this block's edit.
+            DeferredUpdated.Enqueue(target);
+
             DynamicBuffer<Cell> cells = EntityManager.GetBuffer<Cell>(target);
             int applied = 0;
             int count = System.Math.Min(cmd.CellIndices.Length, cmd.ZoneNames.Length);

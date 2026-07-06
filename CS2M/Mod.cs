@@ -120,6 +120,14 @@ namespace CS2M
             // v51: host-authoritative RCI demand bars (clients suppress local demand sim + mirror).
             updateSystem.UpdateAt<DemandSyncSystem>(SystemUpdatePhase.Rendering);
 
+            // v56 FIELD FIX: drains DeferredUpdated at the START of every frame, before consumers run.
+            // Appliers that must stay at Modification5 (zone paint/heal — they retry until a locally-
+            // derived block exists) enqueue here in ADDITION to their immediate AddComponent<Updated>,
+            // because Mod5's Updated dies same-frame under CleanUpSystem before ever being seen by
+            // Mod1-4 (see DeferredUpdateMarker.cs for the full chain + decomp citations). Single-type
+            // overload only — UpdateBefore<A,B> double-registers the anchor (v50 lesson below).
+            updateSystem.UpdateBefore<Sync.DeferredUpdatedSystem>(SystemUpdatePhase.Modification1);
+
             // Object placement sync (buildings/props/trees placed with the Object/Line tool).
             // Detector runs just before ModificationEnd (where Applied is visible, matching
             // Anarchy's AnarchyPlopSystem). The remote-apply system runs at Modification5,
