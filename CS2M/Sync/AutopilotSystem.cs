@@ -66,6 +66,9 @@ namespace CS2M.Sync
         private string _triRoadType;
         private string _triRoadName;
         private float3 _triAnchor;
+        private float3 _triOrigin; // chosen free quadrant's origin — every phase derives its offsets
+                                    // from this ONE field (see TriRepro_Setup's quadrant search), so
+                                    // there is exactly one place that decides where the scene lives.
         private float3 _triA, _triB, _triC, _triMid;
         private ulong _triNodeIdA, _triNodeIdB, _triNodeIdC, _triNodeIdMid;
         private float3 _xcCenter, _xcA1, _xcD1, _xcA2, _xcD2;
@@ -3384,11 +3387,50 @@ namespace CS2M.Sync
             // Far quadrant, clear of every other scene's offsets (CONCURRENT: anchor+400..560/+400..730;
             // RunHostStep sends top out around anchor+600). ~(anchor.x+900, anchor.z+1200) — the example
             // "perto de (600,1600)" the task gave, shifted so it never overlaps.
+            //
+            // BUT every CI round leaves its triangle/X-CROSS/curve behind (the save accumulates — nothing
+            // here is ever deleted), so re-running against that SAME fixed offset draws right on top of
+            // the previous round's roads: raw duplicate edges at snap=0 (no node to fuse onto, since
+            // TagNodeNear only looks near where WE expect our own corners) plus identity chaos downstream.
+            // PHASE4 already covers "player redraws over an existing road" on purpose, in a controlled way
+            // — Setup itself needs genuinely virgin ground. Walk a deterministic quadrant grid instead:
+            // candidate k = baseOrigin + (k%8)*(700,0) + (k/8)*(0,700) for k=0,1,2,...  (step 700m is
+            // bigger than the ~500x500 the scene spans once PHASE2's X-CROSS +400 X shift is counted, so
+            // consecutive quadrants never touch). A quadrant is FREE if no edge (Edge+Curve, no
+            // Temp/Deleted — see _edgeQuery) has its curve midpoint within 600m of the scene's rough
+            // center (candidate + (150,200), generous radius for the same reason). First free k wins.
             const float side = 200f;
-            var origin = new float3(anchor.x + 900f, anchor.y, anchor.z + 1200f);
-            _triA = origin;
-            _triB = origin + new float3(side, 0f, 0f);
-            _triC = origin + new float3(side * 0.5f, 0f, side * 0.866f); // equilateral apex
+            var baseOrigin = new float3(anchor.x + 900f, anchor.y, anchor.z + 1200f);
+            const int maxK = 40;
+            const float quadrantStep = 700f;
+            const float freeRadius = 600f;
+            float3 chosenOrigin = baseOrigin;
+            bool foundFree = false;
+
+            for (int k = 0; k < maxK; k++)
+            {
+                var candidate = baseOrigin + new float3((k % 8) * quadrantStep, 0f, (k / 8) * quadrantStep);
+                var sceneCenter = candidate + new float3(150f, 0f, 200f);
+                if (IsQuadrantFree(sceneCenter, freeRadius))
+                {
+                    chosenOrigin = candidate;
+                    foundFree = true;
+                    L($"[Auto] TRIREPRO quadrant k={k} origem=({candidate.x:F0},{candidate.z:F0})");
+                    break;
+                }
+            }
+
+            if (!foundFree)
+            {
+                L($"[Auto] TRIREPRO WARN no free quadrant found in {maxK} tries — falling back to k=0 " +
+                  "(old behavior: may overdraw on a previous round)");
+                chosenOrigin = baseOrigin;
+            }
+
+            _triOrigin = chosenOrigin;
+            _triA = _triOrigin;
+            _triB = _triOrigin + new float3(side, 0f, 0f);
+            _triC = _triOrigin + new float3(side * 0.5f, 0f, side * 0.866f); // equilateral apex
             _triMid = (_triA + _triB) * 0.5f;
             _triNodeIdA = 0; _triNodeIdB = 0; _triNodeIdC = 0;
 
@@ -3397,6 +3439,33 @@ namespace CS2M.Sync
 
             ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _triA, _triB, 5001,
                 0, 0, float3.zero, 0, 0, float3.zero);
+        }
+
+        /// <summary>Quadrant-freeness check for <see cref="TriRepro_Setup"/>'s virgin-ground search:
+        /// true iff no live edge (Edge+Curve, no Temp/Deleted — reuses <c>_edgeQuery</c>, which already
+        /// excludes those plus CS2M_RemotePlaced; every TRIREPRO edge is born as ordinary LOCAL
+        /// construction, so a previous round's roads DO show up here) has its curve midpoint within
+        /// <paramref name="radius"/> meters (XZ only) of <paramref name="center"/>.</summary>
+        private bool IsQuadrantFree(float3 center, float radius)
+        {
+            if (_edgeQuery.IsEmptyIgnoreFilter) { return true; }
+
+            float r2 = radius * radius;
+            NativeArray<Entity> ents = _edgeQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    Colossal.Mathematics.Bezier4x3 bz = EntityManager.GetComponentData<Game.Net.Curve>(e).m_Bezier;
+                    float3 mid = (bz.a + bz.d) * 0.5f;
+                    float dx = mid.x - center.x;
+                    float dz = mid.z - center.z;
+                    if (dx * dx + dz * dz < r2) { return false; }
+                }
+
+                return true;
+            }
+            finally { ents.Dispose(); }
         }
 
         /// <summary>Step 1: tag the two dead-end nodes side 1 just built (by proximity — this is the
@@ -3476,9 +3545,11 @@ namespace CS2M.Sync
         /// get wrong.</summary>
         private void TriRepro_Phase2_XCrossLine1()
         {
-            // Triangle origin was _triAnchor + (900, 1200) (see TriRepro_Setup); X-CROSS quadrant is that
-            // origin shifted +400 on X, well clear of the triangle (side 200) and of side1's diagonal.
-            _xcCenter = new float3(_triAnchor.x + 900f + 400f, _triAnchor.y, _triAnchor.z + 1200f);
+            // Triangle origin is _triOrigin (the free quadrant TriRepro_Setup picked); X-CROSS quadrant
+            // is that SAME origin shifted +400 on X, well clear of the triangle (side 200) and of side1's
+            // diagonal. Deriving from _triOrigin (not re-deriving from _triAnchor) keeps every phase tied
+            // to the one quadrant Setup actually chose.
+            _xcCenter = new float3(_triOrigin.x + 400f, _triOrigin.y, _triOrigin.z);
 
             const float half = 88.3883f; // 125 * cos(45deg) -> total segment length 250m
             _xcA1 = _xcCenter + new float3(-half, 0f, -half);
