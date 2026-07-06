@@ -356,15 +356,38 @@ namespace CS2M.Sync
                     continue;
                 }
 
+                var bezier = new Bezier4x3(
+                    new float3(cmd.EdgeAX[i], cmd.EdgeAY[i], cmd.EdgeAZ[i]),
+                    new float3(cmd.EdgeBX[i], cmd.EdgeBY[i], cmd.EdgeBZ[i]),
+                    new float3(cmd.EdgeCX[i], cmd.EdgeCY[i], cmd.EdgeCZ[i]),
+                    new float3(cmd.EdgeDX[i], cmd.EdgeDY[i], cmd.EdgeDZ[i]));
+
                 // Idempotency: this exact edge (by node-pair identity) already exists → duplicate delivery.
-                if (FindEdgeById(cmd.EdgeStartNodeIds[i], cmd.EdgeEndNodeIds[i], out _))
+                // BUT node-pair identity alone can lie once a boundary id has been silently re-pointed onto
+                // a different physical node by BOUND-MERGE above (or by any other id remap): FindEdgeById
+                // would then match a LIVE edge that merely SHARES the (now-stale) id pair with the wire
+                // command, not the edge the command actually describes. Cross-check the curve length before
+                // trusting the id match — a real duplicate delivery ships byte-identical geometry, so a
+                // >2 m difference means "different edge, id pair coincidentally collided", not "dup".
+                if (FindEdgeById(cmd.EdgeStartNodeIds[i], cmd.EdgeEndNodeIds[i], out Entity liveEdge))
                 {
-                    CS2M.Log.Info($"[Batch] SKIP dup edge {i} (already live)");
-                    continue;
+                    float wantLen = MathUtils.Length(bezier);
+                    float liveLen = EntityManager.HasComponent<Curve>(liveEdge)
+                        ? EntityManager.GetComponentData<Curve>(liveEdge).m_Length
+                        : wantLen;
+                    if (math.abs(liveLen - wantLen) <= 2f)
+                    {
+                        CS2M.Log.Info($"[Batch] SKIP dup edge {i} (already live)");
+                        continue;
+                    }
+
+                    CS2M.Log.Info($"[Batch] DUP-MISMATCH re-emitting edge {i} liveEdge={liveEdge.Index} " +
+                                  $"liveLen={liveLen:F1} wantLen={wantLen:F1} " +
+                                  "(node-pair id matched but geometry didn't — stale id after a merge, not a real dup)");
                 }
 
                 // Vanilla path: emit a Permanent definition (GenerateEdges builds the REAL edge this frame).
-                if (EmitEdgeCourse(cmd, i, s, en))
+                if (EmitEdgeCourse(cmd, i, bezier, s, en))
                 {
                     createdEdges++;
                     if (boundarySet.Contains(cmd.EdgeStartNodeIds[i])) { boundaryTouched.Add(s); }
@@ -402,6 +425,18 @@ namespace CS2M.Sync
         /// buffer handle is always taken AFTER that structural change (same ordering as the proven Heal
         /// path in ZoneBlockAuthoritySystems.cs) — any buffer fetched before an AddComponent on this same
         /// entity is invalidated by it.</summary>
+        // Above this displacement, a "snap" is no longer plausibly the same junction settling a few
+        // metres as arms attach — it is the builder having folded this id's node into a DIFFERENT one
+        // (edge split / node re-use during the SAME batch's draw). See the BOUND-MERGE branch below.
+        private const float SnapMergeDistance = 10f;
+
+        // How close an ALREADY-REGISTERED node must sit to the builder's settled position for that node
+        // to be treated as "the survivor of the merge" rather than "unrelated node that happens to be far
+        // away". 2 m is generous vs the sub-metre cross-machine float drift NodePinSystem/BOUND-SNAP's own
+        // <=0.25 m noise floor already accounts for, but tight enough that it won't misfire on two actually
+        // distinct junctions that happen to be near each other.
+        private const float SnapMergeSearchRadius = 2f;
+
         private void SnapBoundaryNode(Entity node, ulong id, float3 wantPos)
         {
             if (!EntityManager.Exists(node) || !EntityManager.HasComponent<Node>(node))
@@ -414,6 +449,34 @@ namespace CS2M.Sync
             if (dist <= 0.25f || dist >= 200f)
             {
                 return;
+            }
+
+            // Large snap = probably a MERGE, not a teleport. Proven live 06/07 (statediff on the
+            // '-520/1451--420/1278' edge): a boundary id's settled position landed 100 m from where the
+            // receiver's node for that id sits, because the BUILDER's own net editor re-used/folded that
+            // node's identity into a DIFFERENT node while drawing a later piece of the same batch (an edge
+            // split at the midpoint of an existing edge can hand the split node the ORIGINAL endpoint's
+            // identity and mint a fresh one for the vacated endpoint — see the reconstructed host sequence
+            // in the fix's companion report). If another node is ALREADY sitting at wantPos, that other
+            // node — not a 100 m drag of THIS one — is what the id now names on the builder's side.
+            if (dist > SnapMergeDistance
+                && CS2M_NodeSyncIds.TryFindNearbyRegistered(EntityManager, wantPos, SnapMergeSearchRadius, node, out Entity survivor))
+            {
+                CS2M_NodeSyncIds.Remap(id, survivor);
+                CS2M.Log.Info($"[Batch] BOUND-MERGE id={id} node={node.Index}->{survivor.Index} " +
+                              $"dist={dist:F1}m settledPos=({wantPos.x:F1},{wantPos.z:F1}) " +
+                              "(re-pointed id to the survivor instead of moving the old node)");
+                return;
+            }
+
+            if (dist > SnapMergeDistance)
+            {
+                // No survivor at the destination — fall through to the move (today's behaviour), but this
+                // is far enough that it deserves a loud flag: either a legitimately big junction settle, or
+                // a merge this receiver failed to detect (e.g. the survivor hasn't arrived/resolved yet).
+                CS2M.Log.Warn($"[Batch] BOUND-SNAP-LARGE id={id} moved={dist:F1}m " +
+                              $"({cur.m_Position.x:F1},{cur.m_Position.z:F1})->({wantPos.x:F1},{wantPos.z:F1}) " +
+                              "no nearby registered node to merge onto — moving the node itself");
             }
 
             float3 oldPos = cur.m_Position;
@@ -518,7 +581,7 @@ namespace CS2M.Sync
         /// created/resolved node entities by <c>m_Entity</c>; GenerateNodes@Mod1/GenerateEdges@Mod2 then build
         /// the REAL edge THIS frame (curve terrain-fit, composition, geometry, lanes, zone blocks, mesh) — the
         /// derivation the direct-archetype edge never got. Returns true when a definition was emitted.</summary>
-        private bool EmitEdgeCourse(NetBatchCommand cmd, int i, Entity startNode, Entity endNode)
+        private bool EmitEdgeCourse(NetBatchCommand cmd, int i, Bezier4x3 bezier, Entity startNode, Entity endNode)
         {
             // Prefab is pre-validated by ValidateAllPrefabs (incl. m_EdgeArchetype.Valid — kept as the
             // "is this a real net?" proxy even though the definition path no longer uses the archetype).
@@ -526,12 +589,6 @@ namespace CS2M.Sync
             {
                 return false;
             }
-
-            var bezier = new Bezier4x3(
-                new float3(cmd.EdgeAX[i], cmd.EdgeAY[i], cmd.EdgeAZ[i]),
-                new float3(cmd.EdgeBX[i], cmd.EdgeBY[i], cmd.EdgeBZ[i]),
-                new float3(cmd.EdgeCX[i], cmd.EdgeCY[i], cmd.EdgeCZ[i]),
-                new float3(cmd.EdgeDX[i], cmd.EdgeDY[i], cmd.EdgeDZ[i]));
 
             // ECHO GUARD (same as NetPlaceApplySystem.EmitCourse line ~282): the edge GenerateEdges produces
             // from this definition is born Applied+Created and WITHOUT CS2M_RemotePlaced (we never hold that

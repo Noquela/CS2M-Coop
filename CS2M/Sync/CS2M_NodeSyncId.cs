@@ -115,6 +115,56 @@ namespace CS2M.Sync
             return false;
         }
 
+        /// <summary>Re-point an id at a DIFFERENT already-live node — a merge, not a move. Used when a
+        /// builder's settled boundary position (BoundaryPos*) lands far from the node this id currently
+        /// names, but another node already sits at that settled spot: the builder's own net editor folded
+        /// two junctions into one (edge split / node re-use) and this receiver's id↔entity cache never
+        /// heard about it. Deliberately does NOT touch <see cref="CS2M_NodeSyncId"/> the component on
+        /// either entity — only the lookup table, which is the only thing <see cref="TryResolve"/> and
+        /// <see cref="FindEdgeById"/>-style identity walks actually consult. The old entity is left exactly
+        /// where it is: if it still carries edges after the remap, they keep their (now slightly odd, but
+        /// at least not 100 m displaced) geometry; if it ends up with none, the game's own orphan/junction
+        /// cleanup collects it on a later pass. Trade-off: the OLD id's physical node and the NEW mapping
+        /// target are now two different entities — anything that read the old entity directly (rather than
+        /// through the id) before this call keeps pointing at the pre-merge node.</summary>
+        public static void Remap(ulong id, Entity survivor)
+        {
+            if (id != 0 && survivor != Entity.Null)
+            {
+                Map[id] = survivor;
+            }
+        }
+
+        /// <summary>Nearest LIVE node (any id, any component) within <paramref name="radius"/> of
+        /// <paramref name="pos"/>, other than <paramref name="exclude"/>. Used by the boundary-snap merge
+        /// check: "is some OTHER already-known node already sitting where the builder says this id settled?"
+        /// Scoped to <see cref="Map"/> (id-bearing nodes only) — a bare/unstamped node is not a valid merge
+        /// target here, the same way <see cref="NetBatchApplySystem"/>.FindNodeStrict treats an id-bearing
+        /// node as never a valid ADOPT target: the two searches are mirror images of the same rule.</summary>
+        public static bool TryFindNearbyRegistered(EntityManager em, float3 pos, float radius, Entity exclude, out Entity found)
+        {
+            found = Entity.Null;
+            float bestSq = radius * radius;
+            foreach (KeyValuePair<ulong, Entity> kv in Map)
+            {
+                Entity e = kv.Value;
+                if (e == exclude || e == Entity.Null || !em.Exists(e)
+                    || !em.HasComponent<Node>(e) || em.HasComponent<Deleted>(e))
+                {
+                    continue;
+                }
+
+                float d = math.distancesq(em.GetComponentData<Node>(e).m_Position, pos);
+                if (d < bestSq)
+                {
+                    bestSq = d;
+                    found = e;
+                }
+            }
+
+            return found != Entity.Null;
+        }
+
         public static void Clear()
         {
             Map.Clear();
