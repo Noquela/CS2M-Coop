@@ -72,6 +72,10 @@ namespace CS2M.Sync
                 m_Multiplier = cmd.Multiplier,
                 m_Polluted = cmd.Polluted,
                 m_ConstantDepth = cmd.ConstantDepth,
+                // WaterSimulation.cs:58 multiplica o raio efetivo por m_Modifier; o jogo força 1f em todo
+                // caminho próprio (WaterSourceData.cs:55) e WaterSourceInitializeSystem só corrige entidades
+                // com PrefabRef — sem esta linha a fonte remota nasce com raio efetivo ZERO (morta).
+                m_Modifier = 1f,
             });
             EntityManager.AddComponentData(e, new Transform(new float3(cmd.PosX, y, cmd.PosZ), quaternion.identity));
             EntityManager.AddComponent<CS2M_RemotePlaced>(e);

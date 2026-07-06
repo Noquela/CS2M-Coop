@@ -54,7 +54,8 @@ def enumerate_tools():
 
 
 def enumerate_serialized():
-    """Todo tipo (struct/class) que implementa ISerializable, nome qualificado."""
+    """Todo tipo (struct/class) que IMPLEMENTA ISerializable (base-list, não constraint
+    genérica `where T : ISerializable`), nome qualificado pelo namespace do arquivo."""
     types = set()
     for f in DECOMP.rglob("*.cs"):
         text = f.read_text(encoding="utf-8", errors="replace")
@@ -62,9 +63,35 @@ def enumerate_serialized():
             continue
         ns_m = re.search(r"^namespace ([\w.]+)", text, re.M)
         ns = ns_m.group(1) if ns_m else "?"
-        for m in re.finditer(r"(?:struct|class) (\w+)[^{;]*?\bISerializable\b", text, re.S):
-            types.add(f"{ns}.{m.group(1)}")
+        for m in re.finditer(r"(?:struct|class) (\w+)(?:<[^>]*>)?\s*:\s*([^{;]*?)\{", text, re.S):
+            bases = m.group(2).split(" where ")[0]
+            if re.search(r"\bISerializable\b", bases):
+                types.add(f"{ns}.{m.group(1)}")
     return types
+
+
+def _norm(name):
+    """+ aninhado vira ., genéricos <T> caem."""
+    return re.sub(r"<[^>]*>", "", name).replace("+", ".")
+
+
+def covers(name, pool):
+    """name está coberto por algum item do pool? Exato, ou mesmo nome-base com um
+    caminho de namespace prefixo do outro (lida com Parent+Nested e sub-namespace),
+    o que NÃO casa Net.BuildOrder com Zones.BuildOrder (nenhum é prefixo do outro)."""
+    if name in pool:
+        return True
+    parts = name.split(".")
+    bare, ns = parts[-1], parts[:-1]
+    for c in pool:
+        cp = c.split(".")
+        if cp[-1] != bare:
+            continue
+        cns = cp[:-1]
+        short, long_ = (cns, ns) if len(cns) <= len(ns) else (ns, cns)
+        if long_[: len(short)] == short:
+            return True
+    return False
 
 
 def enumerate_triggers():
@@ -114,12 +141,13 @@ else:
             if row.get("class") == "AUTHORED" and str(row.get("syncPath", "NONE")).upper() in ("NONE", ""):
                 gaps_authored.append(f'{row["type"]} — {row.get("note", "")}')
 
-    missing = sorted(serialized - set(classified))
-    for t in missing:
-        fails.append(f"TIPO SERIALIZADO SEM CLASSIFICAÇÃO: {t}")
-    extra = sorted(set(classified) - serialized)
-    for t in extra:
-        warns.append(f"classificado mas não achei no decomp (nome divergente?): {t}")
+    classified_norm = {_norm(t) for t in classified}
+    for t in sorted(serialized):
+        if not covers(t, classified_norm):
+            fails.append(f"TIPO SERIALIZADO SEM CLASSIFICAÇÃO: {t}")
+    for t in sorted(classified):
+        if not covers(_norm(t), serialized):
+            warns.append(f"classificado mas não achei no decomp (nome divergente?): {t}")
     bad_class = [t for t, r in classified.items()
                  if r.get("class") not in ("AUTHORED", "DERIVED", "EMERGENT", "STATIC", "META")]
     for t in bad_class:

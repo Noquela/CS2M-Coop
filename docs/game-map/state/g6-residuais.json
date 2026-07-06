@@ -1,0 +1,42 @@
+[
+  {
+    "type": "Game.Routes.RoutePathSystem",
+    "file": "Routes/RoutePathSystem.cs",
+    "class": "DERIVED",
+    "writtenBy": ["RoutePathSystem (CheckRoutePathsJob/CheckAppliedLanesJob/CheckSegmentRoutes, Routes/RoutePathSystem.cs:51-250)"],
+    "syncPath": "N/A (recalculado localmente a partir de rotas/lanes sincadas)",
+    "note": "Sistema (não componente) que serializa estado de pathfind de rotas; converge dado rotas e malha iguais — desempates de pathfind local podem variar, efeito emergente (qual lane o veículo usa). Classificado por Fable na auditoria, não por agente."
+  },
+  {
+    "type": "Game.Prefabs.Modes.GameModeSystem",
+    "file": "Prefabs/Modes/GameModeSystem.cs",
+    "class": "META",
+    "writtenBy": ["GameModeSystem (Prefabs/Modes/GameModeSystem.cs:11, m_ModeSetting/m_NextMode)"],
+    "syncPath": "N/A (modo de jogo vem do save transferido no join; sem trigger de UI in-game localizado)",
+    "note": "Serializa o modo de jogo ativo (ModeSetting). Ambos os lados carregam o mesmo save no join → mesmo modo. Se algum dia existir troca de modo em runtime, vira gap."
+  },
+  {
+    "type": "Game.UI.InGame.CachedChirpData",
+    "file": "UI/InGame/ChirpLinkSystem.cs",
+    "class": "META",
+    "writtenBy": ["ChirpLinkSystem (UI/InGame/ChirpLinkSystem.cs:16)"],
+    "syncPath": "N/A",
+    "note": "Cache persistido de dados de chirp para links de UI; bookkeeping local, divergência inofensiva (conteúdo de chirper já é emergente — ver gap chirp.addLike no ui-sweep, que é outro tipo: Game.Triggers.Chirp)."
+  },
+  {
+    "type": "Game.UI.InGame.CachedEntityName",
+    "file": "UI/InGame/ChirpLinkSystem.cs",
+    "class": "META",
+    "writtenBy": ["ChirpLinkSystem (UI/InGame/ChirpLinkSystem.cs:110)"],
+    "syncPath": "N/A",
+    "note": "Cache de nomes de entidade citados em chirps; bookkeeping local de UI."
+  },
+  {
+    "type": "Game.UI.Name",
+    "file": "UI/NameSystem.cs",
+    "class": "AUTHORED",
+    "writtenBy": ["NameSystem.SetCustomName (UI/NameSystem.cs:38 struct Name; consumido pelo painel de renomear)"],
+    "syncPath": "RenameCommand/RenameSyncSystems.cs (kind 1/2/3 + cidade kind=4; exercitado no selftest AutopilotSystem.cs:2878-2904)",
+    "note": "Struct de nome customizado serializada pelo NameSystem — renomear prédio/rua/cidade é ação de jogador. Cobertura já existente e validada; doc-comment do RenameCommand está desatualizado (só lista 1/2/3)."
+  }
+]
