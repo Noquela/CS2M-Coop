@@ -199,38 +199,17 @@ namespace CS2M.Sync
             BuildOrder buildOrder = EntityManager.GetComponentData<BuildOrder>(e);
             uint current = buildOrder.m_Order;
 
-            uint orderBase;
-            if (_stamped.TryGetValue(e, out uint prevStamped) && prevStamped == current)
-            {
-                // Untouched since our own last stamp -- recover the base and keep it; only
-                // posHash below might change (e.g. Block.m_Position nudged without a re-derive).
-                orderBase = current >> 8;
-            }
-            else
-            {
-                // Never stamped, or BlockSystem re-derived this block THIS frame and overwrote our
-                // previous stamp with its own fresh max(edge, neighbor) value -- either way, the
-                // CURRENT component value is a raw base, not something to un-shift.
-                orderBase = current;
-            }
-
-            if (orderBase > 0xFFFFFF)
-            {
-                if (!_overflowWarned)
-                {
-                    _overflowWarned = true;
-                    CS2M.Log.Warn(
-                        $"[ZoneOrderTiebreak] orderBase {orderBase} exceeds the 24-bit tie-break budget " +
-                        "-- capping to 0xFFFFFF (primary order precision unaffected in practice; only " +
-                        "the reserved tie-break byte budget is capped)");
-                }
-
-                orderBase = 0xFFFFFF;
-            }
-
+            // v56.3 REDESIGN (round-6 evidence: same save blocks with host base 6895 vs client base
+            // 7679, offsets NON-uniform across regions — +784 here, +4248 there): the raw m_Order
+            // base is a PER-MACHINE reconstruction. The client re-derives blocks during the join
+            // load with its own process-local GenerateEdges counter, so bases never agree and can't
+            // be made to — preserving them (base<<8|hash) just preserved the disagreement. The only
+            // ordering both machines can compute identically is one derived from SHARED content:
+            // the block's own position. So under the gate the ENTIRE m_Order becomes PosHash32.
+            // Cost: vanilla's "newest road wins the overlap" becomes "stable-arbitrary wins" — a
+            // gameplay-visible but CONSISTENT choice, and consistency is the whole point of co-op.
             Block block = EntityManager.GetComponentData<Block>(e);
-            byte posHash = PosHash(block.m_Position);
-            uint stamped = (orderBase << 8) | posHash;
+            uint stamped = PosHash32(block.m_Position);
 
             bool changed = stamped != current;
             if (changed)
@@ -247,11 +226,10 @@ namespace CS2M.Sync
             return changed;
         }
 
-        /// <summary>Deterministic FNV-1a hash of the block's own position quantized to 0.5 m, low
-        /// byte only -- identical on both machines for the same block (same recipe as
-        /// StateHashSystems.cs's `Pt()`, kept local here since that class isn't gated the same way
-        /// and this needs only 8 bits, not a full fingerprint).</summary>
-        private static byte PosHash(float3 pos)
+        /// <summary>Deterministic FNV-1a hash of the block's own position quantized to 0.5 m —
+        /// identical on both machines for the same block (same recipe as StateHashSystems.cs's
+        /// `Pt()`). Full 32 bits: under the gate this IS the block's contest order.</summary>
+        private static uint PosHash32(float3 pos)
         {
             long x = (int) math.round(pos.x * 2f);
             long z = (int) math.round(pos.z * 2f);
@@ -260,7 +238,7 @@ namespace CS2M.Sync
                 long h = 1469598103934665603L;
                 h = (h ^ (x & 0xffffffffL)) * 1099511628211L;
                 h = (h ^ (z & 0xffffffffL)) * 1099511628211L;
-                return (byte) (h & 0xFF);
+                return (uint) (h & 0xFFFFFFFFL);
             }
         }
 
