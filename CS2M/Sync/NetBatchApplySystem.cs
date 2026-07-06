@@ -230,6 +230,30 @@ namespace CS2M.Sync
                 CS2M.Log.Info($"[Batch] boundary adopt-by-pos id={adopt.Key} node={adopt.Value.Index}");
             }
 
+            // (1b) SNAP a boundary node the builder MOVED after this batch's junction snapped two arms
+            // together (proven live 06/07: node 9188895750254231569 slid ~70 m when a 2nd trace fused it
+            // into another junction). The wire's BoundaryPos* is the builder's SETTLED post-move position;
+            // if the receiver's local node is still at the OLD spot, the new edges below — whose bezier
+            // endpoints are already captured at the NEW spot — would solder onto stale geometry and the
+            // two worlds permanently diverge. Runs here, AFTER every boundary id resolved (any miss above
+            // already returned false with ZERO mutation — the plan-then-commit contract this whole method
+            // documents), so it is part of the SAME atomic commit as the adopt-by-pos loop just above, not
+            // a separate mutation window; and it runs BEFORE (3) emits the new edges' CreationDefinition,
+            // so GenerateEdges/NodeAlign see the ALIGNED node the instant they consume this frame's set.
+            bool boundaryHasPos = cmd.BoundaryNodeIds != null && cmd.BoundaryPosX != null
+                                   && cmd.BoundaryPosY != null && cmd.BoundaryPosZ != null
+                                   && cmd.BoundaryPosX.Length == cmd.BoundaryNodeIds.Length
+                                   && cmd.BoundaryPosY.Length == cmd.BoundaryNodeIds.Length
+                                   && cmd.BoundaryPosZ.Length == cmd.BoundaryNodeIds.Length;
+            if (boundaryHasPos)
+            {
+                for (int bi = 0; bi < cmd.BoundaryNodeIds.Length; bi++)
+                {
+                    SnapBoundaryNode(idToEntity[cmd.BoundaryNodeIds[bi]], cmd.BoundaryNodeIds[bi],
+                        new float3(cmd.BoundaryPosX[bi], cmd.BoundaryPosY[bi], cmd.BoundaryPosZ[bi]));
+                }
+            }
+
             // (2) Create new NODES.
             int nodeCount = cmd.NodeIds != null ? cmd.NodeIds.Length : 0;
             int createdNodes = 0;
@@ -300,6 +324,69 @@ namespace CS2M.Sync
 
             CS2M.Log.Info($"[Batch] APPLIED nodes={createdNodes} edges={createdEdges} dels={appliedDels}");
             return true;
+        }
+
+        /// <summary>Align a resolved boundary node to the builder's settled position when the two have
+        /// drifted apart (junction snap moved the node on the builder's PC after/while this batch was
+        /// captured). Sanity-gated: &lt;0.25 m is noise (float round-trip), &gt;=200 m means BoundaryPos is
+        /// wrong/stale data, not a real snap — skip rather than teleport a node across the map. Structural
+        /// change (AddComponent) always happens AFTER the plain SetComponentData, and the ConnectedEdge
+        /// buffer handle is always taken AFTER that structural change (same ordering as the proven Heal
+        /// path in ZoneBlockAuthoritySystems.cs) — any buffer fetched before an AddComponent on this same
+        /// entity is invalidated by it.</summary>
+        private void SnapBoundaryNode(Entity node, ulong id, float3 wantPos)
+        {
+            if (!EntityManager.Exists(node) || !EntityManager.HasComponent<Node>(node))
+            {
+                return;
+            }
+
+            Node cur = EntityManager.GetComponentData<Node>(node);
+            float dist = math.distance(cur.m_Position, wantPos);
+            if (dist <= 0.25f || dist >= 200f)
+            {
+                return;
+            }
+
+            float3 oldPos = cur.m_Position;
+
+            // 1) Authoritative position — plain SetComponentData, no structural change yet.
+            EntityManager.SetComponentData(node, new Node
+            {
+                m_Position = wantPos,
+                m_Rotation = cur.m_Rotation,
+            });
+
+            // 2) Structural change on the NODE itself — do this before touching any of its buffers.
+            if (!EntityManager.HasComponent<Updated>(node))
+            {
+                EntityManager.AddComponent<Updated>(node);
+            }
+
+            // 3) Mark every connected edge Updated too, so GenerateEdges refits curve/mesh/blocks from the
+            // now-aligned node instead of leaving them pinned to the old endpoint. Buffer handle taken
+            // AFTER the node's own structural change above; edge ids are copied out before mutating any of
+            // them, since AddComponent on edge[0] must not be allowed to invalidate our read of edge[1..].
+            if (EntityManager.HasBuffer<ConnectedEdge>(node))
+            {
+                DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(node, true);
+                var edges = new Entity[ce.Length];
+                for (int i = 0; i < ce.Length; i++)
+                {
+                    edges[i] = ce[i].m_Edge;
+                }
+
+                foreach (Entity edge in edges)
+                {
+                    if (EntityManager.Exists(edge) && !EntityManager.HasComponent<Updated>(edge))
+                    {
+                        EntityManager.AddComponent<Updated>(edge);
+                    }
+                }
+            }
+
+            CS2M.Log.Info($"[Batch] BOUND-SNAP id={id} moved={dist:F1}m " +
+                          $"({oldPos.x:F1},{oldPos.z:F1})->({wantPos.x:F1},{wantPos.z:F1})");
         }
 
         private Entity CreateNode(NetBatchCommand cmd, int i)
