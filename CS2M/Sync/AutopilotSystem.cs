@@ -51,6 +51,16 @@ namespace CS2M.Sync
         private int _concTimer;
         private string _logPath;
 
+        // CS2M_AP_TEST=3: TRIREPRO — host solo-draws a triangle+diagonal of real (capturable) road,
+        // no human, to reproduce the zone-divergence bug automatically. See RunTriReproStep.
+        private bool _triRepro;
+        private int _triStep;
+        private int _triTimer;
+        private string _triRoadType;
+        private string _triRoadName;
+        private float3 _triA, _triB, _triC, _triMid;
+        private ulong _triNodeIdA, _triNodeIdB, _triNodeIdC;
+
         private GameMode _gameMode = GameMode.Other;
         private PrefabSystem _prefabSystem;
         private CitySystem _citySystem;
@@ -170,6 +180,7 @@ namespace CS2M.Sync
 
             _testEnabled = Environment.GetEnvironmentVariable("CS2M_AP_TEST") != "0";
             _concurrent = Environment.GetEnvironmentVariable("CS2M_AP_CONCURRENT") == "1";
+            _triRepro = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "3";
 
             GameManager.instance.onGameLoadingComplete += OnLoadingComplete;
 
@@ -421,6 +432,10 @@ namespace CS2M.Sync
                 else if (_concurrent)
                 {
                     RunConcurrentStep(true);
+                }
+                else if (_triRepro)
+                {
+                    RunTriReproStep();
                 }
                 else
                 {
@@ -3278,6 +3293,291 @@ namespace CS2M.Sync
 
             _concStep++;
             if (_concStep >= 12) { L("[Auto] CONCURRENT done (12 overlapping placements sent each side)"); }
+        }
+
+        // ------- CS2M_AP_TEST=3: TRIREPRO — host solo-builds the zone-divergence repro scenario -------
+        //
+        // Zero-human reproduction of the zone-hash drift: the host draws a triangle of 3 straight "Small
+        // Road" segments (corner-connected), then a diagonal from one side's midpoint to the opposite
+        // corner (a genuine mid-span T-junction), then paints residential zoning around the side that
+        // carries that junction. Roads MUST be born as ordinary LOCAL construction — Applied & Created,
+        // WITHOUT CS2M_RemotePlaced and WITHOUT a RemoteNetEcho mark — or NetDetectorSystem/
+        // NetBatchCaptureSystem (both gated on exactly that: see their EntityQueryDesc.None lists in
+        // NetDetectorSystem.cs / NetBatchCaptureSystem.cs) silently skip them and nothing ships to the
+        // client. The two paths that DO create geometry in this file were checked first:
+        //   - ActNet() (RemoteNetQueue -> NetPlaceApplySystem.EmitCourse) marks RemoteNetEcho.Mark(segHash)
+        //     on every course it emits (NetPlaceApplySystem.cs EmitCourse) — that IS the inject-remote
+        //     path (it is the exact receive-side apply a real network command runs through), so its
+        //     output is deliberately invisible to the capture systems. Not usable here.
+        //   - NetToolReplaySystem.ReplayOne (NetToolReplaySystems.cs) drives the game's OWN
+        //     NetToolSystem.CreateDefinitionsJob and stamps CreationFlags.Permanent on the resulting
+        //     CreationDefinition — it never touches RemoteNetEcho and never adds CS2M_RemotePlaced. This
+        //     is the primitive InjectReplayRoad() already uses (selftest step 0) to prove the job runs;
+        //     here we enqueue to RemoteReplayQueue LOCALLY ONLY (no Command.SendToAll for the replay
+        //     command itself) so the resulting edges are indistinguishable from a real mouse-driven build.
+        //     NetDetectorSystem then captures them next frame (Applied edge, no CS2M_RemotePlaced, no
+        //     echo mark) and ships a genuine NetPlaceCommand to the client — the same code path a real
+        //     player's road would take, and the one under suspicion for the zone drift.
+        private void RunTriReproStep()
+        {
+            if (_triStep > 4) { return; }
+            if (_triTimer > 0) { _triTimer--; return; }
+            _triTimer = 180; // ~3s between traces, as requested
+
+            switch (_triStep)
+            {
+                case 0: TriRepro_Setup(); break;
+                case 1: TriRepro_Side2(); break;
+                case 2: TriRepro_Side3(); break;
+                case 3: TriRepro_Diagonal(); break;
+                case 4: TriRepro_ZoneAndFinish(); break;
+            }
+
+            _triStep++;
+        }
+
+        /// <summary>Step 0: pick the "Small Road" prefab, lay out an equilateral-ish triangle (~200 m
+        /// side) in an empty quadrant well clear of CONCURRENT's/RunHostStep's offsets (which top out
+        /// around anchor+600), and draw side 1 (A-&gt;B) in open ground (no snap — a fresh dead-end pair
+        /// of nodes at both ends, exactly like a player's first drag).</summary>
+        private void TriRepro_Setup()
+        {
+            if (!TryAnchor(out float3 anchor))
+            {
+                L("[Auto] TRIREPRO SKIP no anchor point in city");
+                _triStep = 4; // skip straight to a harmless finish
+                return;
+            }
+
+            if (!TryGetRoadPrefab(out _triRoadType, out _triRoadName))
+            {
+                L("[Auto] TRIREPRO SKIP no Road prefab found");
+                _triStep = 4;
+                return;
+            }
+
+            // Far quadrant, clear of every other scene's offsets (CONCURRENT: anchor+400..560/+400..730;
+            // RunHostStep sends top out around anchor+600). ~(anchor.x+900, anchor.z+1200) — the example
+            // "perto de (600,1600)" the task gave, shifted so it never overlaps.
+            const float side = 200f;
+            var origin = new float3(anchor.x + 900f, anchor.y, anchor.z + 1200f);
+            _triA = origin;
+            _triB = origin + new float3(side, 0f, 0f);
+            _triC = origin + new float3(side * 0.5f, 0f, side * 0.866f); // equilateral apex
+            _triMid = (_triA + _triB) * 0.5f;
+            _triNodeIdA = 0; _triNodeIdB = 0; _triNodeIdC = 0;
+
+            L($"[Auto] TRIREPRO start road='{_triRoadName}' A=({_triA.x:F0},{_triA.z:F0}) " +
+              $"B=({_triB.x:F0},{_triB.z:F0}) C=({_triC.x:F0},{_triC.z:F0})");
+
+            ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _triA, _triB, 5001,
+                0, 0, float3.zero, 0, 0, float3.zero);
+        }
+
+        /// <summary>Step 1: tag the two dead-end nodes side 1 just built (by proximity — this is the
+        /// FIRST time they get a stable id, so identity vs. position doesn't matter yet), then draw side
+        /// 2 (B-&gt;C) snapped onto the real node at B so it fuses instead of stacking a second node on
+        /// top.</summary>
+        private void TriRepro_Side2()
+        {
+            _triNodeIdA = TagNodeNear(_triA, 8f);
+            _triNodeIdB = TagNodeNear(_triB, 8f);
+            if (_triNodeIdB == 0)
+            {
+                L("[Auto] TRIREPRO WARN side1 endpoint B not found (open-ground fallback for side2)");
+            }
+
+            ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _triB, _triC, 5002,
+                _triNodeIdB != 0 ? 1 : 0, _triNodeIdB, _triB, 0, 0, float3.zero);
+        }
+
+        /// <summary>Step 2: tag the apex node C, then close the triangle with side 3 (C-&gt;A), snapped
+        /// at BOTH ends onto the real nodes so all three corners share exactly one node each (a real
+        /// closed triangle, not three coincident-but-separate dead ends).</summary>
+        private void TriRepro_Side3()
+        {
+            _triNodeIdC = TagNodeNear(_triC, 8f);
+            if (_triNodeIdC == 0)
+            {
+                L("[Auto] TRIREPRO WARN side2 endpoint C not found (open-ground fallback for side3 start)");
+            }
+
+            ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _triC, _triA, 5003,
+                _triNodeIdC != 0 ? 1 : 0, _triNodeIdC, _triC,
+                _triNodeIdA != 0 ? 1 : 0, _triNodeIdA, _triA);
+        }
+
+        /// <summary>Step 3: cut the interior with a diagonal from the MIDPOINT of side 1 (A-B) to the
+        /// apex C — a genuine mid-span snap (kind=2, edge) at one end that forces a real T-junction split
+        /// of side 1, and a node snap (kind=1) at the other end onto the existing apex. This is the
+        /// topology shape (triangle + a road ending mid-span on one of its sides) that stresses the
+        /// legacy receiver's own split/snap guess the most.</summary>
+        private void TriRepro_Diagonal()
+        {
+            ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _triMid, _triC, 5004,
+                2, 0, _triMid, // kind=2: nearest EDGE near the midpoint of side A-B
+                _triNodeIdC != 0 ? 1 : 0, _triNodeIdC, _triC);
+            L($"[Auto] TRIREPRO diagonal mid=({_triMid.x:F0},{_triMid.z:F0}) -> C=({_triC.x:F0},{_triC.z:F0})");
+        }
+
+        /// <summary>Step 4: paint residential zoning on whatever zoning blocks landed near side 1 (the
+        /// side carrying the mid-span T-junction) — skips gracefully if none exist yet (some net prefabs
+        /// have no zoneable variant, or the block hasn't been generated this soon). Then logs the done
+        /// marker the operator watches for.</summary>
+        private void TriRepro_ZoneAndFinish()
+        {
+            ZoneSync.EnsureBuilt(EntityManager, _prefabSystem);
+            if (_blockQuery.IsEmptyIgnoreFilter || !TryGetZone(out string zoneName, out ushort _))
+            {
+                L("[Auto] TRIREPRO zone SKIP (no blocks or no ZonePrefab yet — flags still diverge even in Unzoned cells)");
+            }
+            else
+            {
+                int painted = PaintZoneNear(_triMid, 60f, zoneName);
+                L($"[Auto] TRIREPRO zone painted cells={painted} near side A-B (name='{zoneName}')");
+            }
+
+            L("[Auto] TRIREPRO DONE");
+        }
+
+        /// <summary>Any live NetGeometryData prefab named "Small Road" (falls back to any non-invisible
+        /// "Road" prefab if that exact name isn't in this ruleset build).</summary>
+        private bool TryGetRoadPrefab(out string type, out string name)
+        {
+            type = null;
+            name = null;
+            string fbType = null, fbName = null;
+            EntityQuery q = GetEntityQuery(ComponentType.ReadOnly<NetGeometryData>());
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!_prefabSystem.TryGetPrefab(e, out PrefabBase pb) || pb == null) { continue; }
+                    if (pb.name.IndexOf("Invisible", StringComparison.OrdinalIgnoreCase) >= 0) { continue; }
+                    if (pb.name.IndexOf("Small Road", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        type = pb.GetType().Name;
+                        name = pb.name;
+                        return true;
+                    }
+
+                    if (fbName == null && pb.name.IndexOf("Road", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        fbType = pb.GetType().Name;
+                        fbName = pb.name;
+                    }
+                }
+            }
+            finally { ents.Dispose(); }
+
+            if (fbName == null) { return false; }
+            type = fbType;
+            name = fbName;
+            return true;
+        }
+
+        /// <summary>Enqueues a straight 2-point NetToolReplayCommand into RemoteReplayQueue LOCALLY (never
+        /// Command.SendToAll for this command itself — see the RunTriReproStep header comment for why).
+        /// NetToolReplaySystem drives the real CreateDefinitionsJob off it next frame, which is what makes
+        /// the resulting edge indistinguishable from a mouse-driven build. Optional per-endpoint snap:
+        /// kind 0=none (open ground), 1=node (by stable id), 2=edge (nearest edge to snapPos).</summary>
+        private void ReplayRoadSegmentLocal(string type, string name, float3 a, float3 d, int seed,
+            int startSnapKind, ulong startSnapNodeId, float3 startSnapPos,
+            int endSnapKind, ulong endSnapNodeId, float3 endSnapPos)
+        {
+            float3 dir = math.normalizesafe(d - a, new float3(1f, 0f, 0f));
+            quaternion rot = quaternion.LookRotationSafe(new float3(dir.x, 0f, dir.z), math.up());
+            var cmd = new NetToolReplayCommand
+            {
+                PrefabType = type, PrefabName = name,
+                Mode = 0, RandomSeed = seed, EditorMode = false, LeftHandTraffic = false,
+                RemoveUpgrade = false, ParallelOffset = 0f, ParallelCount = 0,
+                PosX = new[] { a.x, d.x }, PosY = new[] { a.y, d.y }, PosZ = new[] { a.z, d.z },
+                HitX = new[] { a.x, d.x }, HitY = new[] { a.y, d.y }, HitZ = new[] { a.z, d.z },
+                DirX = new[] { dir.x, dir.x }, DirZ = new[] { dir.z, dir.z },
+                HitDirX = new[] { dir.x, dir.x }, HitDirY = new[] { 0f, 0f }, HitDirZ = new[] { dir.z, dir.z },
+                RotX = new[] { rot.value.x, rot.value.x }, RotY = new[] { rot.value.y, rot.value.y },
+                RotZ = new[] { rot.value.z, rot.value.z }, RotW = new[] { rot.value.w, rot.value.w },
+                SnapPriX = new[] { 0f, 0f }, SnapPriY = new[] { 0f, 0f },
+                ElemIdxX = new[] { -1, -1 }, ElemIdxY = new[] { -1, -1 },
+                CurvePos = new[] { 0f, 0f }, Elev = new[] { 0f, 0f },
+                SnapPosX = new[] { startSnapPos.x, endSnapPos.x },
+                SnapPosZ = new[] { startSnapPos.z, endSnapPos.z },
+                SnapKind = new[] { startSnapKind, endSnapKind },
+                SnapNodeId = new[] { startSnapNodeId, endSnapNodeId },
+            };
+            RemoteReplayQueue.Enqueue(cmd); // HOST-LOCAL ONLY — see header comment
+            L($"[Auto] TRIREPRO road-replay name={name} A=({a.x:F0},{a.z:F0}) D=({d.x:F0},{d.z:F0}) " +
+              $"snap=({startSnapKind}:{startSnapNodeId},{endSnapKind}:{endSnapNodeId})");
+        }
+
+        /// <summary>Finds the live net Node nearest <paramref name="pos"/> within <paramref name="maxDist"/>
+        /// and Ensures it a stable CS2M_NodeSyncId (idempotent), returning that id (0 if none nearby).</summary>
+        private ulong TagNodeNear(float3 pos, float maxDist)
+        {
+            EntityQuery nodesQ = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Net.Node>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+            NativeArray<Entity> ents = nodesQ.ToEntityArray(Allocator.Temp);
+            try
+            {
+                Entity best = Entity.Null;
+                float bestSq = maxDist * maxDist;
+                foreach (Entity e in ents)
+                {
+                    float3 p = EntityManager.GetComponentData<Game.Net.Node>(e).m_Position;
+                    float dx = p.x - pos.x, dz = p.z - pos.z;
+                    float dsq = dx * dx + dz * dz;
+                    if (dsq < bestSq) { bestSq = dsq; best = e; }
+                }
+
+                return best != Entity.Null ? CS2M_NodeSyncIds.Ensure(EntityManager, best) : 0UL;
+            }
+            finally { ents.Dispose(); }
+        }
+
+        /// <summary>Paints <paramref name="zoneName"/> on every cell of every zoning block within
+        /// <paramref name="radius"/> of <paramref name="center"/>, both applying locally AND shipping to
+        /// the client (same dual dispatch as every other 2-sim host roteiro in this file, e.g. SendZone).
+        /// Returns the number of cells painted (0 if no block was in range).</summary>
+        private int PaintZoneNear(float3 center, float radius, string zoneName)
+        {
+            int painted = 0;
+            float rSq = radius * radius;
+            NativeArray<Entity> blocks = _blockQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity block in blocks)
+                {
+                    Block b = EntityManager.GetComponentData<Block>(block);
+                    float dx = b.m_Position.x - center.x, dz = b.m_Position.z - center.z;
+                    if (dx * dx + dz * dz > rSq) { continue; }
+
+                    DynamicBuffer<Cell> cells = EntityManager.GetBuffer<Cell>(block, true);
+                    if (cells.Length == 0) { continue; }
+
+                    var idx = new int[cells.Length];
+                    var names = new string[cells.Length];
+                    for (int i = 0; i < cells.Length; i++) { idx[i] = i; names[i] = zoneName; }
+
+                    var cmd = new ZonePaintCommand
+                    {
+                        BlockX = b.m_Position.x, BlockZ = b.m_Position.z,
+                        DirX = b.m_Direction.x, DirZ = b.m_Direction.y,
+                        SizeX = b.m_Size.x, SizeY = b.m_Size.y,
+                        CellIndices = idx, ZoneNames = names,
+                    };
+                    RemoteZoneQueue.Enqueue(cmd);      // host paints
+                    Command.SendToAll?.Invoke(cmd);    // client paints -> StateHash checks zone convergence
+                    painted += cells.Length;
+                }
+            }
+            finally { blocks.Dispose(); }
+
+            return painted;
         }
 
         // ------- original over-the-wire host sequence (for the 2-PC test) -------
