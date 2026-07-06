@@ -470,6 +470,10 @@ namespace CS2M.Networking
             Sync.RemoteFeeQueue.Clear();
             Sync.FeeSync.Clear();
             Sync.DistrictReshapeSync.Clear();
+            Sync.RemoteServiceDistrictQueue.Clear();
+            Sync.ServiceDistrictSync.Clear();
+            Sync.RemoteVehicleModelQueue.Clear();
+            Sync.VehicleModelSync.Clear();
             UI.ChatPanel.RefreshPlayerList();
 
             PlayerStatus = PlayerStatus.INACTIVE;

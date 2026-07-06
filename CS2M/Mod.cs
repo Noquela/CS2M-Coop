@@ -161,6 +161,11 @@ namespace CS2M
             // v41: BEFORE Modification1 so the area consumers (triangulation/labels) see Created/Updated.
             updateSystem.UpdateBefore<DistrictApplySystem>(SystemUpdatePhase.Modification1);
 
+            // v56: service-district assignment sync (Districts info-panel add/remove — a building-owned
+            // buffer rewrite, no entity creation, so Modification5 like Fee/Budget is enough).
+            updateSystem.UpdateBefore<ServiceDistrictDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<ServiceDistrictApplySystem>(SystemUpdatePhase.Modification5);
+
             // Water-source sync (WaterSourceData entities — the game's WaterSystem simulates from them).
             updateSystem.UpdateBefore<WaterDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<WaterApplySystem>(SystemUpdatePhase.Modification5);
@@ -270,6 +275,11 @@ namespace CS2M
             // rename sync). Apply CREATES entities → must run before Modification1 (creation law).
             updateSystem.UpdateBefore<RouteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<RouteApplySystem>(SystemUpdatePhase.Modification1);
+
+            // v56: vehicle-model selection sync (Select Vehicles panel — a route-owned buffer rewrite,
+            // no entity creation, so Modification5 like Fee/Budget is enough).
+            updateSystem.UpdateBefore<VehicleModelDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<VehicleModelApplySystem>(SystemUpdatePhase.Modification5);
             // v50 NOTE: do NOT add UpdateBefore<RemotePlacementApplySystem, RouteApplySystem> here —
             // the two-type overload REGISTERS THE SYSTEM A SECOND TIME (anchored on the other), so it
             // updated twice per frame and its second run destroyed the same frame's injected sub-net/

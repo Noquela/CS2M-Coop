@@ -138,7 +138,9 @@ namespace CS2M.Sync
         }
 
         /// <summary>Nearest district (same prefab) whose centroid is within ~40 m of (x,z) — the centroid
-        /// both PCs share from the last synced state. Prefab match guards against grabbing a neighbour.</summary>
+        /// both PCs share from the last synced state. Prefab match guards against grabbing a neighbour.
+        /// v56: delegates to the shared <see cref="DistrictResolver"/> (also used by
+        /// ServiceDistrictApplySystem) so the centroid-resolve logic lives in one place.</summary>
         private Entity FindDistrictByCenter(float x, float z, string prefabName)
         {
             EntityQuery q = GetEntityQuery(new EntityQueryDesc
@@ -152,45 +154,7 @@ namespace CS2M.Sync
                 None = new[] { ComponentType.ReadOnly<Game.Tools.Temp>(), ComponentType.ReadOnly<Deleted>() },
             });
 
-            Entity best = Entity.Null;
-            float bestD = 1600f; // 40 m²
-            Unity.Collections.NativeArray<Entity> ents = q.ToEntityArray(Unity.Collections.Allocator.Temp);
-            try
-            {
-                foreach (Entity e in ents)
-                {
-                    if (!string.IsNullOrEmpty(prefabName))
-                    {
-                        if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(e).m_Prefab,
-                                out PrefabBase pb) || pb == null || pb.name != prefabName)
-                        {
-                            continue;
-                        }
-                    }
-
-                    DynamicBuffer<Node> nb = EntityManager.GetBuffer<Node>(e, true);
-                    if (nb.Length == 0) { continue; }
-
-                    float cx = 0f, cz = 0f;
-                    for (int i = 0; i < nb.Length; i++) { cx += nb[i].m_Position.x; cz += nb[i].m_Position.z; }
-                    cx /= nb.Length;
-                    cz /= nb.Length;
-
-                    float dx = cx - x, dz = cz - z;
-                    float d = dx * dx + dz * dz;
-                    if (d < bestD)
-                    {
-                        bestD = d;
-                        best = e;
-                    }
-                }
-            }
-            finally
-            {
-                ents.Dispose();
-            }
-
-            return best;
+            return DistrictResolver.FindByCenter(EntityManager, q, _prefabSystem, x, z, prefabName);
         }
 
         private void SetReshapeSnapshot(Entity area)

@@ -59,6 +59,7 @@ namespace CS2M.Sync
             // ---- Areas (districts / farm fields / forestry / extraction lots / map tiles) -----------
             { "AreaEditCommand",        SyncClass.WorldContract },
             { "DistrictCommand",        SyncClass.WorldContract },
+            { "ServiceDistrictCommand", SyncClass.WorldContract },
             { "TilePurchaseCommand",    SyncClass.WorldContract },
             // ---- Objects (buildings / props / trees / service buildings) + relocate ------------------
             { "ObjectPlaceCommand",     SyncClass.WorldContract },
@@ -72,6 +73,7 @@ namespace CS2M.Sync
             { "RouteCreateCommand",     SyncClass.WorldContract },
             { "RouteColorCommand",      SyncClass.WorldContract },
             { "RouteVisibilityCommand", SyncClass.WorldContract },
+            { "VehicleModelCommand",    SyncClass.WorldContract },
             // ---- Economy / governance edits the player authors -------------------------------------
             { "PolicyCommand",          SyncClass.WorldContract },
             { "TaxSyncCommand",         SyncClass.WorldContract },

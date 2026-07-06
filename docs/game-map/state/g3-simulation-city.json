@@ -1,159 +1,1502 @@
 [
-{"type": "Game.Simulation.AirPollution", "file": "Simulation/AirPollution.cs", "class": "EMERGENT", "writtenBy": ["AirPollutionSystem (NOT VERIFIED nome exato, grid IStrideSerializable)"], "syncPath": "NONE", "note": "célula de grid de poluição do ar, recalculada por tick a partir de tráfego/indústria; pode divergir por design."},
-{"type": "Game.Simulation.AvailabilityInfoCell", "file": "Simulation/AvailabilityInfoCell.cs", "class": "EMERGENT", "writtenBy": ["sistema de disponibilidade (NOT VERIFIED)"], "syncPath": "NONE", "note": "grid de disponibilidade de emprego/serviço, recomputado por tick."},
-{"type": "Game.Simulation.CellMapData<T>", "file": "Simulation/CellMapData.cs", "class": "META", "writtenBy": ["CellMapSystem<T> (genérico)"], "syncPath": "NONE", "note": "wrapper genérico de infraestrutura (não é dado de jogo em si); requer T:ISerializable."},
-{"type": "Game.Simulation.CellMapSystem<T>", "file": "Simulation/CellMapSystem.cs", "class": "META", "writtenBy": ["subclasses concretas (ex.: WaterSystem)"], "syncPath": "NONE", "note": "classe base abstrata genérica de infraestrutura de grid, sem dado próprio."},
-{"type": "Game.Simulation.CitizenHappinessSystem", "file": "Simulation/CitizenHappinessSystem.cs", "class": "EMERGENT", "writtenBy": ["CitizenHappinessSystem (auto)"], "syncPath": "NONE", "note": "estatística agregada de felicidade dos cidadãos, recalculada por tick."},
-{"type": "Game.Simulation.ClimateSystem", "file": "Simulation/ClimateSystem.cs:26,525", "class": "DERIVED", "writtenBy": ["ClimateSystem.CalculateTemperatureBaseHeight (linha 521)"], "syncPath": "EnvSyncCommand", "note": "m_TemperatureBaseHeight é recalculado deterministicamente a partir de prefab+latitude; risco de drift float cross-machine se latitude divergir (ver PlanetarySystem)."},
-{"type": "Game.Simulation.CityProductionCapacityCalculationSystem", "file": "Simulation/CityProductionCapacityCalculationSystem.cs", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "capacidade de produção agregada, recomputada por tick."},
-{"type": "Game.Simulation.CityProductionStatisticSystem", "file": "Simulation/CityProductionStatisticSystem.cs:14", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "sistema de estatística de produção; contém structs aninhadas (abaixo)."},
-{"type": "Game.Simulation.CityProductionStatisticSystem+CompanyProcessingEvent", "file": "Simulation/CityProductionStatisticSystem.cs:124", "class": "EMERGENT", "writtenBy": ["CityProductionStatisticSystem"], "syncPath": "NONE", "note": "evento de processamento de empresa, estatística por tick."},
-{"type": "Game.Simulation.CityProductionStatisticSystem+ProductionChain", "file": "Simulation/CityProductionStatisticSystem.cs:162", "class": "EMERGENT", "writtenBy": ["CityProductionStatisticSystem"], "syncPath": "NONE", "note": "chave de cadeia de produção agregada para estatística."},
-{"type": "Game.Simulation.CityProductionStatisticSystem+ProductionChainValue", "file": "Simulation/CityProductionStatisticSystem.cs:211", "class": "EMERGENT", "writtenBy": ["CityProductionStatisticSystem"], "syncPath": "NONE", "note": "valor agregado por cadeia de produção."},
-{"type": "Game.Simulation.CityProductionStatisticSystem+CityResourceUsage", "file": "Simulation/CityProductionStatisticSystem.cs:241", "class": "EMERGENT", "writtenBy": ["CityProductionStatisticSystem"], "syncPath": "NONE", "note": "uso de recurso agregado por cidade."},
-{"type": "Game.Simulation.CitySystem", "file": "Simulation/CitySystem.cs:15", "class": "META", "writtenBy": ["CitySystem (auto), MilestoneSystem lê/escreve MilestoneLevel"], "syncPath": "NONE", "note": "bookkeeping do singleton da entidade cidade (NOT VERIFIED o conteúdo exato do Serialize)."},
-{"type": "Game.Simulation.CollectedCityServiceFeeData", "file": "Simulation/CollectedCityServiceFeeData.cs", "class": "DERIVED", "writtenBy": ["sistema de coleta de taxas (NOT VERIFIED nome)"], "syncPath": "FeeCommand", "note": "agregado derivado das taxas autoradas via ServiceFee/FeeCommand; deve convergir se FeeCommand estiver correto."},
-{"type": "Game.Simulation.CollectedServiceBuildingBudgetData", "file": "Simulation/CollectedServiceBuildingBudgetData.cs", "class": "DERIVED", "writtenBy": ["sistema de orçamento por prédio (NOT VERIFIED)"], "syncPath": "BudgetCommand", "note": "agregado derivado do % de orçamento autorado (ServiceBudgetData) por prédio de serviço."},
-{"type": "Game.Simulation.CollectedCityServiceBudgetData", "file": "Simulation/CollectedCityServiceBudgetData.cs", "class": "DERIVED", "writtenBy": ["sistema de orçamento (NOT VERIFIED)"], "syncPath": "BudgetCommand", "note": "agregado de orçamento em nível de cidade, derivado do autorado."},
-{"type": "Game.Simulation.CollectedCityServiceUpkeepData", "file": "Simulation/CollectedCityServiceUpkeepData.cs", "class": "DERIVED", "writtenBy": ["sistema de manutenção (NOT VERIFIED)"], "syncPath": "NONE", "note": "custo de manutenção agregado, derivado de prédios existentes (que já sincam via ObjectPlaceCommand)."},
-{"type": "Game.Simulation.CommercialDemandSystem", "file": "Simulation/CommercialDemandSystem.cs:28", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "DemandSyncCommand", "note": "demanda comercial recalculada por tick; host espelha valor (HostAuthoritative)."},
-{"type": "Game.Simulation.CountCityStoredResourceSystem", "file": "Simulation/CountCityStoredResourceSystem.cs:20", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "contagem agregada de recursos estocados na cidade."},
-{"type": "Game.Simulation.CountConsumptionSystem", "file": "Simulation/CountConsumptionSystem.cs:12", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "contagem agregada de consumo."},
-{"type": "Game.Simulation.CountCompanyDataSystem", "file": "Simulation/CountCompanyDataSystem.cs:25", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "contagem agregada de empresas."},
-{"type": "Game.Simulation.CountVehicleDataSystem", "file": "Simulation/CountVehicleDataSystem.cs:25", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "contagem agregada de veículos."},
-{"type": "Game.Simulation.CountVehicleDataSystem+VehicleCountData", "file": "Simulation/CountVehicleDataSystem.cs:27", "class": "EMERGENT", "writtenBy": ["CountVehicleDataSystem"], "syncPath": "NONE", "note": "acumulador IAccumulable de contagem de veículo por tipo."},
-{"type": "Game.Simulation.CountStudyPositionsSystem", "file": "Simulation/CountStudyPositionsSystem.cs:20", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "contagem agregada de vagas de estudo."},
-{"type": "Game.Simulation.CountResidentialPropertySystem", "file": "Simulation/CountResidentialPropertySystem.cs:22", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "contagem agregada de propriedades residenciais."},
-{"type": "Game.Simulation.CountResidentialPropertySystem+ResidentialPropertyData", "file": "Simulation/CountResidentialPropertySystem.cs:24", "class": "EMERGENT", "writtenBy": ["CountResidentialPropertySystem"], "syncPath": "NONE", "note": "acumulador de propriedade residencial."},
-{"type": "Game.Simulation.CountHouseholdDataSystem", "file": "Simulation/CountHouseholdDataSystem.cs:25", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "contagem agregada de domicílios."},
-{"type": "Game.Simulation.CountHouseholdDataSystem+HouseholdData", "file": "Simulation/CountHouseholdDataSystem.cs:37", "class": "EMERGENT", "writtenBy": ["CountHouseholdDataSystem"], "syncPath": "NONE", "note": "acumulador de domicílio."},
-{"type": "Game.Simulation.ElectricityBuildingConnection", "file": "Simulation/ElectricityBuildingConnection.cs", "class": "DERIVED", "writtenBy": ["ElectricityFlowSystem (NOT VERIFIED linha)"], "syncPath": "NONE", "note": "topologia de conexão elétrica recomputada do grafo da rede; prédio em si sincroniza via ObjectPlaceCommand/NetPlaceCommand."},
-{"type": "Game.Simulation.CountWorkplacesSystem", "file": "Simulation/CountWorkplacesSystem.cs:21", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "contagem agregada de vagas de emprego."},
-{"type": "Game.Simulation.ElectricityFlowEdge", "file": "Simulation/ElectricityFlowEdge.cs", "class": "EMERGENT", "writtenBy": ["ElectricityFlowSystem"], "syncPath": "NONE", "note": "fluxo de energia simulado por tick na aresta da rede elétrica."},
-{"type": "Game.Simulation.Dispatched", "file": "Simulation/Dispatched.cs", "class": "EMERGENT", "writtenBy": ["sistemas de despacho de serviço (NOT VERIFIED)"], "syncPath": "NONE", "note": "tag transiente de despacho de veículo de serviço."},
-{"type": "Game.Simulation.ElectricityFlowSystem", "file": "Simulation/ElectricityFlowSystem.cs:24", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "sistema que mantém o grid/estado de fluxo elétrico simulado."},
-{"type": "Game.Simulation.ElectricityNodeConnection", "file": "Simulation/ElectricityNodeConnection.cs", "class": "DERIVED", "writtenBy": ["ElectricityFlowSystem (NOT VERIFIED)"], "syncPath": "NONE", "note": "topologia de nó elétrico, recomputada do grafo (rede em si sincroniza via NetPlaceCommand)."},
-{"type": "Game.Simulation.ElectricityStatisticsSystem", "file": "Simulation/ElectricityStatisticsSystem.cs:18", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "estatística agregada de eletricidade."},
-{"type": "Game.Simulation.ElectricityTradeSystem", "file": "Simulation/ElectricityTradeSystem.cs:19", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "comércio de eletricidade entre cidades, valor emergente por tick."},
-{"type": "Game.Simulation.ElectricityValveConnection", "file": "Simulation/ElectricityValveConnection.cs", "class": "DERIVED", "writtenBy": ["ElectricityFlowSystem (NOT VERIFIED)"], "syncPath": "NONE", "note": "topologia de válvula elétrica derivada do grafo da rede."},
-{"type": "Game.Simulation.EvacuationRequest", "file": "Simulation/EvacuationRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de desastre/evacuação (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de evacuação, gerado pela simulação de desastre."},
-{"type": "Game.Simulation.FireHazardSystem", "file": "Simulation/FireHazardSystem.cs:24", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "FireSyncCommand", "note": "risco de incêndio por grid, recalculado por tick; host espelha via FireSyncCommand (HostAuthoritative)."},
-{"type": "Game.Simulation.FireRescueRequest", "file": "Simulation/FireRescueRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de despacho de bombeiros (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de resgate de incêndio."},
-{"type": "Game.Simulation.FloodCounterData", "file": "Simulation/FloodCounterData.cs", "class": "EMERGENT", "writtenBy": ["sistema de enchente (NOT VERIFIED)"], "syncPath": "NONE", "note": "contador de estado de enchente por entidade."},
-{"type": "Game.Simulation.GarbageTransferRequest", "file": "Simulation/GarbageTransferRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de transferência de lixo (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de transporte de lixo entre prédios."},
-{"type": "Game.Simulation.GoodsDeliveryRequest", "file": "Simulation/GoodsDeliveryRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de logística (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de entrega de mercadorias."},
-{"type": "Game.Simulation.GarbageCollectionRequest", "file": "Simulation/GarbageCollectionRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de coleta de lixo (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de coleta de lixo."},
-{"type": "Game.Simulation.GroundPollution", "file": "Simulation/GroundPollution.cs", "class": "EMERGENT", "writtenBy": ["sistema de poluição do solo (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de grid de poluição do solo, recomputada por tick."},
-{"type": "Game.Simulation.GarbageAccumulationSystem", "file": "Simulation/GarbageAccumulationSystem.cs:34", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "acúmulo de lixo por prédio, simulado por tick."},
-{"type": "Game.Simulation.GroundWater", "file": "Simulation/GroundWater.cs", "class": "EMERGENT", "writtenBy": ["WaterSystem (NOT VERIFIED linha exata)"], "syncPath": "NONE", "note": "célula de grid de água subterrânea, simulada; base do terreno é AUTHORED (TerrainCommand) mas o nível de água é recalculado por tick."},
-{"type": "Game.Simulation.HealthcareRequest", "file": "Simulation/HealthcareRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de saúde (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de atendimento de saúde."},
-{"type": "Game.Simulation.IndustrialDemandSystem", "file": "Simulation/IndustrialDemandSystem.cs:29", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "DemandSyncCommand", "note": "demanda industrial recalculada por tick; host espelha (HostAuthoritative)."},
-{"type": "Game.Simulation.LandValueCell", "file": "Simulation/LandValueCell.cs:5", "class": "EMERGENT", "writtenBy": ["sistema de valor de terra (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de grid de valor de terra, recomputada por tick a partir de vários fatores; pode divergir por design."},
-{"type": "Game.Simulation.MailTransferRequest", "file": "Simulation/MailTransferRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de correio (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de transporte de correspondência."},
-{"type": "Game.Simulation.MaintenanceConsumer", "file": "Simulation/MaintenanceConsumer.cs", "class": "EMERGENT", "writtenBy": ["sistemas de manutenção (NOT VERIFIED)"], "syncPath": "NONE", "note": "marcador de consumidor de manutenção, ligado ao ciclo de simulação."},
-{"type": "Game.Simulation.MaintenanceRequest", "file": "Simulation/MaintenanceRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de manutenção (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de manutenção de infraestrutura."},
-{"type": "Game.Simulation.NaturalResourceCell", "file": "Simulation/NaturalResourceCell.cs:6", "class": "EMERGENT", "writtenBy": ["sistema de recurso natural (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de recurso natural; base é gerada do mapa (STATIC) mas a quantidade depleta de forma EMERGENT via extração — mistura de origem, risco de drift se extração divergir."},
-{"type": "Game.Simulation.NaturalResourceAmount", "file": "Simulation/NaturalResourceAmount.cs:5", "class": "EMERGENT", "writtenBy": ["sistema de recurso natural (NOT VERIFIED)"], "syncPath": "NONE", "note": "quantidade de recurso natural remanescente, depletada por tick de extração; mesma ressalva que NaturalResourceCell."},
-{"type": "Game.Simulation.NoisePollution", "file": "Simulation/NoisePollution.cs", "class": "EMERGENT", "writtenBy": ["sistema de poluição sonora (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de grid de poluição sonora, recomputada por tick."},
-{"type": "Game.Simulation.PlanetarySystem", "file": "Simulation/PlanetarySystem.cs:23,522", "class": "AUTHORED", "writtenBy": ["PlanetarySystem.SetDefaults (m_Latitude/m_Longitude, linha 516)"], "syncPath": "NONE", "note": "GAP: latitude/longitude definidas na configuração da cidade e usadas por ClimateSystem para recalcular temperatura — sem comando de sync explícito; se divergir entre host/cliente, o clima diverge (DERIVED downstream)."},
-{"type": "Game.Simulation.PostVanRequest", "file": "Simulation/PostVanRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de correio (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de van de correio."},
-{"type": "Game.Simulation.PopulationCell", "file": "Simulation/PopulationCell.cs:5", "class": "EMERGENT", "writtenBy": ["sistema de população em grid (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de grid de densidade populacional, recomputada por tick."},
-{"type": "Game.Simulation.PoliceEmergencyRequest", "file": "Simulation/PoliceEmergencyRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de polícia (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de emergência policial."},
-{"type": "Game.Simulation.PolicePatrolRequest", "file": "Simulation/PolicePatrolRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de polícia (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de patrulha policial."},
-{"type": "Game.Simulation.ProductionChainDataSystem", "file": "Simulation/ProductionChainDataSystem.cs:8", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "dados agregados de cadeia de produção."},
-{"type": "Game.Simulation.ProductionChainDataSystem+ProductionChainData", "file": "Simulation/ProductionChainDataSystem.cs:11", "class": "EMERGENT", "writtenBy": ["ProductionChainDataSystem"], "syncPath": "NONE", "note": "acumulador IAccumulable de cadeia de produção."},
-{"type": "Game.Simulation.PrisonerTransportRequest", "file": "Simulation/PrisonerTransportRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas prisionais (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de transporte de prisioneiro."},
-{"type": "Game.Simulation.ProcessingCompanySystem", "file": "Simulation/ProcessingCompanySystem.cs:30", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "estado agregado de empresas processadoras."},
-{"type": "Game.Simulation.RandomTrafficRequest", "file": "Simulation/RandomTrafficRequest.cs", "class": "EMERGENT", "writtenBy": ["sistema de tráfego aleatório (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de tráfego de preenchimento (cosmético/ambiente)."},
-{"type": "Game.Simulation.ResidentialDemandSystem", "file": "Simulation/ResidentialDemandSystem.cs:26", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "DemandSyncCommand", "note": "demanda residencial recalculada por tick; host espelha (HostAuthoritative)."},
-{"type": "Game.Simulation.ResourceAvailabilitySystem", "file": "Simulation/ResourceAvailabilitySystem.cs:29", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "disponibilidade agregada de recurso, recomputada por tick."},
-{"type": "Game.Simulation.ServiceBudgetData", "file": "Simulation/ServiceBudgetData.cs", "class": "AUTHORED", "writtenBy": ["jogador via UI de orçamento (NOT VERIFIED sistema exato)"], "syncPath": "BudgetCommand", "note": "% de orçamento por serviço definido pelo jogador."},
-{"type": "Game.Simulation.ServiceDispatch", "file": "Simulation/ServiceDispatch.cs", "class": "EMERGENT", "writtenBy": ["sistemas de despacho (NOT VERIFIED)"], "syncPath": "NONE", "note": "registro transiente de despacho de veículo de serviço."},
-{"type": "Game.Simulation.ServiceRequest", "file": "Simulation/ServiceRequest.cs", "class": "EMERGENT", "writtenBy": ["vários sistemas de serviço (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido genérico de serviço, base para vários Request específicos."},
-{"type": "Game.Simulation.SimulationSystem", "file": "Simulation/SimulationSystem.cs:18,135", "class": "META", "writtenBy": ["SimulationSystem.Serialize (linha 135, frameIndex)"], "syncPath": "NONE", "note": "contador de frame de simulação (bookkeeping de save); resync geral cai em WorldTransferCommand/ResyncCommand (Infra), não tem comando dedicado."},
-{"type": "Game.Simulation.SnowSystem", "file": "Simulation/SnowSystem.cs:20", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "EnvSyncCommand", "note": "estado de neve simulado por tick, espelhado via EnvSyncCommand (HostAuthoritative)."},
-{"type": "Game.Simulation.SoilWater", "file": "Simulation/SoilWater.cs:5", "class": "EMERGENT", "writtenBy": ["WaterSystem (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de grid de umidade do solo, simulada por tick."},
-{"type": "Game.Simulation.TaxiRequest", "file": "Simulation/TaxiRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de transporte (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de táxi."},
-{"type": "Game.Simulation.TelecomCoverage", "file": "Simulation/TelecomCoverage.cs", "class": "EMERGENT", "writtenBy": ["sistema de telecomunicação (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de grid de cobertura de telecom, recomputada por tick."},
-{"type": "Game.Simulation.TerrainAttractiveness", "file": "Simulation/TerrainAttractiveness.cs:5", "class": "EMERGENT", "writtenBy": ["sistema de atratividade de terreno (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula derivada do terreno/água, recomputada por tick."},
-{"type": "Game.Simulation.TerrainSystem", "file": "Simulation/TerrainSystem.cs:40,3038", "class": "AUTHORED", "writtenBy": ["TerrainSystem.Serialize (SerializeHeightmap, linha 3038)"], "syncPath": "TerrainCommand", "note": "heightmap esculpido pelo jogador via TerrainToolSystem; coberto pelo TerrainCommand (WorldContract)."},
-{"type": "Game.Simulation.TrafficAmbienceCell", "file": "Simulation/TrafficAmbienceCell.cs:5", "class": "EMERGENT", "writtenBy": ["sistema de ambiente de tráfego (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de grid de ambiente sonoro/visual de tráfego, cosmética."},
-{"type": "Game.Simulation.TransportLineSystem", "file": "Simulation/TransportLineSystem.cs:29", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "sistema agregado de linhas de transporte (estatística); a linha/rota em si já sincroniza via RouteCreateCommand/RouteColorCommand/RouteVisibilityCommand."},
-{"type": "Game.Simulation.TransportUsageData", "file": "Simulation/TransportUsageData.cs:5", "class": "EMERGENT", "writtenBy": ["TransportUsageTrackSystem"], "syncPath": "NONE", "note": "estatística de uso/ridership de transporte, por tick."},
-{"type": "Game.Simulation.TransportUsageTrackSystem", "file": "Simulation/TransportUsageTrackSystem.cs:15", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "rastreamento agregado de uso de transporte."},
-{"type": "Game.Simulation.TransportVehicleRequest", "file": "Simulation/TransportVehicleRequest.cs", "class": "EMERGENT", "writtenBy": ["sistemas de transporte (NOT VERIFIED)"], "syncPath": "NONE", "note": "pedido transiente de veículo de transporte."},
-{"type": "Game.Simulation.UpdateFrame", "file": "Simulation/UpdateFrame.cs", "class": "META", "writtenBy": ["motor ECS (ISharedComponentData de agrupamento, NOT VERIFIED sistema específico)"], "syncPath": "NONE", "note": "shared component de bookkeeping usado para distribuir atualização de entidades entre frames (round-robin do motor), não é dado de jogador."},
-{"type": "Game.Simulation.WaterPipeBuildingConnection", "file": "Simulation/WaterPipeBuildingConnection.cs", "class": "DERIVED", "writtenBy": ["WaterPipeFlowSystem (NOT VERIFIED linha)"], "syncPath": "NONE", "note": "topologia de conexão de prédio à rede de água, derivada do grafo (rede sincroniza via NetPlaceCommand)."},
-{"type": "Game.Simulation.WaterPipeEdge", "file": "Simulation/WaterPipeEdge.cs:7", "class": "EMERGENT", "writtenBy": ["WaterPipeFlowSystem (NOT VERIFIED)"], "syncPath": "NONE", "note": "fluxo de água simulado por tick na aresta da tubulação."},
-{"type": "Game.Simulation.WaterPipeFlowSystem", "file": "Simulation/WaterPipeFlowSystem.cs:23", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "sistema que mantém o estado de fluxo de água simulado."},
-{"type": "Game.Simulation.WaterPipeNode", "file": "Simulation/WaterPipeNode.cs", "class": "DERIVED", "writtenBy": ["WaterPipeFlowSystem (NOT VERIFIED)"], "syncPath": "NONE", "note": "topologia de nó de tubulação, derivada do grafo da rede."},
-{"type": "Game.Simulation.WaterPipeNodeConnection", "file": "Simulation/WaterPipeNodeConnection.cs", "class": "DERIVED", "writtenBy": ["WaterPipeFlowSystem (NOT VERIFIED)"], "syncPath": "NONE", "note": "conexão de nó de tubulação, derivada do grafo."},
-{"type": "Game.Simulation.WaterPipeValveConnection", "file": "Simulation/WaterPipeValveConnection.cs", "class": "DERIVED", "writtenBy": ["WaterPipeFlowSystem (NOT VERIFIED)"], "syncPath": "NONE", "note": "conexão de válvula de tubulação, derivada do grafo."},
-{"type": "Game.Simulation.WaterStatisticsSystem", "file": "Simulation/WaterStatisticsSystem.cs:18", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "estatística agregada de água."},
-{"type": "Game.Simulation.WaterSourceData", "file": "Simulation/WaterSourceData.cs", "class": "AUTHORED", "writtenBy": ["WaterToolSystem via WaterCommand (NOT VERIFIED campo exato)"], "syncPath": "WaterCommand", "note": "força/parâmetro de fonte de água configurado pelo jogador ao colocar bomba/estação; coberto pelo WaterCommand."},
-{"type": "Game.Simulation.WaterTradeSystem", "file": "Simulation/WaterTradeSystem.cs:20", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "comércio de água entre cidades, valor emergente por tick."},
-{"type": "Game.Simulation.Wind", "file": "Simulation/Wind.cs:7", "class": "EMERGENT", "writtenBy": ["WindSimulationSystem (NOT VERIFIED)"], "syncPath": "NONE", "note": "campo de vento simulado por tick."},
-{"type": "Game.Simulation.WaterSystem", "file": "Simulation/WaterSystem.cs:34", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "sistema que mantém grids de água (GroundWater/SoilWater); classe base CellMapSystem<GroundWater>-like."},
-{"type": "Game.Simulation.WaterSystem+WaterMaterialParams", "file": "Simulation/WaterSystem.cs:37", "class": "EMERGENT", "writtenBy": ["WaterSystem"], "syncPath": "NONE", "note": "parâmetros de material de renderização de água, derivados do estado simulado (cosmético)."},
-{"type": "Game.Simulation.WindSimulationSystem", "file": "Simulation/WindSimulationSystem.cs:13", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "sistema que mantém o grid de vento simulado."},
-{"type": "Game.Simulation.WindSimulationSystem+WindCell", "file": "Simulation/WindSimulationSystem.cs:15", "class": "EMERGENT", "writtenBy": ["WindSimulationSystem"], "syncPath": "NONE", "note": "célula de vento do grid, simulada por tick."},
-{"type": "Game.Simulation.ZoneAmbienceCell", "file": "Simulation/ZoneAmbienceCell.cs:5", "class": "EMERGENT", "writtenBy": ["sistema de ambiente de zona (NOT VERIFIED)"], "syncPath": "NONE", "note": "célula de grid de ambiente de zona, cosmética/recomputada."},
-{"type": "Game.Simulation.ZoneAmbiences", "file": "Simulation/ZoneAmbiences.cs:5", "class": "EMERGENT", "writtenBy": ["sistema de ambiente de zona (NOT VERIFIED)"], "syncPath": "NONE", "note": "dados agregados de ambiente de zona, cosmética/recomputada."},
-
-{"type": "Game.City.DevTreePoints", "file": "City/DevTreePoints.cs", "class": "AUTHORED", "writtenBy": ["jogador via árvore de desenvolvimento (NOT VERIFIED sistema exato)"], "syncPath": "DevTreeCommand", "note": "pontos de desenvolvimento gastos pelo jogador na árvore de progressão."},
-{"type": "Game.City.MilestoneLevel", "file": "City/MilestoneLevel.cs", "class": "DERIVED", "writtenBy": ["MilestoneSystem"], "syncPath": "ProgressionSyncCommand", "note": "nível de marco calculado deterministicamente a partir de XP/população; deve convergir se XP sincar."},
-{"type": "Game.City.ServiceFee", "file": "City/ServiceFee.cs", "class": "AUTHORED", "writtenBy": ["jogador via UI de taxas (NOT VERIFIED)"], "syncPath": "FeeCommand", "note": "taxa de serviço configurada pelo jogador."},
-{"type": "Game.City.CityModifier", "file": "City/CityModifier.cs", "class": "DERIVED", "writtenBy": ["CityModifierUpdateSystem (Simulation/CityModifierUpdateSystem.cs)"], "syncPath": "NONE", "note": "modificador agregado computado de políticas/milestones ativos; deve convergir se PolicyCommand+DevTreeCommand sincarem, mas ordem de recálculo não verificada (risco de drift)."},
-{"type": "Game.City.PlayerMoney", "file": "City/PlayerMoney.cs", "class": "EMERGENT", "writtenBy": ["sistemas de economia da cidade (NOT VERIFIED)"], "syncPath": "MoneySyncCommand", "note": "tesouro da cidade, evolui por tick com receitas/despesas; host espelha (HostAuthoritative)."},
-{"type": "Game.City.CityConfigurationSystem", "file": "City/CityConfigurationSystem.cs:20,267", "class": "AUTHORED", "writtenBy": ["CityConfigurationSystem.Serialize (linha 267: cityName, defaultTheme, leftHandTraffic, naturalDisasters)"], "syncPath": "RenameCommand (parcial)", "note": "GAP: RenameCommand cobre só cityName; defaultTheme/leftHandTraffic/naturalDisasters (linhas 269-273) não têm comando de sync — se um jogador mudar tema ou lado do tráfego após o join, diverge."},
-{"type": "Game.City.ServiceImportBudget", "file": "City/ServiceImportBudget.cs", "class": "AUTHORED", "writtenBy": ["sistema de orçamento de importação (NOT VERIFIED, só referenciado no próprio arquivo)"], "syncPath": "NONE", "note": "GAP: orçamento de importação de recurso definido pelo jogador; BudgetCommand só cobre ServiceBudgetData (por prédio), não este buffer de importação por recurso."},
-{"type": "Game.City.DangerLevel", "file": "City/DangerLevel.cs", "class": "EMERGENT", "writtenBy": ["sistemas de perigo da cidade (NOT VERIFIED)"], "syncPath": "NONE", "note": "indicador de perigo agregado da cidade, computado por tick."},
-{"type": "Game.City.Population", "file": "City/Population.cs", "class": "EMERGENT", "writtenBy": ["sistemas de população (NOT VERIFIED)"], "syncPath": "NONE", "note": "contagem de população da cidade, resultado emergente da simulação de cidadãos."},
-{"type": "Game.City.CityStatistic", "file": "City/CityStatistic.cs", "class": "EMERGENT", "writtenBy": ["sistemas de estatística (NOT VERIFIED)"], "syncPath": "NONE", "note": "buffer de histórico de estatísticas da cidade, por tick."},
-{"type": "Game.City.City", "file": "City/City.cs", "class": "AUTHORED", "writtenBy": ["CityUtils.cs (leitura), escrita NOT VERIFIED — provável tela de opções/criação de cidade"], "syncPath": "NONE", "note": "GAP potencial: m_OptionMask (bitmask de opções de cidade, ex. desastres/dinheiro ilimitado conforme CityOptionData) sem comando de sync identificado; NOT VERIFIED se é setado só na criação (imutável) ou editável em runtime."},
-{"type": "Game.City.SpecializationBonus", "file": "City/SpecializationBonus.cs", "class": "DERIVED", "writtenBy": ["sistema de especialização (NOT VERIFIED)"], "syncPath": "NONE", "note": "bônus de especialização de área, derivado de políticas/distritos ativos (que já sincam via PolicyCommand/DistrictCommand)."},
-{"type": "Game.City.StatisticsEvent", "file": "City/StatisticsEvent.cs", "class": "EMERGENT", "writtenBy": ["sistemas de estatística (NOT VERIFIED)"], "syncPath": "NONE", "note": "evento pontual de estatística, gerado pela simulação."},
-{"type": "Game.City.StatisticParameter", "file": "City/StatisticParameter.cs", "class": "DERIVED", "writtenBy": ["Simulation/StatisticTriggerSystem.cs"], "syncPath": "NONE", "note": "parâmetro int computado pelo motor de estatísticas a partir de fórmula de prefab (StatisticTriggerData); determinístico se as entradas sincarem."},
-{"type": "Game.City.Tourism", "file": "City/Tourism.cs:7", "class": "EMERGENT", "writtenBy": ["sistemas de turismo (NOT VERIFIED)"], "syncPath": "NONE", "note": "métrica de turismo, computada por tick."},
-{"type": "Game.City.TaxRates", "file": "City/TaxRates.cs", "class": "AUTHORED", "writtenBy": ["jogador via UI de impostos (NOT VERIFIED)"], "syncPath": "TaxSyncCommand", "note": "taxa de imposto por área definida pelo jogador."},
-{"type": "Game.City.XP", "file": "City/XP.cs", "class": "DERIVED", "writtenBy": ["sistemas de progressão (NOT VERIFIED)"], "syncPath": "ProgressionSyncCommand", "note": "experiência da cidade, acumulada deterministicamente a partir de ações do jogador; base para MilestoneLevel."},
-
-{"type": "Game.Economy.Resources", "file": "Economy/Resources.cs", "class": "EMERGENT", "writtenBy": ["sistemas de economia de prédio (NOT VERIFIED)"], "syncPath": "NONE", "note": "quantidade de recurso armazenado em um prédio, muda por tick via simulação de produção/consumo."},
-{"type": "Game.Economy.ResourceInfo", "file": "Economy/ResourceInfo.cs", "class": "STATIC", "writtenBy": ["dados de prefab de recurso (NOT VERIFIED sistema de inicialização)"], "syncPath": "NONE", "note": "definição/categoria de recurso, idêntica por instalação do jogo."},
-
-{"type": "Game.Policies.Policy", "file": "Policies/Policy.cs", "class": "AUTHORED", "writtenBy": ["jogador via UI de políticas (NOT VERIFIED sistema exato)"], "syncPath": "PolicyCommand", "note": "política ativada/configurada pelo jogador."},
-
-{"type": "Game.Notifications.Animation", "file": "Notifications/Animation.cs", "class": "EMERGENT", "writtenBy": ["sistemas de notificação/ícone (NOT VERIFIED)"], "syncPath": "NONE", "note": "estado de animação de ícone flutuante, cosmético e derivado do estado do prédio/cidadão."},
-{"type": "Game.Notifications.Icon", "file": "Notifications/Icon.cs:8", "class": "EMERGENT", "writtenBy": ["sistemas de notificação (NOT VERIFIED)"], "syncPath": "NONE", "note": "ícone exibido sobre entidade, computado do estado atual (cosmético)."},
-
-{"type": "Game.Achievements.EventAchievementTrackingData", "file": "Achievements/EventAchievementTrackingData.cs:7", "class": "EMERGENT", "writtenBy": ["AchievementTriggerSystem"], "syncPath": "NONE", "note": "progresso de conquista Steam por jogador; não precisa sincar entre máquinas (conquista é local/per-account)."},
-{"type": "Game.Achievements.AchievementTriggerSystem", "file": "Achievements/AchievementTriggerSystem.cs:36", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "bookkeeping de rastreamento de conquistas, local por jogador."},
-
-{"type": "Game.Triggers.LifePathEvent", "file": "Triggers/LifePathEvent.cs", "class": "EMERGENT", "writtenBy": ["sistema de eventos de vida do cidadão (NOT VERIFIED)"], "syncPath": "NONE", "note": "evento de vida do cidadão (ex.: casamento), gerado pela simulação de cidadãos (per-tick, pode divergir por design)."},
-{"type": "Game.Triggers.Chirp", "file": "Triggers/Chirp.cs", "class": "EMERGENT", "writtenBy": ["sistema de rede social (Chirper) (NOT VERIFIED)"], "syncPath": "NONE", "note": "post de rede social gerado pela simulação, cosmético/narrativo."},
-{"type": "Game.Triggers.ChirpEntity", "file": "Triggers/ChirpEntity.cs", "class": "EMERGENT", "writtenBy": ["sistema Chirper (NOT VERIFIED)"], "syncPath": "NONE", "note": "buffer de entidades relacionadas a um chirp."},
-{"type": "Game.Triggers.ChirpLink", "file": "Triggers/ChirpLink.cs", "class": "EMERGENT", "writtenBy": ["sistema Chirper (NOT VERIFIED)"], "syncPath": "NONE", "note": "buffer de link relacionado a um chirp."},
-{"type": "Game.Triggers.TriggerSystem", "file": "Triggers/TriggerSystem.cs:32", "class": "EMERGENT", "writtenBy": ["auto"], "syncPath": "NONE", "note": "sistema central de disparo de gatilhos de simulação/notificação."},
-{"type": "Game.Triggers.RadioEvent", "file": "Triggers/RadioEvent.cs", "class": "EMERGENT", "writtenBy": ["sistema de rádio/notícias (NOT VERIFIED)"], "syncPath": "NONE", "note": "evento de notícia de rádio gerado pela simulação, cosmético/narrativo."},
-{"type": "Game.Triggers.LifePathEntry", "file": "Triggers/LifePathEntry.cs", "class": "EMERGENT", "writtenBy": ["sistema de eventos de vida (NOT VERIFIED)"], "syncPath": "NONE", "note": "buffer de entrada de trajetória de vida do cidadão."},
-
-{"type": "Game.Events.AttendingEvent", "file": "Events/AttendingEvent.cs", "class": "EMERGENT", "writtenBy": ["sistema de eventos da cidade (NOT VERIFIED)"], "syncPath": "NONE", "note": "cidadão participando de um evento, gerado pela simulação; não achamos ferramenta de jogador para criar evento (grep por Festival/CreateEvent só achou EventJournalSystem/EventJournalInitializeSystem, ambos de journal, não de criação por jogador)."},
-{"type": "Game.Events.Duration", "file": "Events/Duration.cs", "class": "EMERGENT", "writtenBy": ["sistemas de evento (NOT VERIFIED)"], "syncPath": "NONE", "note": "contador de duração de evento/desastre gerado pela simulação."},
-{"type": "Game.Events.AccidentSite", "file": "Events/AccidentSite.cs", "class": "EMERGENT", "writtenBy": ["sistema de tráfego/acidente (NOT VERIFIED)"], "syncPath": "NONE", "note": "local de acidente de trânsito, gerado pela simulação de tráfego."},
-{"type": "Game.Events.DangerLevel", "file": "Events/DangerLevel.cs", "class": "EMERGENT", "writtenBy": ["sistemas de perigo de evento (NOT VERIFIED)"], "syncPath": "NONE", "note": "nível de perigo associado a um evento/entidade, computado por tick."},
-{"type": "Game.Events.EventJournalCityEffect", "file": "Events/EventJournalCityEffect.cs", "class": "EMERGENT", "writtenBy": ["Events/EventJournalSystem.cs (NOT VERIFIED linha)"], "syncPath": "NONE", "note": "efeito de cidade registrado no diário de eventos, derivado da simulação."},
-{"type": "Game.Events.EventJournalData", "file": "Events/EventJournalData.cs", "class": "EMERGENT", "writtenBy": ["Events/EventJournalSystem.cs (NOT VERIFIED)"], "syncPath": "NONE", "note": "dado de entrada de diário de eventos."},
-{"type": "Game.Events.EventJournalPending", "file": "Events/EventJournalPending.cs", "class": "EMERGENT", "writtenBy": ["Events/EventJournalInitializeSystem.cs (NOT VERIFIED)"], "syncPath": "NONE", "note": "marcador de evento de diário pendente de processamento."},
-{"type": "Game.Events.EventJournalEntry", "file": "Events/EventJournalEntry.cs", "class": "EMERGENT", "writtenBy": ["Events/EventJournalSystem.cs (NOT VERIFIED)"], "syncPath": "NONE", "note": "entrada de diário de evento, gerada pela simulação."},
-{"type": "Game.Events.Flooded", "file": "Events/Flooded.cs", "class": "EMERGENT", "writtenBy": ["sistema de enchente (NOT VERIFIED)"], "syncPath": "NONE", "note": "marcador de entidade inundada, estado de desastre simulado."},
-{"type": "Game.Events.FacingWeather", "file": "Events/FacingWeather.cs", "class": "EMERGENT", "writtenBy": ["sistema de clima (NOT VERIFIED)"], "syncPath": "NONE", "note": "marcador de entidade exposta ao clima atual, derivado do estado de clima."},
-{"type": "Game.Events.WeatherPhenomenon", "file": "Events/WeatherPhenomenon.cs:7", "class": "EMERGENT", "writtenBy": ["sistema de clima (NOT VERIFIED)"], "syncPath": "EnvSyncCommand", "note": "fenômeno climático ativo (chuva/tempestade); coberto por EnvSyncCommand (HostAuthoritative) se este for o mecanismo que espelha clima — NOT VERIFIED o payload exato do EnvSyncCommand."},
-{"type": "Game.Events.WaterLevelChange", "file": "Events/WaterLevelChange.cs:7", "class": "EMERGENT", "writtenBy": ["sistema de enchente (NOT VERIFIED)"], "syncPath": "NONE", "note": "variação de nível de água de desastre, simulada por tick."},
-{"type": "Game.Events.OnFire", "file": "Events/OnFire.cs", "class": "EMERGENT", "writtenBy": ["FireHazardSystem (Simulation) (NOT VERIFIED linha exata)"], "syncPath": "FireSyncCommand", "note": "marcador de entidade em chamas; espelhado via FireSyncCommand (HostAuthoritative)."},
-{"type": "Game.Events.SpectatorSite", "file": "Events/SpectatorSite.cs", "class": "EMERGENT", "writtenBy": ["sistema de evento/acidente (NOT VERIFIED)"], "syncPath": "NONE", "note": "local onde cidadãos se reúnem para observar evento/acidente, gerado pela simulação."},
-{"type": "Game.Events.VehicleLaunch", "file": "Events/VehicleLaunch.cs", "class": "EMERGENT", "writtenBy": ["sistema de desastre (tornado/etc.) (NOT VERIFIED)"], "syncPath": "NONE", "note": "veículo arremessado por desastre, efeito físico simulado."},
-{"type": "Game.Events.InvolvedInAccident", "file": "Events/InvolvedInAccident.cs", "class": "EMERGENT", "writtenBy": ["sistema de acidente de tráfego (NOT VERIFIED)"], "syncPath": "NONE", "note": "marcador de entidade envolvida em acidente."},
-{"type": "Game.Events.JournalEvent", "file": "Events/JournalEvent.cs:6", "class": "EMERGENT", "writtenBy": ["Events/EventJournalSystem.cs (NOT VERIFIED)"], "syncPath": "NONE", "note": "referência (m_JournalEntity) da entidade a um evento de diário; confirmado por leitura direta do arquivo — só contém Serialize/Deserialize de uma Entity, gerado pela simulação de eventos."},
-{"type": "Game.Events.TargetElement", "file": "Events/TargetElement.cs:8", "class": "EMERGENT", "writtenBy": ["sistemas de evento (alvo do evento) (NOT VERIFIED)"], "syncPath": "NONE", "note": "buffer de elemento-alvo de um evento (ex.: prédios afetados por desastre), gerado pela simulação."},
-{"type": "Game.Events.InDanger", "file": "Events/InDanger.cs", "class": "EMERGENT", "writtenBy": ["sistemas de perigo/desastre (NOT VERIFIED)"], "syncPath": "NONE", "note": "marcador de entidade em perigo, derivado do estado de desastre simulado."}
+ {
+  "type": "Game.Simulation.AirPollution",
+  "file": "Simulation/AirPollution.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "AirPollutionSystem (NOT VERIFIED nome exato, grid IStrideSerializable)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de poluição do ar, recalculada por tick a partir de tráfego/indústria; pode divergir por design."
+ },
+ {
+  "type": "Game.Simulation.AvailabilityInfoCell",
+  "file": "Simulation/AvailabilityInfoCell.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de disponibilidade (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "grid de disponibilidade de emprego/serviço, recomputado por tick."
+ },
+ {
+  "type": "Game.Simulation.CellMapData<T>",
+  "file": "Simulation/CellMapData.cs",
+  "class": "META",
+  "writtenBy": [
+   "CellMapSystem<T> (genérico)"
+  ],
+  "syncPath": "NONE",
+  "note": "wrapper genérico de infraestrutura (não é dado de jogo em si); requer T:ISerializable."
+ },
+ {
+  "type": "Game.Simulation.CellMapSystem<T>",
+  "file": "Simulation/CellMapSystem.cs",
+  "class": "META",
+  "writtenBy": [
+   "subclasses concretas (ex.: WaterSystem)"
+  ],
+  "syncPath": "NONE",
+  "note": "classe base abstrata genérica de infraestrutura de grid, sem dado próprio."
+ },
+ {
+  "type": "Game.Simulation.CitizenHappinessSystem",
+  "file": "Simulation/CitizenHappinessSystem.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "CitizenHappinessSystem (auto)"
+  ],
+  "syncPath": "NONE",
+  "note": "estatística agregada de felicidade dos cidadãos, recalculada por tick."
+ },
+ {
+  "type": "Game.Simulation.ClimateSystem",
+  "file": "Simulation/ClimateSystem.cs:26,525",
+  "class": "DERIVED",
+  "writtenBy": [
+   "ClimateSystem.CalculateTemperatureBaseHeight (linha 521)"
+  ],
+  "syncPath": "EnvSyncCommand",
+  "note": "m_TemperatureBaseHeight é recalculado deterministicamente a partir de prefab+latitude; risco de drift float cross-machine se latitude divergir (ver PlanetarySystem)."
+ },
+ {
+  "type": "Game.Simulation.CityProductionCapacityCalculationSystem",
+  "file": "Simulation/CityProductionCapacityCalculationSystem.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "capacidade de produção agregada, recomputada por tick."
+ },
+ {
+  "type": "Game.Simulation.CityProductionStatisticSystem",
+  "file": "Simulation/CityProductionStatisticSystem.cs:14",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "sistema de estatística de produção; contém structs aninhadas (abaixo)."
+ },
+ {
+  "type": "Game.Simulation.CityProductionStatisticSystem+CompanyProcessingEvent",
+  "file": "Simulation/CityProductionStatisticSystem.cs:124",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "CityProductionStatisticSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "evento de processamento de empresa, estatística por tick."
+ },
+ {
+  "type": "Game.Simulation.CityProductionStatisticSystem+ProductionChain",
+  "file": "Simulation/CityProductionStatisticSystem.cs:162",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "CityProductionStatisticSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "chave de cadeia de produção agregada para estatística."
+ },
+ {
+  "type": "Game.Simulation.CityProductionStatisticSystem+ProductionChainValue",
+  "file": "Simulation/CityProductionStatisticSystem.cs:211",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "CityProductionStatisticSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "valor agregado por cadeia de produção."
+ },
+ {
+  "type": "Game.Simulation.CityProductionStatisticSystem+CityResourceUsage",
+  "file": "Simulation/CityProductionStatisticSystem.cs:241",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "CityProductionStatisticSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "uso de recurso agregado por cidade."
+ },
+ {
+  "type": "Game.Simulation.CitySystem",
+  "file": "Simulation/CitySystem.cs:15",
+  "class": "META",
+  "writtenBy": [
+   "CitySystem (auto), MilestoneSystem lê/escreve MilestoneLevel"
+  ],
+  "syncPath": "NONE",
+  "note": "bookkeeping do singleton da entidade cidade (NOT VERIFIED o conteúdo exato do Serialize)."
+ },
+ {
+  "type": "Game.Simulation.CollectedCityServiceFeeData",
+  "file": "Simulation/CollectedCityServiceFeeData.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "sistema de coleta de taxas (NOT VERIFIED nome)"
+  ],
+  "syncPath": "FeeCommand",
+  "note": "agregado derivado das taxas autoradas via ServiceFee/FeeCommand; deve convergir se FeeCommand estiver correto."
+ },
+ {
+  "type": "Game.Simulation.CollectedServiceBuildingBudgetData",
+  "file": "Simulation/CollectedServiceBuildingBudgetData.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "sistema de orçamento por prédio (NOT VERIFIED)"
+  ],
+  "syncPath": "BudgetCommand",
+  "note": "agregado derivado do % de orçamento autorado (ServiceBudgetData) por prédio de serviço."
+ },
+ {
+  "type": "Game.Simulation.CollectedCityServiceBudgetData",
+  "file": "Simulation/CollectedCityServiceBudgetData.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "sistema de orçamento (NOT VERIFIED)"
+  ],
+  "syncPath": "BudgetCommand",
+  "note": "agregado de orçamento em nível de cidade, derivado do autorado."
+ },
+ {
+  "type": "Game.Simulation.CollectedCityServiceUpkeepData",
+  "file": "Simulation/CollectedCityServiceUpkeepData.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "sistema de manutenção (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "custo de manutenção agregado, derivado de prédios existentes (que já sincam via ObjectPlaceCommand)."
+ },
+ {
+  "type": "Game.Simulation.CommercialDemandSystem",
+  "file": "Simulation/CommercialDemandSystem.cs:28",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "DemandSyncCommand",
+  "note": "demanda comercial recalculada por tick; host espelha valor (HostAuthoritative)."
+ },
+ {
+  "type": "Game.Simulation.CountCityStoredResourceSystem",
+  "file": "Simulation/CountCityStoredResourceSystem.cs:20",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem agregada de recursos estocados na cidade."
+ },
+ {
+  "type": "Game.Simulation.CountConsumptionSystem",
+  "file": "Simulation/CountConsumptionSystem.cs:12",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem agregada de consumo."
+ },
+ {
+  "type": "Game.Simulation.CountCompanyDataSystem",
+  "file": "Simulation/CountCompanyDataSystem.cs:25",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem agregada de empresas."
+ },
+ {
+  "type": "Game.Simulation.CountVehicleDataSystem",
+  "file": "Simulation/CountVehicleDataSystem.cs:25",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem agregada de veículos."
+ },
+ {
+  "type": "Game.Simulation.CountVehicleDataSystem+VehicleCountData",
+  "file": "Simulation/CountVehicleDataSystem.cs:27",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "CountVehicleDataSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "acumulador IAccumulable de contagem de veículo por tipo."
+ },
+ {
+  "type": "Game.Simulation.CountStudyPositionsSystem",
+  "file": "Simulation/CountStudyPositionsSystem.cs:20",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem agregada de vagas de estudo."
+ },
+ {
+  "type": "Game.Simulation.CountResidentialPropertySystem",
+  "file": "Simulation/CountResidentialPropertySystem.cs:22",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem agregada de propriedades residenciais."
+ },
+ {
+  "type": "Game.Simulation.CountResidentialPropertySystem+ResidentialPropertyData",
+  "file": "Simulation/CountResidentialPropertySystem.cs:24",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "CountResidentialPropertySystem"
+  ],
+  "syncPath": "NONE",
+  "note": "acumulador de propriedade residencial."
+ },
+ {
+  "type": "Game.Simulation.CountHouseholdDataSystem",
+  "file": "Simulation/CountHouseholdDataSystem.cs:25",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem agregada de domicílios."
+ },
+ {
+  "type": "Game.Simulation.CountHouseholdDataSystem+HouseholdData",
+  "file": "Simulation/CountHouseholdDataSystem.cs:37",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "CountHouseholdDataSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "acumulador de domicílio."
+ },
+ {
+  "type": "Game.Simulation.ElectricityBuildingConnection",
+  "file": "Simulation/ElectricityBuildingConnection.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "ElectricityFlowSystem (NOT VERIFIED linha)"
+  ],
+  "syncPath": "NONE",
+  "note": "topologia de conexão elétrica recomputada do grafo da rede; prédio em si sincroniza via ObjectPlaceCommand/NetPlaceCommand."
+ },
+ {
+  "type": "Game.Simulation.CountWorkplacesSystem",
+  "file": "Simulation/CountWorkplacesSystem.cs:21",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem agregada de vagas de emprego."
+ },
+ {
+  "type": "Game.Simulation.ElectricityFlowEdge",
+  "file": "Simulation/ElectricityFlowEdge.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "ElectricityFlowSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "fluxo de energia simulado por tick na aresta da rede elétrica."
+ },
+ {
+  "type": "Game.Simulation.Dispatched",
+  "file": "Simulation/Dispatched.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de despacho de serviço (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "tag transiente de despacho de veículo de serviço."
+ },
+ {
+  "type": "Game.Simulation.ElectricityFlowSystem",
+  "file": "Simulation/ElectricityFlowSystem.cs:24",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "sistema que mantém o grid/estado de fluxo elétrico simulado."
+ },
+ {
+  "type": "Game.Simulation.ElectricityNodeConnection",
+  "file": "Simulation/ElectricityNodeConnection.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "ElectricityFlowSystem (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "topologia de nó elétrico, recomputada do grafo (rede em si sincroniza via NetPlaceCommand)."
+ },
+ {
+  "type": "Game.Simulation.ElectricityStatisticsSystem",
+  "file": "Simulation/ElectricityStatisticsSystem.cs:18",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "estatística agregada de eletricidade."
+ },
+ {
+  "type": "Game.Simulation.ElectricityTradeSystem",
+  "file": "Simulation/ElectricityTradeSystem.cs:19",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "comércio de eletricidade entre cidades, valor emergente por tick."
+ },
+ {
+  "type": "Game.Simulation.ElectricityValveConnection",
+  "file": "Simulation/ElectricityValveConnection.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "ElectricityFlowSystem (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "topologia de válvula elétrica derivada do grafo da rede."
+ },
+ {
+  "type": "Game.Simulation.EvacuationRequest",
+  "file": "Simulation/EvacuationRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de desastre/evacuação (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de evacuação, gerado pela simulação de desastre."
+ },
+ {
+  "type": "Game.Simulation.FireHazardSystem",
+  "file": "Simulation/FireHazardSystem.cs:24",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "FireSyncCommand",
+  "note": "risco de incêndio por grid, recalculado por tick; host espelha via FireSyncCommand (HostAuthoritative)."
+ },
+ {
+  "type": "Game.Simulation.FireRescueRequest",
+  "file": "Simulation/FireRescueRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de despacho de bombeiros (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de resgate de incêndio."
+ },
+ {
+  "type": "Game.Simulation.FloodCounterData",
+  "file": "Simulation/FloodCounterData.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de enchente (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "contador de estado de enchente por entidade."
+ },
+ {
+  "type": "Game.Simulation.GarbageTransferRequest",
+  "file": "Simulation/GarbageTransferRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de transferência de lixo (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de transporte de lixo entre prédios."
+ },
+ {
+  "type": "Game.Simulation.GoodsDeliveryRequest",
+  "file": "Simulation/GoodsDeliveryRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de logística (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de entrega de mercadorias."
+ },
+ {
+  "type": "Game.Simulation.GarbageCollectionRequest",
+  "file": "Simulation/GarbageCollectionRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de coleta de lixo (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de coleta de lixo."
+ },
+ {
+  "type": "Game.Simulation.GroundPollution",
+  "file": "Simulation/GroundPollution.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de poluição do solo (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de poluição do solo, recomputada por tick."
+ },
+ {
+  "type": "Game.Simulation.GarbageAccumulationSystem",
+  "file": "Simulation/GarbageAccumulationSystem.cs:34",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "acúmulo de lixo por prédio, simulado por tick."
+ },
+ {
+  "type": "Game.Simulation.GroundWater",
+  "file": "Simulation/GroundWater.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "WaterSystem (NOT VERIFIED linha exata)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de água subterrânea, simulada; base do terreno é AUTHORED (TerrainCommand) mas o nível de água é recalculado por tick."
+ },
+ {
+  "type": "Game.Simulation.HealthcareRequest",
+  "file": "Simulation/HealthcareRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de saúde (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de atendimento de saúde."
+ },
+ {
+  "type": "Game.Simulation.IndustrialDemandSystem",
+  "file": "Simulation/IndustrialDemandSystem.cs:29",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "DemandSyncCommand",
+  "note": "demanda industrial recalculada por tick; host espelha (HostAuthoritative)."
+ },
+ {
+  "type": "Game.Simulation.LandValueCell",
+  "file": "Simulation/LandValueCell.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de valor de terra (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de valor de terra, recomputada por tick a partir de vários fatores; pode divergir por design."
+ },
+ {
+  "type": "Game.Simulation.MailTransferRequest",
+  "file": "Simulation/MailTransferRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de correio (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de transporte de correspondência."
+ },
+ {
+  "type": "Game.Simulation.MaintenanceConsumer",
+  "file": "Simulation/MaintenanceConsumer.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de manutenção (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "marcador de consumidor de manutenção, ligado ao ciclo de simulação."
+ },
+ {
+  "type": "Game.Simulation.MaintenanceRequest",
+  "file": "Simulation/MaintenanceRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de manutenção (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de manutenção de infraestrutura."
+ },
+ {
+  "type": "Game.Simulation.NaturalResourceCell",
+  "file": "Simulation/NaturalResourceCell.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de recurso natural (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de recurso natural; base é gerada do mapa (STATIC) mas a quantidade depleta de forma EMERGENT via extração — mistura de origem, risco de drift se extração divergir."
+ },
+ {
+  "type": "Game.Simulation.NaturalResourceAmount",
+  "file": "Simulation/NaturalResourceAmount.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de recurso natural (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "quantidade de recurso natural remanescente, depletada por tick de extração; mesma ressalva que NaturalResourceCell."
+ },
+ {
+  "type": "Game.Simulation.NoisePollution",
+  "file": "Simulation/NoisePollution.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de poluição sonora (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de poluição sonora, recomputada por tick."
+ },
+ {
+  "type": "Game.Simulation.PlanetarySystem",
+  "file": "Simulation/PlanetarySystem.cs:23,522",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "PlanetarySystem.SetDefaults (m_Latitude/m_Longitude, linha 516)"
+  ],
+  "syncPath": "NONE",
+  "note": "GAP: latitude/longitude definidas na configuração da cidade e usadas por ClimateSystem para recalcular temperatura — sem comando de sync explícito; se divergir entre host/cliente, o clima diverge (DERIVED downstream)."
+ },
+ {
+  "type": "Game.Simulation.PostVanRequest",
+  "file": "Simulation/PostVanRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de correio (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de van de correio."
+ },
+ {
+  "type": "Game.Simulation.PopulationCell",
+  "file": "Simulation/PopulationCell.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de população em grid (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de densidade populacional, recomputada por tick."
+ },
+ {
+  "type": "Game.Simulation.PoliceEmergencyRequest",
+  "file": "Simulation/PoliceEmergencyRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de polícia (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de emergência policial."
+ },
+ {
+  "type": "Game.Simulation.PolicePatrolRequest",
+  "file": "Simulation/PolicePatrolRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de polícia (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de patrulha policial."
+ },
+ {
+  "type": "Game.Simulation.ProductionChainDataSystem",
+  "file": "Simulation/ProductionChainDataSystem.cs:8",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "dados agregados de cadeia de produção."
+ },
+ {
+  "type": "Game.Simulation.ProductionChainDataSystem+ProductionChainData",
+  "file": "Simulation/ProductionChainDataSystem.cs:11",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "ProductionChainDataSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "acumulador IAccumulable de cadeia de produção."
+ },
+ {
+  "type": "Game.Simulation.PrisonerTransportRequest",
+  "file": "Simulation/PrisonerTransportRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas prisionais (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de transporte de prisioneiro."
+ },
+ {
+  "type": "Game.Simulation.ProcessingCompanySystem",
+  "file": "Simulation/ProcessingCompanySystem.cs:30",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "estado agregado de empresas processadoras."
+ },
+ {
+  "type": "Game.Simulation.RandomTrafficRequest",
+  "file": "Simulation/RandomTrafficRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de tráfego aleatório (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de tráfego de preenchimento (cosmético/ambiente)."
+ },
+ {
+  "type": "Game.Simulation.ResidentialDemandSystem",
+  "file": "Simulation/ResidentialDemandSystem.cs:26",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "DemandSyncCommand",
+  "note": "demanda residencial recalculada por tick; host espelha (HostAuthoritative)."
+ },
+ {
+  "type": "Game.Simulation.ResourceAvailabilitySystem",
+  "file": "Simulation/ResourceAvailabilitySystem.cs:29",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "disponibilidade agregada de recurso, recomputada por tick."
+ },
+ {
+  "type": "Game.Simulation.ServiceBudgetData",
+  "file": "Simulation/ServiceBudgetData.cs",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "jogador via UI de orçamento (NOT VERIFIED sistema exato)"
+  ],
+  "syncPath": "BudgetCommand",
+  "note": "% de orçamento por serviço definido pelo jogador."
+ },
+ {
+  "type": "Game.Simulation.ServiceDispatch",
+  "file": "Simulation/ServiceDispatch.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de despacho (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "registro transiente de despacho de veículo de serviço."
+ },
+ {
+  "type": "Game.Simulation.ServiceRequest",
+  "file": "Simulation/ServiceRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "vários sistemas de serviço (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido genérico de serviço, base para vários Request específicos."
+ },
+ {
+  "type": "Game.Simulation.SimulationSystem",
+  "file": "Simulation/SimulationSystem.cs:18,135",
+  "class": "META",
+  "writtenBy": [
+   "SimulationSystem.Serialize (linha 135, frameIndex)"
+  ],
+  "syncPath": "NONE",
+  "note": "contador de frame de simulação (bookkeeping de save); resync geral cai em WorldTransferCommand/ResyncCommand (Infra), não tem comando dedicado."
+ },
+ {
+  "type": "Game.Simulation.SnowSystem",
+  "file": "Simulation/SnowSystem.cs:20",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "EnvSyncCommand",
+  "note": "estado de neve simulado por tick, espelhado via EnvSyncCommand (HostAuthoritative)."
+ },
+ {
+  "type": "Game.Simulation.SoilWater",
+  "file": "Simulation/SoilWater.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "WaterSystem (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de umidade do solo, simulada por tick."
+ },
+ {
+  "type": "Game.Simulation.TaxiRequest",
+  "file": "Simulation/TaxiRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de transporte (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de táxi."
+ },
+ {
+  "type": "Game.Simulation.TelecomCoverage",
+  "file": "Simulation/TelecomCoverage.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de telecomunicação (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de cobertura de telecom, recomputada por tick."
+ },
+ {
+  "type": "Game.Simulation.TerrainAttractiveness",
+  "file": "Simulation/TerrainAttractiveness.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de atratividade de terreno (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula derivada do terreno/água, recomputada por tick."
+ },
+ {
+  "type": "Game.Simulation.TerrainSystem",
+  "file": "Simulation/TerrainSystem.cs:40,3038",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "TerrainSystem.Serialize (SerializeHeightmap, linha 3038)"
+  ],
+  "syncPath": "TerrainCommand",
+  "note": "heightmap esculpido pelo jogador via TerrainToolSystem; coberto pelo TerrainCommand (WorldContract)."
+ },
+ {
+  "type": "Game.Simulation.TrafficAmbienceCell",
+  "file": "Simulation/TrafficAmbienceCell.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de ambiente de tráfego (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de ambiente sonoro/visual de tráfego, cosmética."
+ },
+ {
+  "type": "Game.Simulation.TransportLineSystem",
+  "file": "Simulation/TransportLineSystem.cs:29",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "sistema agregado de linhas de transporte (estatística); a linha/rota em si já sincroniza via RouteCreateCommand/RouteColorCommand/RouteVisibilityCommand."
+ },
+ {
+  "type": "Game.Simulation.TransportUsageData",
+  "file": "Simulation/TransportUsageData.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "TransportUsageTrackSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "estatística de uso/ridership de transporte, por tick."
+ },
+ {
+  "type": "Game.Simulation.TransportUsageTrackSystem",
+  "file": "Simulation/TransportUsageTrackSystem.cs:15",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "rastreamento agregado de uso de transporte."
+ },
+ {
+  "type": "Game.Simulation.TransportVehicleRequest",
+  "file": "Simulation/TransportVehicleRequest.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de transporte (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "pedido transiente de veículo de transporte."
+ },
+ {
+  "type": "Game.Simulation.UpdateFrame",
+  "file": "Simulation/UpdateFrame.cs",
+  "class": "META",
+  "writtenBy": [
+   "motor ECS (ISharedComponentData de agrupamento, NOT VERIFIED sistema específico)"
+  ],
+  "syncPath": "NONE",
+  "note": "shared component de bookkeeping usado para distribuir atualização de entidades entre frames (round-robin do motor), não é dado de jogador."
+ },
+ {
+  "type": "Game.Simulation.WaterPipeBuildingConnection",
+  "file": "Simulation/WaterPipeBuildingConnection.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "WaterPipeFlowSystem (NOT VERIFIED linha)"
+  ],
+  "syncPath": "NONE",
+  "note": "topologia de conexão de prédio à rede de água, derivada do grafo (rede sincroniza via NetPlaceCommand)."
+ },
+ {
+  "type": "Game.Simulation.WaterPipeEdge",
+  "file": "Simulation/WaterPipeEdge.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "WaterPipeFlowSystem (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "fluxo de água simulado por tick na aresta da tubulação."
+ },
+ {
+  "type": "Game.Simulation.WaterPipeFlowSystem",
+  "file": "Simulation/WaterPipeFlowSystem.cs:23",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "sistema que mantém o estado de fluxo de água simulado."
+ },
+ {
+  "type": "Game.Simulation.WaterPipeNode",
+  "file": "Simulation/WaterPipeNode.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "WaterPipeFlowSystem (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "topologia de nó de tubulação, derivada do grafo da rede."
+ },
+ {
+  "type": "Game.Simulation.WaterPipeNodeConnection",
+  "file": "Simulation/WaterPipeNodeConnection.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "WaterPipeFlowSystem (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "conexão de nó de tubulação, derivada do grafo."
+ },
+ {
+  "type": "Game.Simulation.WaterPipeValveConnection",
+  "file": "Simulation/WaterPipeValveConnection.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "WaterPipeFlowSystem (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "conexão de válvula de tubulação, derivada do grafo."
+ },
+ {
+  "type": "Game.Simulation.WaterStatisticsSystem",
+  "file": "Simulation/WaterStatisticsSystem.cs:18",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "estatística agregada de água."
+ },
+ {
+  "type": "Game.Simulation.WaterSourceData",
+  "file": "Simulation/WaterSourceData.cs",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "WaterToolSystem via WaterCommand (NOT VERIFIED campo exato)"
+  ],
+  "syncPath": "WaterCommand",
+  "note": "força/parâmetro de fonte de água configurado pelo jogador ao colocar bomba/estação; coberto pelo WaterCommand."
+ },
+ {
+  "type": "Game.Simulation.WaterTradeSystem",
+  "file": "Simulation/WaterTradeSystem.cs:20",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "comércio de água entre cidades, valor emergente por tick."
+ },
+ {
+  "type": "Game.Simulation.Wind",
+  "file": "Simulation/Wind.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "WindSimulationSystem (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "campo de vento simulado por tick."
+ },
+ {
+  "type": "Game.Simulation.WaterSystem",
+  "file": "Simulation/WaterSystem.cs:34",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "sistema que mantém grids de água (GroundWater/SoilWater); classe base CellMapSystem<GroundWater>-like."
+ },
+ {
+  "type": "Game.Simulation.WaterSystem+WaterMaterialParams",
+  "file": "Simulation/WaterSystem.cs:37",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "WaterSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "parâmetros de material de renderização de água, derivados do estado simulado (cosmético)."
+ },
+ {
+  "type": "Game.Simulation.WindSimulationSystem",
+  "file": "Simulation/WindSimulationSystem.cs:13",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "sistema que mantém o grid de vento simulado."
+ },
+ {
+  "type": "Game.Simulation.WindSimulationSystem+WindCell",
+  "file": "Simulation/WindSimulationSystem.cs:15",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "WindSimulationSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de vento do grid, simulada por tick."
+ },
+ {
+  "type": "Game.Simulation.ZoneAmbienceCell",
+  "file": "Simulation/ZoneAmbienceCell.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de ambiente de zona (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "célula de grid de ambiente de zona, cosmética/recomputada."
+ },
+ {
+  "type": "Game.Simulation.ZoneAmbiences",
+  "file": "Simulation/ZoneAmbiences.cs:5",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de ambiente de zona (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "dados agregados de ambiente de zona, cosmética/recomputada."
+ },
+ {
+  "type": "Game.City.DevTreePoints",
+  "file": "City/DevTreePoints.cs",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "jogador via árvore de desenvolvimento (NOT VERIFIED sistema exato)"
+  ],
+  "syncPath": "DevTreeCommand",
+  "note": "pontos de desenvolvimento gastos pelo jogador na árvore de progressão."
+ },
+ {
+  "type": "Game.City.MilestoneLevel",
+  "file": "City/MilestoneLevel.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "MilestoneSystem"
+  ],
+  "syncPath": "ProgressionSyncCommand",
+  "note": "nível de marco calculado deterministicamente a partir de XP/população; deve convergir se XP sincar."
+ },
+ {
+  "type": "Game.City.ServiceFee",
+  "file": "City/ServiceFee.cs",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "jogador via UI de taxas (NOT VERIFIED)"
+  ],
+  "syncPath": "FeeCommand",
+  "note": "taxa de serviço configurada pelo jogador."
+ },
+ {
+  "type": "Game.City.CityModifier",
+  "file": "City/CityModifier.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "CityModifierUpdateSystem (Simulation/CityModifierUpdateSystem.cs)"
+  ],
+  "syncPath": "NONE",
+  "note": "modificador agregado computado de políticas/milestones ativos; deve convergir se PolicyCommand+DevTreeCommand sincarem, mas ordem de recálculo não verificada (risco de drift)."
+ },
+ {
+  "type": "Game.City.PlayerMoney",
+  "file": "City/PlayerMoney.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de economia da cidade (NOT VERIFIED)"
+  ],
+  "syncPath": "MoneySyncCommand",
+  "note": "tesouro da cidade, evolui por tick com receitas/despesas; host espelha (HostAuthoritative)."
+ },
+ {
+  "type": "Game.City.CityConfigurationSystem",
+  "file": "City/CityConfigurationSystem.cs:20,267",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "CityConfigurationSystem.Serialize (linha 267: cityName, defaultTheme, leftHandTraffic, naturalDisasters)"
+  ],
+  "syncPath": "RenameCommand (parcial)",
+  "note": "GAP: RenameCommand cobre só cityName; defaultTheme/leftHandTraffic/naturalDisasters (linhas 269-273) não têm comando de sync — se um jogador mudar tema ou lado do tráfego após o join, diverge."
+ },
+ {
+  "type": "Game.City.ServiceImportBudget",
+  "file": "City/ServiceImportBudget.cs",
+  "class": "META",
+  "writtenBy": [
+   "sistema de orçamento de importação (NOT VERIFIED, só referenciado no próprio arquivo)"
+  ],
+  "syncPath": "n/a (dado morto)",
+  "note": "REFUTADO 06/07: buffer morto nesta versao - nenhum sistema le/escreve (so a definicao City/ServiceImportBudget.cs); ServiceBudgetUISystem escreve ServiceBudgetData/ServiceFee, nao isto."
+ },
+ {
+  "type": "Game.City.DangerLevel",
+  "file": "City/DangerLevel.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de perigo da cidade (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "indicador de perigo agregado da cidade, computado por tick."
+ },
+ {
+  "type": "Game.City.Population",
+  "file": "City/Population.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de população (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "contagem de população da cidade, resultado emergente da simulação de cidadãos."
+ },
+ {
+  "type": "Game.City.CityStatistic",
+  "file": "City/CityStatistic.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de estatística (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "buffer de histórico de estatísticas da cidade, por tick."
+ },
+ {
+  "type": "Game.City.City",
+  "file": "City/City.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "CityUtils.cs (leitura), escrita NOT VERIFIED — provável tela de opções/criação de cidade"
+  ],
+  "syncPath": "NONE",
+  "note": "CORRIGIDO 06/07: m_OptionMask e RECOMPUTADO em runtime (CityModifierUpdateSystem.cs:107 zera e reconstroi) — converge se os inputs convergem; nao e gap independente. Money/XP ja sincados por comandos proprios."
+ },
+ {
+  "type": "Game.City.SpecializationBonus",
+  "file": "City/SpecializationBonus.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "sistema de especialização (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "bônus de especialização de área, derivado de políticas/distritos ativos (que já sincam via PolicyCommand/DistrictCommand)."
+ },
+ {
+  "type": "Game.City.StatisticsEvent",
+  "file": "City/StatisticsEvent.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de estatística (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "evento pontual de estatística, gerado pela simulação."
+ },
+ {
+  "type": "Game.City.StatisticParameter",
+  "file": "City/StatisticParameter.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Simulation/StatisticTriggerSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "parâmetro int computado pelo motor de estatísticas a partir de fórmula de prefab (StatisticTriggerData); determinístico se as entradas sincarem."
+ },
+ {
+  "type": "Game.City.Tourism",
+  "file": "City/Tourism.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de turismo (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "métrica de turismo, computada por tick."
+ },
+ {
+  "type": "Game.City.TaxRates",
+  "file": "City/TaxRates.cs",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "jogador via UI de impostos (NOT VERIFIED)"
+  ],
+  "syncPath": "TaxSyncCommand",
+  "note": "taxa de imposto por área definida pelo jogador."
+ },
+ {
+  "type": "Game.City.XP",
+  "file": "City/XP.cs",
+  "class": "DERIVED",
+  "writtenBy": [
+   "sistemas de progressão (NOT VERIFIED)"
+  ],
+  "syncPath": "ProgressionSyncCommand",
+  "note": "experiência da cidade, acumulada deterministicamente a partir de ações do jogador; base para MilestoneLevel."
+ },
+ {
+  "type": "Game.Economy.Resources",
+  "file": "Economy/Resources.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de economia de prédio (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "quantidade de recurso armazenado em um prédio, muda por tick via simulação de produção/consumo."
+ },
+ {
+  "type": "Game.Economy.ResourceInfo",
+  "file": "Economy/ResourceInfo.cs",
+  "class": "STATIC",
+  "writtenBy": [
+   "dados de prefab de recurso (NOT VERIFIED sistema de inicialização)"
+  ],
+  "syncPath": "NONE",
+  "note": "definição/categoria de recurso, idêntica por instalação do jogo."
+ },
+ {
+  "type": "Game.Policies.Policy",
+  "file": "Policies/Policy.cs",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "jogador via UI de políticas (NOT VERIFIED sistema exato)"
+  ],
+  "syncPath": "PolicyCommand",
+  "note": "política ativada/configurada pelo jogador."
+ },
+ {
+  "type": "Game.Notifications.Animation",
+  "file": "Notifications/Animation.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de notificação/ícone (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "estado de animação de ícone flutuante, cosmético e derivado do estado do prédio/cidadão."
+ },
+ {
+  "type": "Game.Notifications.Icon",
+  "file": "Notifications/Icon.cs:8",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de notificação (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "ícone exibido sobre entidade, computado do estado atual (cosmético)."
+ },
+ {
+  "type": "Game.Achievements.EventAchievementTrackingData",
+  "file": "Achievements/EventAchievementTrackingData.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "AchievementTriggerSystem"
+  ],
+  "syncPath": "NONE",
+  "note": "progresso de conquista Steam por jogador; não precisa sincar entre máquinas (conquista é local/per-account)."
+ },
+ {
+  "type": "Game.Achievements.AchievementTriggerSystem",
+  "file": "Achievements/AchievementTriggerSystem.cs:36",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "bookkeeping de rastreamento de conquistas, local por jogador."
+ },
+ {
+  "type": "Game.Triggers.LifePathEvent",
+  "file": "Triggers/LifePathEvent.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de eventos de vida do cidadão (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "evento de vida do cidadão (ex.: casamento), gerado pela simulação de cidadãos (per-tick, pode divergir por design)."
+ },
+ {
+  "type": "Game.Triggers.Chirp",
+  "file": "Triggers/Chirp.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de rede social (Chirper) (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "post de rede social gerado pela simulação, cosmético/narrativo."
+ },
+ {
+  "type": "Game.Triggers.ChirpEntity",
+  "file": "Triggers/ChirpEntity.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema Chirper (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "buffer de entidades relacionadas a um chirp."
+ },
+ {
+  "type": "Game.Triggers.ChirpLink",
+  "file": "Triggers/ChirpLink.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema Chirper (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "buffer de link relacionado a um chirp."
+ },
+ {
+  "type": "Game.Triggers.TriggerSystem",
+  "file": "Triggers/TriggerSystem.cs:32",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "auto"
+  ],
+  "syncPath": "NONE",
+  "note": "sistema central de disparo de gatilhos de simulação/notificação."
+ },
+ {
+  "type": "Game.Triggers.RadioEvent",
+  "file": "Triggers/RadioEvent.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de rádio/notícias (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "evento de notícia de rádio gerado pela simulação, cosmético/narrativo."
+ },
+ {
+  "type": "Game.Triggers.LifePathEntry",
+  "file": "Triggers/LifePathEntry.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de eventos de vida (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "buffer de entrada de trajetória de vida do cidadão."
+ },
+ {
+  "type": "Game.Events.AttendingEvent",
+  "file": "Events/AttendingEvent.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de eventos da cidade (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "cidadão participando de um evento, gerado pela simulação; não achamos ferramenta de jogador para criar evento (grep por Festival/CreateEvent só achou EventJournalSystem/EventJournalInitializeSystem, ambos de journal, não de criação por jogador)."
+ },
+ {
+  "type": "Game.Events.Duration",
+  "file": "Events/Duration.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de evento (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "contador de duração de evento/desastre gerado pela simulação."
+ },
+ {
+  "type": "Game.Events.AccidentSite",
+  "file": "Events/AccidentSite.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de tráfego/acidente (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "local de acidente de trânsito, gerado pela simulação de tráfego."
+ },
+ {
+  "type": "Game.Events.DangerLevel",
+  "file": "Events/DangerLevel.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de perigo de evento (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "nível de perigo associado a um evento/entidade, computado por tick."
+ },
+ {
+  "type": "Game.Events.EventJournalCityEffect",
+  "file": "Events/EventJournalCityEffect.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Events/EventJournalSystem.cs (NOT VERIFIED linha)"
+  ],
+  "syncPath": "NONE",
+  "note": "efeito de cidade registrado no diário de eventos, derivado da simulação."
+ },
+ {
+  "type": "Game.Events.EventJournalData",
+  "file": "Events/EventJournalData.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Events/EventJournalSystem.cs (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "dado de entrada de diário de eventos."
+ },
+ {
+  "type": "Game.Events.EventJournalPending",
+  "file": "Events/EventJournalPending.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Events/EventJournalInitializeSystem.cs (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "marcador de evento de diário pendente de processamento."
+ },
+ {
+  "type": "Game.Events.EventJournalEntry",
+  "file": "Events/EventJournalEntry.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Events/EventJournalSystem.cs (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "entrada de diário de evento, gerada pela simulação."
+ },
+ {
+  "type": "Game.Events.Flooded",
+  "file": "Events/Flooded.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de enchente (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "marcador de entidade inundada, estado de desastre simulado."
+ },
+ {
+  "type": "Game.Events.FacingWeather",
+  "file": "Events/FacingWeather.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de clima (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "marcador de entidade exposta ao clima atual, derivado do estado de clima."
+ },
+ {
+  "type": "Game.Events.WeatherPhenomenon",
+  "file": "Events/WeatherPhenomenon.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de clima (NOT VERIFIED)"
+  ],
+  "syncPath": "EnvSyncCommand",
+  "note": "fenômeno climático ativo (chuva/tempestade); coberto por EnvSyncCommand (HostAuthoritative) se este for o mecanismo que espelha clima — NOT VERIFIED o payload exato do EnvSyncCommand."
+ },
+ {
+  "type": "Game.Events.WaterLevelChange",
+  "file": "Events/WaterLevelChange.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de enchente (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "variação de nível de água de desastre, simulada por tick."
+ },
+ {
+  "type": "Game.Events.OnFire",
+  "file": "Events/OnFire.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "FireHazardSystem (Simulation) (NOT VERIFIED linha exata)"
+  ],
+  "syncPath": "FireSyncCommand",
+  "note": "marcador de entidade em chamas; espelhado via FireSyncCommand (HostAuthoritative)."
+ },
+ {
+  "type": "Game.Events.SpectatorSite",
+  "file": "Events/SpectatorSite.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de evento/acidente (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "local onde cidadãos se reúnem para observar evento/acidente, gerado pela simulação."
+ },
+ {
+  "type": "Game.Events.VehicleLaunch",
+  "file": "Events/VehicleLaunch.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de desastre (tornado/etc.) (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "veículo arremessado por desastre, efeito físico simulado."
+ },
+ {
+  "type": "Game.Events.InvolvedInAccident",
+  "file": "Events/InvolvedInAccident.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistema de acidente de tráfego (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "marcador de entidade envolvida em acidente."
+ },
+ {
+  "type": "Game.Events.JournalEvent",
+  "file": "Events/JournalEvent.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Events/EventJournalSystem.cs (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "referência (m_JournalEntity) da entidade a um evento de diário; confirmado por leitura direta do arquivo — só contém Serialize/Deserialize de uma Entity, gerado pela simulação de eventos."
+ },
+ {
+  "type": "Game.Events.TargetElement",
+  "file": "Events/TargetElement.cs:8",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de evento (alvo do evento) (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "buffer de elemento-alvo de um evento (ex.: prédios afetados por desastre), gerado pela simulação."
+ },
+ {
+  "type": "Game.Events.InDanger",
+  "file": "Events/InDanger.cs",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "sistemas de perigo/desastre (NOT VERIFIED)"
+  ],
+  "syncPath": "NONE",
+  "note": "marcador de entidade em perigo, derivado do estado de desastre simulado."
+ }
 ]

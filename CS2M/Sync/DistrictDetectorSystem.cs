@@ -39,6 +39,114 @@ namespace CS2M.Sync
         }
     }
 
+    /// <summary>v56: districts have no SyncId scheme of their own (areas are polygon-boundary entities
+    /// recreated per-PC), so every consumer that needs to name one on the wire shares this pair:
+    /// <see cref="TryDescribe"/> turns a LOCAL district entity into (prefabName, centroid) to ship, and
+    /// <see cref="FindByCenter"/> takes that back to the nearest LOCAL entity with a matching prefab —
+    /// the same 40 m² tolerance <c>DistrictApplySystem</c>'s reshape resolution already validated
+    /// on-screen. Extracted so <c>ServiceDistrictDetectorSystem</c>/<c>ServiceDistrictApplySystem</c>
+    /// (translating a building's served-district list) don't duplicate the centroid-resolve logic.</summary>
+    public static class DistrictResolver
+    {
+        public static bool TryDescribe(EntityManager em, PrefabSystem prefabSystem, Entity district,
+            out string prefabName, out float centerX, out float centerZ)
+        {
+            prefabName = null;
+            centerX = 0f;
+            centerZ = 0f;
+
+            if (district == Entity.Null || !em.Exists(district) || !em.HasBuffer<Node>(district)
+                || !em.HasComponent<PrefabRef>(district))
+            {
+                return false;
+            }
+
+            DynamicBuffer<Node> nodes = em.GetBuffer<Node>(district, true);
+            if (nodes.Length == 0)
+            {
+                return false;
+            }
+
+            if (!prefabSystem.TryGetPrefab(em.GetComponentData<PrefabRef>(district).m_Prefab,
+                    out PrefabBase prefab) || prefab == null)
+            {
+                return false;
+            }
+
+            float cx = 0f, cz = 0f;
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                cx += nodes[i].m_Position.x;
+                cz += nodes[i].m_Position.z;
+            }
+
+            prefabName = prefab.name;
+            centerX = cx / nodes.Length;
+            centerZ = cz / nodes.Length;
+            return true;
+        }
+
+        /// <summary>Nearest district (same prefab) whose centroid is within ~40 m of (x,z) — the
+        /// centroid both PCs share from the last synced state. <paramref name="districts"/> should
+        /// already exclude Temp/Deleted (caller-owned query, mirrors <c>RouteResolver.Resolve</c>).</summary>
+        public static Entity FindByCenter(EntityManager em, EntityQuery districts, PrefabSystem prefabSystem,
+            float x, float z, string prefabName)
+        {
+            Entity best = Entity.Null;
+            float bestD = 1600f; // 40 m²
+            NativeArray<Entity> ents = districts.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!string.IsNullOrEmpty(prefabName))
+                    {
+                        if (!prefabSystem.TryGetPrefab(em.GetComponentData<PrefabRef>(e).m_Prefab,
+                                out PrefabBase pb) || pb == null || pb.name != prefabName)
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (!em.HasBuffer<Node>(e))
+                    {
+                        continue;
+                    }
+
+                    DynamicBuffer<Node> nb = em.GetBuffer<Node>(e, true);
+                    if (nb.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    float cx = 0f, cz = 0f;
+                    for (int i = 0; i < nb.Length; i++)
+                    {
+                        cx += nb[i].m_Position.x;
+                        cz += nb[i].m_Position.z;
+                    }
+
+                    cx /= nb.Length;
+                    cz /= nb.Length;
+
+                    float dx = cx - x, dz = cz - z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = e;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return best;
+        }
+    }
+
     public partial class DistrictDetectorSystem : GameSystemBase
     {
         private PrefabSystem _prefabSystem;

@@ -1,76 +1,755 @@
 [
-  {"type": "Game.Net.AggregateElement", "file": "Net/AggregateElement.cs:8", "class": "DERIVED", "writtenBy": ["Net/AggregateSystem.cs"], "syncPath": "NONE", "note": "Buffer m_Edge agrupa edges do mesmo agregado (ex.: mesma rua nomeada); recomputado por AggregateSystem a partir de Edge/PrefabRef — não precisa sync próprio se Edge sinca."},
-  {"type": "Game.Net.AreaLane", "file": "Net/AreaLane.cs:7", "class": "DERIVED", "writtenBy": ["Areas/AreaConnectionSystem.cs"], "syncPath": "NONE", "note": "m_Nodes (int4) é geometria de faixa dentro de área/lote gerada por AreaConnectionSystem a partir do polígono de Area — converge se Area+Node sincarem."},
-  {"type": "Game.Net.Bottleneck", "file": "Net/Bottleneck.cs:6", "class": "EMERGENT", "writtenBy": ["Simulation/TrafficBottleneckSystem.cs", "Simulation/ElectricityFlowSystem.cs"], "syncPath": "NONE", "note": "m_Position/m_Timer é estado de gargalo de tráfego/energia recalculado tick a tick; pode divergir por design (emergente)."},
-  {"type": "Game.Net.BuildOrder", "file": "Net/BuildOrder.cs:6", "class": "DERIVED", "writtenBy": ["Net/FlipTrafficHandednessSystem.cs", "Net/LaneSystem.cs"], "syncPath": "NONE", "note": "m_Start/m_End (uint) é ordem de construção de faixas dentro de um net; NÃO VERIFICADO se índice pode divergir por ordem de criação por-máquina — risco de ordem análogo ao suspeitado em Zones.Cell."},
-  {"type": "Game.Net.CarLane", "file": "Net/CarLane.cs:7", "class": "DERIVED", "writtenBy": ["Net/FixLaneObjectsSystem.cs", "Net/LaneConnectionSystem.cs", "Net/ConnectionWarningSystem.cs (leitor)"], "syncPath": "NONE", "note": "Velocidade/curviness/bloqueio de faixa de carro são computados de Composition+PrefabRef; CS2 base não tem tool de limite de velocidade manual (NÃO VERIFICADO se algum mod expõe isso)."},
-  {"type": "Game.Net.ConnectedNode", "file": "Net/ConnectedNode.cs:8", "class": "DERIVED", "writtenBy": ["Net/EdgeMappingSystem.cs"], "syncPath": "NONE", "note": "Buffer no nó listando edges conectados (GAME_SYSTEMS.md:104); reconstruído por GenerateEdgesSystem/EdgeMappingSystem a partir de Edge.m_Start/m_End — converge se Edge/Node sincarem."},
-  {"type": "Game.Net.ConnectionLane", "file": "Net/ConnectionLane.cs:7", "class": "DERIVED", "writtenBy": ["Net/AirwaySystem.cs", "Net/FixLaneObjectsSystem.cs"], "syncPath": "NONE", "note": "Faixa de conexão em interseção, gerada automaticamente pelo pipeline de faixas a partir da topologia de Edge/Node."},
-  {"type": "Game.Net.CoverageServiceType", "file": "Net/CoverageServiceType.cs:6", "class": "STATIC", "writtenBy": ["Simulation/ServiceCoverageSystem.cs", "Net/InitializeSystem.cs"], "syncPath": "NONE", "note": "Shared component m_Service (enum CoverageService) fixado na criação a partir do prefab de serviço; não muda por ação do jogador nem por tick."},
-  {"type": "Game.Net.Curve", "file": "Net/Curve.cs:9", "class": "AUTHORED", "writtenBy": ["Net/GenerateEdgesSystem (edge)", "Net/CompositionSelectSystem.cs (faixa, derivado)"], "syncPath": "NetPlaceCommand/NetBatchCommand/NetToolReplayCommand", "note": "Tipo usado em dois papéis: no Edge é a geometria autorada pelo traçado do jogador (m_Bezier — GAME_SYSTEMS.md:99-101, §3), em Lane é DERIVADO da curva do edge+composição; classificação por tipo prioriza o caso Edge (é o que o mod sinca)."},
-  {"type": "Game.Net.CutRange", "file": "Net/CutRange.cs:8", "class": "DERIVED", "writtenBy": ["Net/OverrideSystem.cs", "Net/SecondaryLaneSystem.cs", "Net/LaneSystem.cs"], "syncPath": "NONE", "note": "Bounds1 de recorte de faixa (usado em obras/overrides de upgrade parcial); recomputado a partir de Edge+Composition, não é autorado diretamente."},
-  {"type": "Game.Net.Density", "file": "Net/Density.cs:6", "class": "EMERGENT", "writtenBy": ["Pathfind/PathfindQueueSystem.cs", "Pathfind/LanesModifiedSystem.cs"], "syncPath": "NONE", "note": "m_Density é carga de pathfind/tráfego por faixa recalculada continuamente — sim per-tick, pode divergir."},
-  {"type": "Game.Net.Edge", "file": "Net/Edge.cs:6", "class": "AUTHORED", "writtenBy": ["Net/GenerateEdgesSystem", "Tools/NetToolSystem.cs"], "syncPath": "NetPlaceCommand/NetBatchCommand/NetToolReplayCommand/NetDeleteCommand", "note": "m_Start/m_End (Entity dos nós) é o segmento de rede que o jogador desenha (GAME_SYSTEMS.md:99, §3); núcleo do sync de rede."},
-  {"type": "Game.Net.EdgeLane", "file": "Net/EdgeLane.cs:7", "class": "DERIVED", "writtenBy": ["Net/EdgeMappingSystem.cs", "Net/LaneOverlapSystem.cs"], "syncPath": "NONE", "note": "m_EdgeDelta e contadores de faixas conectadas nas pontas — geometria de faixa derivada do Edge, recomputada pelo pipeline de geração."},
-  {"type": "Game.Net.Elevation", "file": "Net/Elevation.cs:7", "class": "AUTHORED", "writtenBy": ["Tools/NetToolSystem.cs (input do jogador)", "Net/CompositionSelectSystem.cs (visual derivado)"], "syncPath": "NetPlaceCommand", "note": "m_Elevation (float2, ponte/túnel) é escolhido pelo jogador durante o arrasto da ferramenta de rede; confirmado que NetPlaceCommand.cs carrega Elevation (grep em CS2M/Commands/Data/Game/NetPlaceCommand.cs)."},
-  {"type": "Game.Net.Fixed", "file": "Net/Fixed.cs:6", "class": "DERIVED", "writtenBy": ["Net/CompositionSelectSystem.cs"], "syncPath": "NONE", "note": "m_Index (int) é bookkeeping de variante de composição fixa; recomputado, não autorado."},
-  {"type": "Game.Net.GarageLane", "file": "Net/GarageLane.cs:6", "class": "EMERGENT", "writtenBy": ["Pathfind/LaneDataSystem.cs", "Pathfind/LanePoliciesSystem.cs"], "syncPath": "NONE", "note": "m_VehicleCount/m_VehicleCapacity mudam a cada tick com ocupação de garagem; m_ParkingFee deriva de política de distrito (DERIVED), não é autorado por faixa — classificado pelo campo dominante (ocupação)."},
-  {"type": "Game.Net.HangingLane", "file": "Net/HangingLane.cs:7", "class": "DERIVED", "writtenBy": ["Net/LaneSystem.cs", "Net/SecondaryLaneSystem.cs"], "syncPath": "NONE", "note": "m_Distances (float2) é geometria de faixa suspensa (cabos aéreos), computada do Composition — derivada."},
-  {"type": "Game.Net.LandValue", "file": "Net/LandValue.cs:6", "class": "EMERGENT", "writtenBy": ["Debug/LandValueDebugSystem.cs (leitor)"], "syncPath": "NONE", "note": "m_LandValue/m_Weight é saída da simulação econômica por posição ao longo da rede; sistema gravador não localizado com certeza no grep rápido (NÃO VERIFICADO qual system escreve), mas o campo é claramente por-tick."},
-  {"type": "Game.Net.Lane", "file": "Net/Lane.cs:8", "class": "DERIVED", "writtenBy": ["Net/AirwaySystem.cs", "Net/EdgeMappingSystem.cs"], "syncPath": "NONE", "note": "m_StartNode/m_MiddleNode/m_EndNode (PathNode) é a topologia central de faixas, gerada deterministicamente por LaneSystem/GenerateEdgesSystem a partir de Edge+Composition — precisa CONVERGIR mas não é autorado direto."},
-  {"type": "Game.Net.LaneCondition", "file": "Net/LaneCondition.cs:6", "class": "EMERGENT", "writtenBy": ["Simulation/MaintenanceVehicleAISystem.cs (por analogia a NetCondition)"], "syncPath": "NONE", "note": "m_Wear (desgaste) acumula com tráfego/manutenção tick a tick — não localizei o writer exato da faixa no grep rápido (NÃO VERIFICADO), mas o padrão é o mesmo de NetCondition."},
-  {"type": "Game.Net.LaneConnection", "file": "Net/LaneConnection.cs:6", "class": "DERIVED", "writtenBy": ["Net/LaneConnectionSystem.cs"], "syncPath": "NONE", "note": "m_StartLane/m_EndLane/posições são conexões de faixa geradas automaticamente pela topologia de interseção; CS2 base não expõe editor manual de lane connector (NÃO VERIFICADO)."},
-  {"type": "Game.Net.LaneFlow", "file": "Net/LaneFlow.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/TrafficFlowSystem.cs"], "syncPath": "NONE", "note": "m_Duration/m_Distance/m_Next é fluxo de tráfego por faixa, recalculado a cada tick pela simulação — diverge por design."},
-  {"type": "Game.Net.LaneReservation", "file": "Net/LaneReservation.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/AircraftNavigationSystem.cs", "Simulation/AnimalNavigationSystem.cs (leitores/prováveis gravadores por analogia)"], "syncPath": "NONE", "note": "m_Blocker/m_Next/m_Prev é reserva de faixa por veículo/pedestre em trânsito — estado emergente por-tick."},
-  {"type": "Game.Net.LaneSignal", "file": "Net/LaneSignal.cs:6", "class": "EMERGENT", "writtenBy": ["Net/LaneSystem.cs"], "syncPath": "NONE", "note": "m_Petitioner/m_Blocker/m_Priority/m_Signal é estado de semáforo/sinalização por faixa recalculado por tick de simulação de tráfego."},
-  {"type": "Game.Net.MasterLane", "file": "Net/MasterLane.cs:6", "class": "DERIVED", "writtenBy": ["Net/LaneReferencesSystem.cs", "Net/FixLaneObjectsSystem.cs"], "syncPath": "NONE", "note": "m_Group/m_MinIndex/m_MaxIndex é bookkeeping de agrupamento de faixas mestre/escrava, recomputado do Composition — derivado."},
-  {"type": "Game.Net.NetCondition", "file": "Net/NetCondition.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/MaintenanceDepotAISystem.cs", "Simulation/MaintenanceVehicleAISystem.cs"], "syncPath": "NONE", "note": "m_Wear (float2) é desgaste de rede que piora com uso e melhora com manutenção — simulação por-tick, pode divergir."},
-  {"type": "Game.Net.Node", "file": "Net/Node.cs:8", "class": "AUTHORED", "writtenBy": ["Net/GenerateNodesSystem", "Tools/NetToolSystem.cs"], "syncPath": "NetPlaceCommand/NetBatchCommand/NetToolReplayCommand/NetDeleteCommand", "note": "m_Position/m_Rotation é o nó (junção/ponta) que o jogador cria ao desenhar rede (GAME_SYSTEMS.md:100, §3); identidade explícita via CS2M_NodeSyncId (ver memória bug-juncao-sync)."},
-  {"type": "Game.Net.NodeLane", "file": "Net/NodeLane.cs:7", "class": "DERIVED", "writtenBy": ["Net/EdgeMappingSystem.cs", "Net/LaneOverlapSystem.cs", "Net/LaneSystem.cs"], "syncPath": "NONE", "note": "m_WidthOffset/flags/contadores compartilhados é geometria de faixa em nó/interseção, gerada do Composition — derivada."},
-  {"type": "Game.Net.OutsideConnection", "file": "Net/OutsideConnection.cs:6", "class": "STATIC", "writtenBy": ["Net/AirwaySystem.cs", "Net/GeometrySystem.cs"], "syncPath": "NONE", "note": "m_Delay vem do prefab de conexão externa (trem/rodovia/aeroporto) ao criar o nó de borda do mapa; não muda depois."},
-  {"type": "Game.Net.ParkingLane", "file": "Net/ParkingLane.cs:7", "class": "EMERGENT", "writtenBy": ["Net/FixLaneObjectsSystem.cs", "Net/LaneConnectionSystem.cs"], "syncPath": "NONE", "note": "m_FreeSpace/m_TaxiAvailability mudam a cada tick com veículos estacionando; m_ParkingFee é derivado de política (não autorado por faixa) — classificado pelo campo dominante."},
-  {"type": "Game.Net.PedestrianLane", "file": "Net/PedestrianLane.cs:6", "class": "DERIVED", "writtenBy": ["Net/FixLaneObjectsSystem.cs", "Net/LaneConnectionSystem.cs"], "syncPath": "NONE", "note": "m_AccessRestriction/flags de faixa de pedestre gerados do Composition/PrefabRef — derivado."},
-  {"type": "Game.Net.Pollution", "file": "Net/Pollution.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/NetPollutionSystem.cs"], "syncPath": "NONE", "note": "m_Pollution/m_Accumulation é poluição por segmento recalculada a cada tick de simulação — diverge por design."},
-  {"type": "Game.Net.ResourceAvailability", "file": "Net/ResourceAvailability.cs:8", "class": "EMERGENT", "writtenBy": ["Net/InitializeSystem.cs (init)", "Net/FlipTrafficHandednessSystem.cs (espelha ao inverter)"], "syncPath": "NONE", "note": "Buffer float2 de disponibilidade de recurso ao longo do net (água/eletricidade); não localizei com certeza o system de simulação que o atualiza por-tick (NÃO VERIFICADO o writer principal), mas semântica é claramente emergente."},
-  {"type": "Game.Net.ResourceConnection", "file": "Net/ResourceConnection.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/ExtractorCompanySystem.cs"], "syncPath": "NONE", "note": "m_Flow (int2) é fluxo de recurso extraído/transportado pela rede — valor de simulação por-tick."},
-  {"type": "Game.Net.Road", "file": "Net/Road.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/TrafficFlowSystem.cs (fluxo, por analogia a LaneFlow/SecondaryFlow)", "Net/CompositionSelectSystem.cs (m_Flags, na criação)"], "syncPath": "NONE", "note": "m_TrafficFlowDuration/Distance é agregado de tráfego por-tick (emergente); m_Flags (RoadFlags) é mais próximo de DERIVED/autorado via upgrade de composição — tipo misto, classificado pelo campo dominante (fluxo)."},
-  {"type": "Game.Net.SecondaryFlow", "file": "Net/SecondaryFlow.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/TrafficFlowSystem.cs"], "syncPath": "NONE", "note": "Mesmo formato de LaneFlow para fluxo secundário (pedestre/ciclista) — recalculado por tick."},
-  {"type": "Game.Net.ServiceCoverage", "file": "Net/ServiceCoverage.cs:8", "class": "EMERGENT", "writtenBy": ["Simulation/ServiceCoverageSystem.cs"], "syncPath": "NONE", "note": "Buffer float2 de cobertura de serviço propagada pela rede a partir de prédios de serviço; depende de orçamento/upkeep (ambos emergentes), então reclassificado de DERIVED para EMERGENT."},
-  {"type": "Game.Net.SlaveLane", "file": "Net/SlaveLane.cs:6", "class": "DERIVED", "writtenBy": ["Net/LaneConnectionSystem.cs", "Net/LaneOverlapSystem.cs"], "syncPath": "NONE", "note": "m_Group/m_SubIndex/m_MasterIndex é bookkeeping de faixa escrava vinculada a uma master lane, gerado do Composition."},
-  {"type": "Game.Net.SubReplacement", "file": "Net/SubReplacement.cs:9", "class": "DERIVED", "writtenBy": ["Net/CompositionSelectSystem.cs", "Tools/ApplyNetSystem.cs"], "syncPath": "NONE", "note": "m_Prefab/m_Type/m_Side/m_AgeMask escolhe variante de sub-elemento de composição (ex.: árvore por idade) — determinístico a partir de Edge+PrefabRef, converge se estes sincarem."},
-  {"type": "Game.Net.TrackLane", "file": "Net/TrackLane.cs:6", "class": "DERIVED", "writtenBy": ["Net/FixLaneObjectsSystem.cs", "Net/LaneOverlapSystem.cs"], "syncPath": "NONE", "note": "m_SpeedLimit/m_Curviness de faixa de trilho, computados do prefab/composição — mesmo padrão de CarLane."},
-  {"type": "Game.Net.TrafficLights", "file": "Net/TrafficLights.cs:6", "class": "EMERGENT", "writtenBy": ["Net/LaneSystem.cs"], "syncPath": "NONE", "note": "m_State/m_CurrentSignalGroup/m_Timer é a máquina de estado do semáforo, avançada a cada tick — emergente; a config inicial de quantos grupos (m_SignalGroupCount) é derivada da composição do cruzamento."},
-  {"type": "Game.Net.Upgraded", "file": "Net/Upgraded.cs:7", "class": "AUTHORED", "writtenBy": ["Net/CompositionSelectSystem.cs", "Tools/UpgradeToolSystem.cs"], "syncPath": "NetUpgradeCommand", "note": "m_Flags (CompositionFlags) é a seleção de upgrade do jogador (calçada, quay, barreira de som) feita pela ferramenta de upgrade — é literalmente o alvo do NetUpgradeCommand."},
-  {"type": "Game.Net.UtilityLane", "file": "Net/UtilityLane.cs:6", "class": "DERIVED", "writtenBy": ["Net/LaneSystem.cs", "Net/OverrideSystem.cs"], "syncPath": "NONE", "note": "m_Flags de faixa utilitária (cano/fio subterrâneo) gerado do Composition — derivado."},
-  {"type": "Game.Net.WaterPipeConnection", "file": "Net/WaterPipeConnection.cs:6", "class": "DERIVED", "writtenBy": ["Net/InitializeSystem.cs", "Prefabs/NetInitializeSystem.cs"], "syncPath": "NONE", "note": "Capacidades fresh/sewage/storm são derivadas do prefab+composição do cano na criação; a simulação de vazão real (pressão/fluxo por-tick) vive em Simulation.WaterPipeEdgeGraphSystem e é EMERGENTE — só a capacidade base é determinística."},
-
-  {"type": "Game.Zones.Block", "file": "Zones/Block.cs:8", "class": "DERIVED", "writtenBy": ["Zones/BlockSystem (GAME_SYSTEMS.md:183, não localizado por nome exato no grep rápido)"], "syncPath": "NONE", "note": "m_Position/m_Direction/m_Size — blocos existem ao longo de toda rua, criados automaticamente pelo BlockSystem independente de pintura (GAME_SYSTEMS.md:183-184); PISTA da memória (zones 594vs594 hash-diff) suspeita que a ORDEM/índice de criação de blocos possa divergir por-máquina mesmo com a mesma malha viária — risco de ordem não verificado."},
-  {"type": "Game.Zones.BuildOrder", "file": "Zones/BuildOrder.cs:6", "class": "DERIVED", "writtenBy": ["não localizado com certeza no grep rápido (NÃO VERIFICADO)"], "syncPath": "NONE", "note": "m_Order (uint) é sequência de construção do bloco/zona; mesmo risco de ordem por-máquina do Block — candidato a explicar divergência de zona relatada na memória do projeto."},
-  {"type": "Game.Zones.Cell", "file": "Zones/Cell.cs:7", "class": "AUTHORED", "writtenBy": ["Zones/CellCheckSystem.cs", "Tools/ZoneToolSystem.cs"], "syncPath": "ZonePaintCommand", "note": "Buffer m_State(ocupação, DERIVED)/m_Zone(ZoneType, AUTHORED)/m_Height(DERIVED) por célula; GAME_SYSTEMS.md:184-187 confirma que pintar = setar m_Zone e que ZoneDetectorSystem lê cells[i].m_Zone.m_Index (estável cross-machine) — classificado AUTHORED pelo campo que o jogador controla."},
-  {"type": "Game.Zones.CurvePosition", "file": "Zones/CurvePosition.cs:7", "class": "DERIVED", "writtenBy": ["Zones/BlockSystem (não localizado por nome exato)"], "syncPath": "NONE", "note": "m_CurvePosition (float2) é a posição do bloco ao longo da curva da rua-frente, calculada geometricamente do Edge — converge se Edge/Curve sincarem."},
-  {"type": "Game.Zones.VacantLot", "file": "Zones/VacantLot.cs:9", "class": "DERIVED", "writtenBy": ["Zones/CellCheckSystem.cs"], "syncPath": "NONE", "note": "m_Area/m_Type/m_Height/m_Flags descreve um lote livre dentro do bloco, calculado a partir do estado das células (Cell.m_Zone) — o consumo dele (spawn de growable) é EMERGENTE e depende da demanda host-autoritativa (GAME_SYSTEMS.md §5/§7)."},
-  {"type": "Game.Zones.ValidArea", "file": "Zones/ValidArea.cs:7", "class": "DERIVED", "writtenBy": ["Buildings/ZoneCheckSystem.cs", "Zones/CellCheckSystem.cs"], "syncPath": "NONE", "note": "m_Area (int4) é a região válida/edificável do bloco, recomputada a partir de terreno+geometria do bloco."},
-  {"type": "Game.Zones.ZoneType", "file": "Zones/ZoneType.cs:6", "class": "AUTHORED", "writtenBy": ["Tools/ZoneToolSystem.cs"], "syncPath": "ZonePaintCommand", "note": "m_Index (ushort) é o valor cru que ZoneDetectorSystem lê e manda pelo fio (GAME_SYSTEMS.md:186-187); é o tipo embrulhado dentro de Cell.m_Zone."},
-
-  {"type": "Game.Areas.Area", "file": "Areas/Area.cs:6", "class": "AUTHORED", "writtenBy": ["Tools/AreaToolSystem.cs"], "syncPath": "AreaEditCommand/DistrictCommand", "note": "m_Flags (AreaFlags) marca a área (distrito/lote/superfície); editar vértice marca Updated e não Applied (GAME_SYSTEMS.md:206-209), por isso o detector varre por diff de hash de polígono."},
-  {"type": "Game.Areas.BorderDistrict", "file": "Areas/BorderDistrict.cs:6", "class": "DERIVED", "writtenBy": ["writer não localizado com certeza (só leitores em Pathfind/*System.cs — NÃO VERIFICADO)"], "syncPath": "NONE", "note": "m_Left/m_Right (Entity) é a fronteira computada entre dois distritos adjacentes; usado por Pathfind (LaneDataSystem/LanePoliciesSystem) para aplicar política de borda — converge se District/Area/Node sincarem."},
-  {"type": "Game.Areas.CurrentDistrict", "file": "Areas/CurrentDistrict.cs:6", "class": "DERIVED", "writtenBy": ["writer não localizado com certeza (só leitores em dezenas de systems de Simulation/* — NÃO VERIFICADO)"], "syncPath": "NONE", "note": "m_District (Entity) é o distrito que contém espacialmente a entidade (prédio/objeto); índice espacial recomputado, não autorado — mas usado por muitos sistemas de política/felicidade, então uma divergência aqui contaminaria vários números emergentes."},
-  {"type": "Game.Areas.District", "file": "Areas/District.cs:6", "class": "AUTHORED", "writtenBy": ["Sync/DistrictApplySystem.cs (CS2M)", "Sync/DistrictDetectorSystem.cs (CS2M)"], "syncPath": "DistrictCommand", "note": "m_OptionMask (uint) é a máscara de políticas/opções do distrito escolhida pelo jogador; confirmado uso em CS2M/Sync/DistrictDetectorSystem.cs e DistrictApplySystem.cs."},
-  {"type": "Game.Areas.DistrictModifier", "file": "Areas/DistrictModifier.cs:8", "class": "DERIVED", "writtenBy": ["Policies/DistrictModifierInitializeSystem.cs", "Policies/ModifiedSystem.cs"], "syncPath": "NONE", "note": "Buffer m_Delta (float2) é a magnitude do efeito de uma política aplicada ao distrito; recalculado a partir de District.m_OptionMask — converge se District sincar via DistrictCommand."},
-  {"type": "Game.Areas.Extractor", "file": "Areas/Extractor.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/AreaLotSimulationSystem.cs", "Simulation/AreaSpawnSystem.cs", "Areas/AreaResourceSystem.cs"], "syncPath": "NONE", "note": "m_ResourceAmount/m_ExtractedAmount/m_WorkAmount/m_HarvestedAmount são acumuladores de extração (fazenda/mineração/floresta) atualizados a cada tick pela simulação — candidato direto ao gap 'campo de fazenda não bate' citado na memória do projeto."},
-  {"type": "Game.Areas.MapFeatureElement", "file": "Areas/MapFeatureElement.cs:7", "class": "EMERGENT", "writtenBy": ["Simulation/AreaLotSimulationSystem.cs", "Simulation/MapTilePurchaseSystem.cs", "Areas/AreaResourceSystem.cs"], "syncPath": "NONE", "note": "Buffer m_Amount/m_RenewalRate é o depósito de recurso natural sob a área (madeira/petróleo/minério); m_Amount deple­ta com extração tick a tick — é o EXATO tipo de campo que a memória do projeto aponta como 'campo de fazenda não bate' (depleção emergente diverge entre PCs mesmo com a mesma Area/Extractor sincada)."},
-  {"type": "Game.Areas.Node", "file": "Areas/Node.cs:9", "class": "AUTHORED", "writtenBy": ["Tools/AreaToolSystem.cs"], "syncPath": "AreaEditCommand/DistrictCommand", "note": "Buffer m_Position/m_Elevation são os vértices do polígono de área que o jogador arrasta (GAME_SYSTEMS.md:201); cuidado citado no doc: colide de nome com Game.Net.Node, precisa qualificar namespace."},
-  {"type": "Game.Areas.ServiceDistrict", "file": "Areas/ServiceDistrict.cs:8", "class": "DERIVED", "writtenBy": ["Simulation/ServiceCoverageSystem.cs", "Simulation/GarbageTruckAISystem.cs"], "syncPath": "NONE", "note": "Buffer m_District (Entity) lista distritos cobertos por um prédio de serviço/política — join espacial recomputado a partir de District+Area."},
-  {"type": "Game.Areas.Storage", "file": "Areas/Storage.cs:6", "class": "EMERGENT", "writtenBy": ["Simulation/AreaLotSimulationSystem.cs", "Simulation/AreaSpawnSystem.cs"], "syncPath": "NONE", "note": "m_Amount/m_WorkAmount é estoque de recurso do lote de área (silo/depósito), mudando a cada tick com produção/consumo."},
-  {"type": "Game.Areas.WoodResource", "file": "Areas/WoodResource.cs:7", "class": "DERIVED", "writtenBy": ["Areas/AreaResourceSystem.cs"], "syncPath": "NONE", "note": "Buffer m_Tree (Entity) lista as árvores dentro de uma área de floresta; a lista em si é recomputada por proximidade espacial, mas o estado de cada árvore (idade/saúde) é EMERGENTE — ver [[sync-gaps-audit]] 'idade árvore' já endereçado."},
-
-  {"type": "Game.Tools.EditorContainer", "file": "Tools/EditorContainer.cs:7", "class": "AUTHORED", "writtenBy": ["writer não localizado com certeza no grep rápido — provável tool exclusiva do Editor de mapas (NÃO VERIFICADO)"], "syncPath": "NONE", "note": "m_Prefab/m_Scale/m_Intensity é posicionamento de asset feito no Editor de Mapas (não no modo de jogo normal); fora do escopo do coop por design, mas fica como GAP formal por ser AUTHORED sem syncPath."},
-  {"type": "Game.Tools.LocalTransformCache", "file": "Tools/LocalTransformCache.cs:7", "class": "DERIVED", "writtenBy": ["Objects/SubObjectSystem.cs", "Tools/ApplyObjectsSystem.cs"], "syncPath": "NONE", "note": "Cache de transform local de sub-objeto relativo ao pai (luz/arbusto/extensão); é exatamente o caso da lei 13/14 do GAME_SYSTEMS.md:153-157 — sub-objetos derivados NÃO se sincronizam, os dois PCs recriam sozinhos."},
-  {"type": "Game.Tools.Recent", "file": "Tools/Recent.cs:6", "class": "META", "writtenBy": ["Net/CostSystem.cs", "Tools/ApplyNetSystem.cs", "Tools/ApplyObjectsSystem.cs", "Objects/AttachSystem.cs"], "syncPath": "NONE", "note": "m_ModificationFrame/m_ModificationCost é timestamp/custo da última edição (bookkeeping de UI/upkeep), tocado por praticamente todo apply-system; não carrega intenção do jogador além do carimbo — NÃO VERIFICADO se a divergência de frame entre host/cliente tem efeito visível."},
-
-  {"type": "Game.Pathfind.PathElement", "file": "Pathfind/PathElement.cs:8", "class": "EMERGENT", "writtenBy": ["Pathfind/PathfindResultSystem.cs", "Creatures/GroupSystem.cs", "Creatures/TripResetSystem.cs"], "syncPath": "NONE", "note": "Buffer de waypoints do caminho atual de um cidadão/veículo, resultado de pathfind — sim per-tick, diverge por design (cidadãos são emergentes)."},
-  {"type": "Game.Pathfind.PathInformation", "file": "Pathfind/PathInformation.cs:6", "class": "EMERGENT", "writtenBy": ["Pathfind/PathfindResultSystem.cs", "Routes/RoutePathReadySystem.cs"], "syncPath": "NONE", "note": "m_Origin/m_Destination/m_Distance/m_Duration/m_TotalCost é resultado de pathfind cacheado (ex.: para linha de transporte); recalculado, pode variar em custo/duração por timing local."},
-  {"type": "Game.Pathfind.PathInformations", "file": "Pathfind/PathInformations.cs:7", "class": "EMERGENT", "writtenBy": ["Pathfind/PathfindResultSystem.cs", "Simulation/HouseholdFindPropertySystem.cs"], "syncPath": "NONE", "note": "Variante em buffer do PathInformation (múltiplos candidatos, ex.: busca de imóvel por household) — mesma natureza emergente."},
-  {"type": "Game.Pathfind.PathNode", "file": "Pathfind/PathNode.cs:8", "class": "DERIVED", "writtenBy": ["não é componente próprio — struct-valor embutido em Game.Net.Lane.m_StartNode/m_MiddleNode/m_EndNode e Game.Net.ParkingLane.m_AdditionalStartNode"], "syncPath": "NONE", "note": "Não implementa IComponentData (só IEquatable/IStrideSerializable/ISerializable); é um codec de referência (lane+índice+posição-na-curva) usado dentro de outros componentes derivados — não existe como entidade sincronizável isolada."},
-  {"type": "Game.Pathfind.PathOwner", "file": "Pathfind/PathOwner.cs:6", "class": "EMERGENT", "writtenBy": ["Creatures/GroupSystem.cs", "Creatures/InitializeSystem.cs", "Creatures/TripResetSystem.cs"], "syncPath": "NONE", "note": "m_ElementIndex/m_State avança a cada tick conforme o cidadão/veículo progride no PathElement — estado de simulação, não autorado."}
+ {
+  "type": "Game.Net.AggregateElement",
+  "file": "Net/AggregateElement.cs:8",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/AggregateSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Buffer m_Edge agrupa edges do mesmo agregado (ex.: mesma rua nomeada); recomputado por AggregateSystem a partir de Edge/PrefabRef — não precisa sync próprio se Edge sinca."
+ },
+ {
+  "type": "Game.Net.AreaLane",
+  "file": "Net/AreaLane.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Areas/AreaConnectionSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Nodes (int4) é geometria de faixa dentro de área/lote gerada por AreaConnectionSystem a partir do polígono de Area — converge se Area+Node sincarem."
+ },
+ {
+  "type": "Game.Net.Bottleneck",
+  "file": "Net/Bottleneck.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/TrafficBottleneckSystem.cs",
+   "Simulation/ElectricityFlowSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Position/m_Timer é estado de gargalo de tráfego/energia recalculado tick a tick; pode divergir por design (emergente)."
+ },
+ {
+  "type": "Game.Net.BuildOrder",
+  "file": "Net/BuildOrder.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/FlipTrafficHandednessSystem.cs",
+   "Net/LaneSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Start/m_End (uint) é ordem de construção de faixas dentro de um net; NÃO VERIFICADO se índice pode divergir por ordem de criação por-máquina — risco de ordem análogo ao suspeitado em Zones.Cell."
+ },
+ {
+  "type": "Game.Net.CarLane",
+  "file": "Net/CarLane.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/FixLaneObjectsSystem.cs",
+   "Net/LaneConnectionSystem.cs",
+   "Net/ConnectionWarningSystem.cs (leitor)"
+  ],
+  "syncPath": "NONE",
+  "note": "Velocidade/curviness/bloqueio de faixa de carro são computados de Composition+PrefabRef; CS2 base não tem tool de limite de velocidade manual (NÃO VERIFICADO se algum mod expõe isso)."
+ },
+ {
+  "type": "Game.Net.ConnectedNode",
+  "file": "Net/ConnectedNode.cs:8",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/EdgeMappingSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Buffer no nó listando edges conectados (GAME_SYSTEMS.md:104); reconstruído por GenerateEdgesSystem/EdgeMappingSystem a partir de Edge.m_Start/m_End — converge se Edge/Node sincarem."
+ },
+ {
+  "type": "Game.Net.ConnectionLane",
+  "file": "Net/ConnectionLane.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/AirwaySystem.cs",
+   "Net/FixLaneObjectsSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Faixa de conexão em interseção, gerada automaticamente pelo pipeline de faixas a partir da topologia de Edge/Node."
+ },
+ {
+  "type": "Game.Net.CoverageServiceType",
+  "file": "Net/CoverageServiceType.cs:6",
+  "class": "STATIC",
+  "writtenBy": [
+   "Simulation/ServiceCoverageSystem.cs",
+   "Net/InitializeSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Shared component m_Service (enum CoverageService) fixado na criação a partir do prefab de serviço; não muda por ação do jogador nem por tick."
+ },
+ {
+  "type": "Game.Net.Curve",
+  "file": "Net/Curve.cs:9",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Net/GenerateEdgesSystem (edge)",
+   "Net/CompositionSelectSystem.cs (faixa, derivado)"
+  ],
+  "syncPath": "NetPlaceCommand/NetBatchCommand/NetToolReplayCommand",
+  "note": "Tipo usado em dois papéis: no Edge é a geometria autorada pelo traçado do jogador (m_Bezier — GAME_SYSTEMS.md:99-101, §3), em Lane é DERIVADO da curva do edge+composição; classificação por tipo prioriza o caso Edge (é o que o mod sinca)."
+ },
+ {
+  "type": "Game.Net.CutRange",
+  "file": "Net/CutRange.cs:8",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/OverrideSystem.cs",
+   "Net/SecondaryLaneSystem.cs",
+   "Net/LaneSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Bounds1 de recorte de faixa (usado em obras/overrides de upgrade parcial); recomputado a partir de Edge+Composition, não é autorado diretamente."
+ },
+ {
+  "type": "Game.Net.Density",
+  "file": "Net/Density.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Pathfind/PathfindQueueSystem.cs",
+   "Pathfind/LanesModifiedSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Density é carga de pathfind/tráfego por faixa recalculada continuamente — sim per-tick, pode divergir."
+ },
+ {
+  "type": "Game.Net.Edge",
+  "file": "Net/Edge.cs:6",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Net/GenerateEdgesSystem",
+   "Tools/NetToolSystem.cs"
+  ],
+  "syncPath": "NetPlaceCommand/NetBatchCommand/NetToolReplayCommand/NetDeleteCommand",
+  "note": "m_Start/m_End (Entity dos nós) é o segmento de rede que o jogador desenha (GAME_SYSTEMS.md:99, §3); núcleo do sync de rede."
+ },
+ {
+  "type": "Game.Net.EdgeLane",
+  "file": "Net/EdgeLane.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/EdgeMappingSystem.cs",
+   "Net/LaneOverlapSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_EdgeDelta e contadores de faixas conectadas nas pontas — geometria de faixa derivada do Edge, recomputada pelo pipeline de geração."
+ },
+ {
+  "type": "Game.Net.Elevation",
+  "file": "Net/Elevation.cs:7",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Tools/NetToolSystem.cs (input do jogador)",
+   "Net/CompositionSelectSystem.cs (visual derivado)"
+  ],
+  "syncPath": "NetPlaceCommand",
+  "note": "m_Elevation (float2, ponte/túnel) é escolhido pelo jogador durante o arrasto da ferramenta de rede; confirmado que NetPlaceCommand.cs carrega Elevation (grep em CS2M/Commands/Data/Game/NetPlaceCommand.cs)."
+ },
+ {
+  "type": "Game.Net.Fixed",
+  "file": "Net/Fixed.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/CompositionSelectSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Index (int) é bookkeeping de variante de composição fixa; recomputado, não autorado."
+ },
+ {
+  "type": "Game.Net.GarageLane",
+  "file": "Net/GarageLane.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Pathfind/LaneDataSystem.cs",
+   "Pathfind/LanePoliciesSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_VehicleCount/m_VehicleCapacity mudam a cada tick com ocupação de garagem; m_ParkingFee deriva de política de distrito (DERIVED), não é autorado por faixa — classificado pelo campo dominante (ocupação)."
+ },
+ {
+  "type": "Game.Net.HangingLane",
+  "file": "Net/HangingLane.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/LaneSystem.cs",
+   "Net/SecondaryLaneSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Distances (float2) é geometria de faixa suspensa (cabos aéreos), computada do Composition — derivada."
+ },
+ {
+  "type": "Game.Net.LandValue",
+  "file": "Net/LandValue.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Debug/LandValueDebugSystem.cs (leitor)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_LandValue/m_Weight é saída da simulação econômica por posição ao longo da rede; sistema gravador não localizado com certeza no grep rápido (NÃO VERIFICADO qual system escreve), mas o campo é claramente por-tick."
+ },
+ {
+  "type": "Game.Net.Lane",
+  "file": "Net/Lane.cs:8",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/AirwaySystem.cs",
+   "Net/EdgeMappingSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_StartNode/m_MiddleNode/m_EndNode (PathNode) é a topologia central de faixas, gerada deterministicamente por LaneSystem/GenerateEdgesSystem a partir de Edge+Composition — precisa CONVERGIR mas não é autorado direto."
+ },
+ {
+  "type": "Game.Net.LaneCondition",
+  "file": "Net/LaneCondition.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/MaintenanceVehicleAISystem.cs (por analogia a NetCondition)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Wear (desgaste) acumula com tráfego/manutenção tick a tick — não localizei o writer exato da faixa no grep rápido (NÃO VERIFICADO), mas o padrão é o mesmo de NetCondition."
+ },
+ {
+  "type": "Game.Net.LaneConnection",
+  "file": "Net/LaneConnection.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/LaneConnectionSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_StartLane/m_EndLane/posições são conexões de faixa geradas automaticamente pela topologia de interseção; CS2 base não expõe editor manual de lane connector (NÃO VERIFICADO)."
+ },
+ {
+  "type": "Game.Net.LaneFlow",
+  "file": "Net/LaneFlow.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/TrafficFlowSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Duration/m_Distance/m_Next é fluxo de tráfego por faixa, recalculado a cada tick pela simulação — diverge por design."
+ },
+ {
+  "type": "Game.Net.LaneReservation",
+  "file": "Net/LaneReservation.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/AircraftNavigationSystem.cs",
+   "Simulation/AnimalNavigationSystem.cs (leitores/prováveis gravadores por analogia)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Blocker/m_Next/m_Prev é reserva de faixa por veículo/pedestre em trânsito — estado emergente por-tick."
+ },
+ {
+  "type": "Game.Net.LaneSignal",
+  "file": "Net/LaneSignal.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Net/LaneSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Petitioner/m_Blocker/m_Priority/m_Signal é estado de semáforo/sinalização por faixa recalculado por tick de simulação de tráfego."
+ },
+ {
+  "type": "Game.Net.MasterLane",
+  "file": "Net/MasterLane.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/LaneReferencesSystem.cs",
+   "Net/FixLaneObjectsSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Group/m_MinIndex/m_MaxIndex é bookkeeping de agrupamento de faixas mestre/escrava, recomputado do Composition — derivado."
+ },
+ {
+  "type": "Game.Net.NetCondition",
+  "file": "Net/NetCondition.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/MaintenanceDepotAISystem.cs",
+   "Simulation/MaintenanceVehicleAISystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Wear (float2) é desgaste de rede que piora com uso e melhora com manutenção — simulação por-tick, pode divergir."
+ },
+ {
+  "type": "Game.Net.Node",
+  "file": "Net/Node.cs:8",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Net/GenerateNodesSystem",
+   "Tools/NetToolSystem.cs"
+  ],
+  "syncPath": "NetPlaceCommand/NetBatchCommand/NetToolReplayCommand/NetDeleteCommand",
+  "note": "m_Position/m_Rotation é o nó (junção/ponta) que o jogador cria ao desenhar rede (GAME_SYSTEMS.md:100, §3); identidade explícita via CS2M_NodeSyncId (ver memória bug-juncao-sync)."
+ },
+ {
+  "type": "Game.Net.NodeLane",
+  "file": "Net/NodeLane.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/EdgeMappingSystem.cs",
+   "Net/LaneOverlapSystem.cs",
+   "Net/LaneSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_WidthOffset/flags/contadores compartilhados é geometria de faixa em nó/interseção, gerada do Composition — derivada."
+ },
+ {
+  "type": "Game.Net.OutsideConnection",
+  "file": "Net/OutsideConnection.cs:6",
+  "class": "STATIC",
+  "writtenBy": [
+   "Net/AirwaySystem.cs",
+   "Net/GeometrySystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Delay vem do prefab de conexão externa (trem/rodovia/aeroporto) ao criar o nó de borda do mapa; não muda depois."
+ },
+ {
+  "type": "Game.Net.ParkingLane",
+  "file": "Net/ParkingLane.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Net/FixLaneObjectsSystem.cs",
+   "Net/LaneConnectionSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_FreeSpace/m_TaxiAvailability mudam a cada tick com veículos estacionando; m_ParkingFee é derivado de política (não autorado por faixa) — classificado pelo campo dominante."
+ },
+ {
+  "type": "Game.Net.PedestrianLane",
+  "file": "Net/PedestrianLane.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/FixLaneObjectsSystem.cs",
+   "Net/LaneConnectionSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_AccessRestriction/flags de faixa de pedestre gerados do Composition/PrefabRef — derivado."
+ },
+ {
+  "type": "Game.Net.Pollution",
+  "file": "Net/Pollution.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/NetPollutionSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Pollution/m_Accumulation é poluição por segmento recalculada a cada tick de simulação — diverge por design."
+ },
+ {
+  "type": "Game.Net.ResourceAvailability",
+  "file": "Net/ResourceAvailability.cs:8",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Net/InitializeSystem.cs (init)",
+   "Net/FlipTrafficHandednessSystem.cs (espelha ao inverter)"
+  ],
+  "syncPath": "NONE",
+  "note": "Buffer float2 de disponibilidade de recurso ao longo do net (água/eletricidade); não localizei com certeza o system de simulação que o atualiza por-tick (NÃO VERIFICADO o writer principal), mas semântica é claramente emergente."
+ },
+ {
+  "type": "Game.Net.ResourceConnection",
+  "file": "Net/ResourceConnection.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/ExtractorCompanySystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Flow (int2) é fluxo de recurso extraído/transportado pela rede — valor de simulação por-tick."
+ },
+ {
+  "type": "Game.Net.Road",
+  "file": "Net/Road.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/TrafficFlowSystem.cs (fluxo, por analogia a LaneFlow/SecondaryFlow)",
+   "Net/CompositionSelectSystem.cs (m_Flags, na criação)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_TrafficFlowDuration/Distance é agregado de tráfego por-tick (emergente); m_Flags (RoadFlags) é mais próximo de DERIVED/autorado via upgrade de composição — tipo misto, classificado pelo campo dominante (fluxo)."
+ },
+ {
+  "type": "Game.Net.SecondaryFlow",
+  "file": "Net/SecondaryFlow.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/TrafficFlowSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Mesmo formato de LaneFlow para fluxo secundário (pedestre/ciclista) — recalculado por tick."
+ },
+ {
+  "type": "Game.Net.ServiceCoverage",
+  "file": "Net/ServiceCoverage.cs:8",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/ServiceCoverageSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Buffer float2 de cobertura de serviço propagada pela rede a partir de prédios de serviço; depende de orçamento/upkeep (ambos emergentes), então reclassificado de DERIVED para EMERGENT."
+ },
+ {
+  "type": "Game.Net.SlaveLane",
+  "file": "Net/SlaveLane.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/LaneConnectionSystem.cs",
+   "Net/LaneOverlapSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Group/m_SubIndex/m_MasterIndex é bookkeeping de faixa escrava vinculada a uma master lane, gerado do Composition."
+ },
+ {
+  "type": "Game.Net.SubReplacement",
+  "file": "Net/SubReplacement.cs:9",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/CompositionSelectSystem.cs",
+   "Tools/ApplyNetSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Prefab/m_Type/m_Side/m_AgeMask escolhe variante de sub-elemento de composição (ex.: árvore por idade) — determinístico a partir de Edge+PrefabRef, converge se estes sincarem."
+ },
+ {
+  "type": "Game.Net.TrackLane",
+  "file": "Net/TrackLane.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/FixLaneObjectsSystem.cs",
+   "Net/LaneOverlapSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_SpeedLimit/m_Curviness de faixa de trilho, computados do prefab/composição — mesmo padrão de CarLane."
+ },
+ {
+  "type": "Game.Net.TrafficLights",
+  "file": "Net/TrafficLights.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Net/LaneSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_State/m_CurrentSignalGroup/m_Timer é a máquina de estado do semáforo, avançada a cada tick — emergente; a config inicial de quantos grupos (m_SignalGroupCount) é derivada da composição do cruzamento."
+ },
+ {
+  "type": "Game.Net.Upgraded",
+  "file": "Net/Upgraded.cs:7",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Net/CompositionSelectSystem.cs",
+   "Tools/UpgradeToolSystem.cs"
+  ],
+  "syncPath": "NetUpgradeCommand",
+  "note": "m_Flags (CompositionFlags) é a seleção de upgrade do jogador (calçada, quay, barreira de som) feita pela ferramenta de upgrade — é literalmente o alvo do NetUpgradeCommand."
+ },
+ {
+  "type": "Game.Net.UtilityLane",
+  "file": "Net/UtilityLane.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/LaneSystem.cs",
+   "Net/OverrideSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Flags de faixa utilitária (cano/fio subterrâneo) gerado do Composition — derivado."
+ },
+ {
+  "type": "Game.Net.WaterPipeConnection",
+  "file": "Net/WaterPipeConnection.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Net/InitializeSystem.cs",
+   "Prefabs/NetInitializeSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Capacidades fresh/sewage/storm são derivadas do prefab+composição do cano na criação; a simulação de vazão real (pressão/fluxo por-tick) vive em Simulation.WaterPipeEdgeGraphSystem e é EMERGENTE — só a capacidade base é determinística."
+ },
+ {
+  "type": "Game.Zones.Block",
+  "file": "Zones/Block.cs:8",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Zones/BlockSystem (GAME_SYSTEMS.md:183, não localizado por nome exato no grep rápido)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Position/m_Direction/m_Size — blocos existem ao longo de toda rua, criados automaticamente pelo BlockSystem independente de pintura (GAME_SYSTEMS.md:183-184); PISTA da memória (zones 594vs594 hash-diff) suspeita que a ORDEM/índice de criação de blocos possa divergir por-máquina mesmo com a mesma malha viária — risco de ordem não verificado."
+ },
+ {
+  "type": "Game.Zones.BuildOrder",
+  "file": "Zones/BuildOrder.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "não localizado com certeza no grep rápido (NÃO VERIFICADO)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Order (uint) é sequência de construção do bloco/zona; mesmo risco de ordem por-máquina do Block — candidato a explicar divergência de zona relatada na memória do projeto."
+ },
+ {
+  "type": "Game.Zones.Cell",
+  "file": "Zones/Cell.cs:7",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Zones/CellCheckSystem.cs",
+   "Tools/ZoneToolSystem.cs"
+  ],
+  "syncPath": "ZonePaintCommand",
+  "note": "Buffer m_State(ocupação, DERIVED)/m_Zone(ZoneType, AUTHORED)/m_Height(DERIVED) por célula; GAME_SYSTEMS.md:184-187 confirma que pintar = setar m_Zone e que ZoneDetectorSystem lê cells[i].m_Zone.m_Index (estável cross-machine) — classificado AUTHORED pelo campo que o jogador controla."
+ },
+ {
+  "type": "Game.Zones.CurvePosition",
+  "file": "Zones/CurvePosition.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Zones/BlockSystem (não localizado por nome exato)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_CurvePosition (float2) é a posição do bloco ao longo da curva da rua-frente, calculada geometricamente do Edge — converge se Edge/Curve sincarem."
+ },
+ {
+  "type": "Game.Zones.VacantLot",
+  "file": "Zones/VacantLot.cs:9",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Zones/CellCheckSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Area/m_Type/m_Height/m_Flags descreve um lote livre dentro do bloco, calculado a partir do estado das células (Cell.m_Zone) — o consumo dele (spawn de growable) é EMERGENTE e depende da demanda host-autoritativa (GAME_SYSTEMS.md §5/§7)."
+ },
+ {
+  "type": "Game.Zones.ValidArea",
+  "file": "Zones/ValidArea.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Buildings/ZoneCheckSystem.cs",
+   "Zones/CellCheckSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Area (int4) é a região válida/edificável do bloco, recomputada a partir de terreno+geometria do bloco."
+ },
+ {
+  "type": "Game.Zones.ZoneType",
+  "file": "Zones/ZoneType.cs:6",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Tools/ZoneToolSystem.cs"
+  ],
+  "syncPath": "ZonePaintCommand",
+  "note": "m_Index (ushort) é o valor cru que ZoneDetectorSystem lê e manda pelo fio (GAME_SYSTEMS.md:186-187); é o tipo embrulhado dentro de Cell.m_Zone."
+ },
+ {
+  "type": "Game.Areas.Area",
+  "file": "Areas/Area.cs:6",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Tools/AreaToolSystem.cs"
+  ],
+  "syncPath": "AreaEditCommand/DistrictCommand",
+  "note": "m_Flags (AreaFlags) marca a área (distrito/lote/superfície); editar vértice marca Updated e não Applied (GAME_SYSTEMS.md:206-209), por isso o detector varre por diff de hash de polígono."
+ },
+ {
+  "type": "Game.Areas.BorderDistrict",
+  "file": "Areas/BorderDistrict.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "writer não localizado com certeza (só leitores em Pathfind/*System.cs — NÃO VERIFICADO)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Left/m_Right (Entity) é a fronteira computada entre dois distritos adjacentes; usado por Pathfind (LaneDataSystem/LanePoliciesSystem) para aplicar política de borda — converge se District/Area/Node sincarem."
+ },
+ {
+  "type": "Game.Areas.CurrentDistrict",
+  "file": "Areas/CurrentDistrict.cs:6",
+  "class": "DERIVED",
+  "writtenBy": [
+   "writer não localizado com certeza (só leitores em dezenas de systems de Simulation/* — NÃO VERIFICADO)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_District (Entity) é o distrito que contém espacialmente a entidade (prédio/objeto); índice espacial recomputado, não autorado — mas usado por muitos sistemas de política/felicidade, então uma divergência aqui contaminaria vários números emergentes."
+ },
+ {
+  "type": "Game.Areas.District",
+  "file": "Areas/District.cs:6",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Sync/DistrictApplySystem.cs (CS2M)",
+   "Sync/DistrictDetectorSystem.cs (CS2M)"
+  ],
+  "syncPath": "DistrictCommand",
+  "note": "m_OptionMask (uint) é a máscara de políticas/opções do distrito escolhida pelo jogador; confirmado uso em CS2M/Sync/DistrictDetectorSystem.cs e DistrictApplySystem.cs."
+ },
+ {
+  "type": "Game.Areas.DistrictModifier",
+  "file": "Areas/DistrictModifier.cs:8",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Policies/DistrictModifierInitializeSystem.cs",
+   "Policies/ModifiedSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Buffer m_Delta (float2) é a magnitude do efeito de uma política aplicada ao distrito; recalculado a partir de District.m_OptionMask — converge se District sincar via DistrictCommand."
+ },
+ {
+  "type": "Game.Areas.Extractor",
+  "file": "Areas/Extractor.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/AreaLotSimulationSystem.cs",
+   "Simulation/AreaSpawnSystem.cs",
+   "Areas/AreaResourceSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_ResourceAmount/m_ExtractedAmount/m_WorkAmount/m_HarvestedAmount são acumuladores de extração (fazenda/mineração/floresta) atualizados a cada tick pela simulação — candidato direto ao gap 'campo de fazenda não bate' citado na memória do projeto."
+ },
+ {
+  "type": "Game.Areas.MapFeatureElement",
+  "file": "Areas/MapFeatureElement.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/AreaLotSimulationSystem.cs",
+   "Simulation/MapTilePurchaseSystem.cs",
+   "Areas/AreaResourceSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Buffer m_Amount/m_RenewalRate é o depósito de recurso natural sob a área (madeira/petróleo/minério); m_Amount deple­ta com extração tick a tick — é o EXATO tipo de campo que a memória do projeto aponta como 'campo de fazenda não bate' (depleção emergente diverge entre PCs mesmo com a mesma Area/Extractor sincada)."
+ },
+ {
+  "type": "Game.Areas.Node",
+  "file": "Areas/Node.cs:9",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Tools/AreaToolSystem.cs"
+  ],
+  "syncPath": "AreaEditCommand/DistrictCommand",
+  "note": "Buffer m_Position/m_Elevation são os vértices do polígono de área que o jogador arrasta (GAME_SYSTEMS.md:201); cuidado citado no doc: colide de nome com Game.Net.Node, precisa qualificar namespace."
+ },
+ {
+  "type": "Game.Areas.ServiceDistrict",
+  "file": "Areas/ServiceDistrict.cs:8",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "Simulation/ServiceCoverageSystem.cs",
+   "Simulation/GarbageTruckAISystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "CORRIGIDO 06/07: jogador EDITA via TriggerBinding removeDistrict (UI/InGame/DistrictsSection.cs:79-85) — classificacao DERIVED anterior errada; gap real, sync em implementacao."
+ },
+ {
+  "type": "Game.Areas.Storage",
+  "file": "Areas/Storage.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Simulation/AreaLotSimulationSystem.cs",
+   "Simulation/AreaSpawnSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Amount/m_WorkAmount é estoque de recurso do lote de área (silo/depósito), mudando a cada tick com produção/consumo."
+ },
+ {
+  "type": "Game.Areas.WoodResource",
+  "file": "Areas/WoodResource.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Areas/AreaResourceSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Buffer m_Tree (Entity) lista as árvores dentro de uma área de floresta; a lista em si é recomputada por proximidade espacial, mas o estado de cada árvore (idade/saúde) é EMERGENTE — ver [[sync-gaps-audit]] 'idade árvore' já endereçado."
+ },
+ {
+  "type": "Game.Tools.EditorContainer",
+  "file": "Tools/EditorContainer.cs:7",
+  "class": "AUTHORED",
+  "writtenBy": [
+   "writer não localizado com certeza no grep rápido — provável tool exclusiva do Editor de mapas (NÃO VERIFICADO)"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Prefab/m_Scale/m_Intensity é posicionamento de asset feito no Editor de Mapas (não no modo de jogo normal); fora do escopo do coop por design, mas fica como GAP formal por ser AUTHORED sem syncPath."
+ },
+ {
+  "type": "Game.Tools.LocalTransformCache",
+  "file": "Tools/LocalTransformCache.cs:7",
+  "class": "DERIVED",
+  "writtenBy": [
+   "Objects/SubObjectSystem.cs",
+   "Tools/ApplyObjectsSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Cache de transform local de sub-objeto relativo ao pai (luz/arbusto/extensão); é exatamente o caso da lei 13/14 do GAME_SYSTEMS.md:153-157 — sub-objetos derivados NÃO se sincronizam, os dois PCs recriam sozinhos."
+ },
+ {
+  "type": "Game.Tools.Recent",
+  "file": "Tools/Recent.cs:6",
+  "class": "META",
+  "writtenBy": [
+   "Net/CostSystem.cs",
+   "Tools/ApplyNetSystem.cs",
+   "Tools/ApplyObjectsSystem.cs",
+   "Objects/AttachSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_ModificationFrame/m_ModificationCost é timestamp/custo da última edição (bookkeeping de UI/upkeep), tocado por praticamente todo apply-system; não carrega intenção do jogador além do carimbo — NÃO VERIFICADO se a divergência de frame entre host/cliente tem efeito visível."
+ },
+ {
+  "type": "Game.Pathfind.PathElement",
+  "file": "Pathfind/PathElement.cs:8",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Pathfind/PathfindResultSystem.cs",
+   "Creatures/GroupSystem.cs",
+   "Creatures/TripResetSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Buffer de waypoints do caminho atual de um cidadão/veículo, resultado de pathfind — sim per-tick, diverge por design (cidadãos são emergentes)."
+ },
+ {
+  "type": "Game.Pathfind.PathInformation",
+  "file": "Pathfind/PathInformation.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Pathfind/PathfindResultSystem.cs",
+   "Routes/RoutePathReadySystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_Origin/m_Destination/m_Distance/m_Duration/m_TotalCost é resultado de pathfind cacheado (ex.: para linha de transporte); recalculado, pode variar em custo/duração por timing local."
+ },
+ {
+  "type": "Game.Pathfind.PathInformations",
+  "file": "Pathfind/PathInformations.cs:7",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Pathfind/PathfindResultSystem.cs",
+   "Simulation/HouseholdFindPropertySystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "Variante em buffer do PathInformation (múltiplos candidatos, ex.: busca de imóvel por household) — mesma natureza emergente."
+ },
+ {
+  "type": "Game.Pathfind.PathNode",
+  "file": "Pathfind/PathNode.cs:8",
+  "class": "DERIVED",
+  "writtenBy": [
+   "não é componente próprio — struct-valor embutido em Game.Net.Lane.m_StartNode/m_MiddleNode/m_EndNode e Game.Net.ParkingLane.m_AdditionalStartNode"
+  ],
+  "syncPath": "NONE",
+  "note": "Não implementa IComponentData (só IEquatable/IStrideSerializable/ISerializable); é um codec de referência (lane+índice+posição-na-curva) usado dentro de outros componentes derivados — não existe como entidade sincronizável isolada."
+ },
+ {
+  "type": "Game.Pathfind.PathOwner",
+  "file": "Pathfind/PathOwner.cs:6",
+  "class": "EMERGENT",
+  "writtenBy": [
+   "Creatures/GroupSystem.cs",
+   "Creatures/InitializeSystem.cs",
+   "Creatures/TripResetSystem.cs"
+  ],
+  "syncPath": "NONE",
+  "note": "m_ElementIndex/m_State avança a cada tick conforme o cidadão/veículo progride no PathElement — estado de simulação, não autorado."
+ }
 ]
