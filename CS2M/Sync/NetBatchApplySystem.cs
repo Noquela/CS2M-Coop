@@ -214,6 +214,12 @@ namespace CS2M.Sync
 
                     idToEntity[bid] = be;
                     boundarySet.Add(bid);
+
+                    if (EntityManager.HasComponent<Node>(be))
+                    {
+                        float3 bPos = EntityManager.GetComponentData<Node>(be).m_Position;
+                        CS2M.Log.Info($"[Batch] BOUND-OK id={bid} entity={be.Index} pos=({bPos.x:F1},{bPos.z:F1})");
+                    }
                 }
             }
 
@@ -344,6 +350,9 @@ namespace CS2M.Sync
             {
                 EntityManager.AddComponent<CS2M_RemotePlaced>(node);
             }
+
+            CS2M.Log.Info(
+                $"[Batch] NODE-NEW id={cmd.NodeIds[i]} pos=({cmd.NodePosX[i]:F1},{cmd.NodePosZ[i]:F1}) entity={node.Index}");
 
             return node;
         }

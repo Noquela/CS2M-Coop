@@ -377,8 +377,45 @@ namespace CS2M.Sync
             };
 
             Command.SendToAll?.Invoke(cmd);
+
+            // Debug-only (logging, no behavior change): id+position dumps so a divergence hunt can tell
+            // "receiver never got this node" from "receiver got it, then moved it".
+            if (nNodeIds.Count > 0)
+            {
+                CS2M.Log.Info($"[Batch] CAP-NODES {FormatIdPosList(nNodeIds, nPosX, nPosZ)}");
+            }
+
+            if (boundaryIds.Count > 0)
+            {
+                CS2M.Log.Info($"[Batch] CAP-BOUND {FormatIdPosList(boundaryIds, boundaryPosX, boundaryPosZ)}");
+            }
+
             CS2M.Log.Info(
                 $"[Batch] CAPTURED nodes={nNodeIds.Count} edges={eStart.Count} dels={dStart.Count} boundary={boundaryIds.Count}");
+        }
+
+        /// <summary>Debug-only formatter: "<c>id@x,z</c>" tokens, space-separated, capped at 32 items
+        /// (a "+N" suffix marks how many more were omitted). Used only by CAP-NODES/CAP-BOUND logging.</summary>
+        private static string FormatIdPosList(List<ulong> ids, List<float> x, List<float> z, int cap = 32)
+        {
+            var sb = new System.Text.StringBuilder();
+            int shown = ids.Count < cap ? ids.Count : cap;
+            for (int i = 0; i < shown; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append(' ');
+                }
+
+                sb.Append(ids[i]).Append('@').Append(x[i].ToString("F1")).Append(',').Append(z[i].ToString("F1"));
+            }
+
+            if (ids.Count > cap)
+            {
+                sb.Append(" +").Append(ids.Count - cap);
+            }
+
+            return sb.ToString();
         }
 
         /// <summary>Resolve a new edge's endpoint node to its shipped id. If it is one of this batch's new
