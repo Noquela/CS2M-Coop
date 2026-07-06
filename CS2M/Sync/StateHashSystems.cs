@@ -964,6 +964,15 @@ namespace CS2M.Sync
                     {
                         StateHash.DumpBlocks(EntityManager, _blocks, "CLIENT");
                     }
+                    else if (StateHash.NodeDumpOn)
+                    {
+                        // v56: cell-FLAG divergence (visibility/overlap outcome) is deliberately invisible
+                        // to the zones hash, so a flags-only split never trips the drift gate above — yet
+                        // it is exactly what the BlockDump's new ~hex suffix exists to catch. Dump every
+                        // sample under NODEDUMP so statediff always has a CLIENT side to pair with the
+                        // host's periodic dump, drift or no drift.
+                        StateHash.DumpBlocks(EntityManager, _blocks, "CLIENT");
+                    }
 
                     if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("buildings")))
                     {
