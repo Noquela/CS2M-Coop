@@ -69,6 +69,9 @@ namespace CS2M.Sync
         private int _triPhasesDone;
         private string _triRoadType;
         private string _triRoadName;
+        private string _triZoneName; // zone name PHASE1/PHASE5 actually painted with — PHASE7 REPAINT
+                                      // reads this back so it can pick a DIFFERENT zone for the same cells
+                                      // (repainting with the SAME name would never touch Cell.m_Zone at all).
         private float3 _triAnchor;
         private float3 _triOrigin; // chosen free quadrant's origin — every phase derives its offsets
                                     // from this ONE field (see TriRepro_Setup's quadrant search), so
@@ -766,8 +769,13 @@ namespace CS2M.Sync
             finally { blocks.Dispose(); }
         }
 
-        /// <summary>Finds any real ZonePrefab (ZoneData) with a non-zero index and a resolvable name.</summary>
-        private bool TryGetZone(out string name, out ushort index)
+        /// <summary>Finds any real ZonePrefab (ZoneData) with a non-zero index and a resolvable name — the
+        /// FIRST such match in query order, which is why repeated calls (PHASE1, PHASE5) deterministically
+        /// return the SAME zone every time. <paramref name="exclude"/> (optional) skips a name already in
+        /// use, so PHASE7 REPAINT can ask for a DIFFERENT zone than whatever PHASE1/PHASE5 painted with —
+        /// without it, "repaint" would pick the identical zone and never actually rewrite
+        /// Cell.m_Zone.</summary>
+        private bool TryGetZone(out string name, out ushort index, string exclude = null)
         {
             name = null;
             index = 0;
@@ -781,6 +789,7 @@ namespace CS2M.Sync
                     if (zd.m_ZoneType.m_Index == 0) { continue; }
                     if (_prefabSystem.TryGetPrefab(e, out PrefabBase pb) && pb != null)
                     {
+                        if (!string.IsNullOrEmpty(exclude) && pb.name == exclude) { continue; }
                         name = pb.name;
                         index = zd.m_ZoneType.m_Index;
                         return true;
@@ -3343,10 +3352,13 @@ namespace CS2M.Sync
         // NetToolReplaySystems.cs); PHASE4 "OVERDRAW" (step 8) redraws exactly over half of PHASE1's
         // triangle; PHASE5 (step 9) paints zoning around the X-CROSS; PHASE6 "FARM" (step 10) places a
         // real agricultural extractor building to reproduce the AreaSpawnSystem field-divergence bug;
-        // TriRepro_Finish (step 11) logs the final DONE marker.
+        // PHASE7 "REPAINT" (step 11) repaints the SAME blocks PHASE1/PHASE5 already zoned, with a
+        // DIFFERENT ZonePrefab, to reproduce the user report "quando eu pinto uma zona que JÁ EXISTIA, ela
+        // não sinca" (as opposed to painting a fresh Unzoned cell, which PHASE1/PHASE5 already cover);
+        // TriRepro_Finish (step 12) logs the final DONE marker.
         private void RunTriReproStep()
         {
-            if (_triStep > 11) { return; }
+            if (_triStep > 12) { return; }
             if (_triTimer > 0) { _triTimer--; return; }
             _triTimer = 180; // ~3s between traces, as requested (phases can override this — see PHASE6)
 
@@ -3363,7 +3375,8 @@ namespace CS2M.Sync
                 case 8: TriRepro_Phase4_Overdraw(); break;
                 case 9: TriRepro_Phase5_ZoneAndFinish(); break;
                 case 10: TriRepro_Phase6_FarmPlace(); break;
-                case 11: TriRepro_Finish(); break;
+                case 11: TriRepro_Phase7_Repaint(); break;
+                case 12: TriRepro_Finish(); break;
             }
 
             _triStep++;
@@ -3378,8 +3391,9 @@ namespace CS2M.Sync
             if (!TryAnchor(out float3 anchor))
             {
                 L("[Auto] TRIREPRO SKIP no anchor point in city");
-                _triStep = 8; // -> Phase5(SKIP)->Phase6(SKIP)->Finish(DONE); RunTriReproStep's trailing
-                              // _triStep++ makes this land on case 9 (Phase5) next call, not case 8 again.
+                _triStep = 8; // -> Phase5(SKIP)->Phase6(SKIP)->Phase7(SKIP)->Finish(DONE); RunTriReproStep's
+                              // trailing _triStep++ makes this land on case 9 (Phase5) next call, not case 8
+                              // again.
                 return;
             }
 
@@ -3538,6 +3552,7 @@ namespace CS2M.Sync
             else
             {
                 int painted = PaintZoneNear(_triMid, 60f, zoneName);
+                _triZoneName = zoneName; // PHASE7 REPAINT needs this to pick a DIFFERENT zone later
                 L($"[Auto] TRIREPRO zone painted cells={painted} near side A-B (name='{zoneName}')");
             }
 
@@ -3652,8 +3667,8 @@ namespace CS2M.Sync
 
         /// <summary>Step 9: PHASE5 — paint zoning around the X-CROSS intersection (reuses the same
         /// <see cref="PaintZoneNear"/> helper PHASE1 used near the triangle). The scenario continues into
-        /// PHASE6 (farm building, step 10); the final "TRIREPRO DONE" marker now comes from
-        /// <see cref="TriRepro_Finish"/> (step 11), not from here.</summary>
+        /// PHASE6 (farm building, step 10) and PHASE7 (repaint, step 11); the final "TRIREPRO DONE" marker
+        /// now comes from <see cref="TriRepro_Finish"/> (step 12), not from here.</summary>
         private void TriRepro_Phase5_ZoneAndFinish()
         {
             if (_triRoadName == null)
@@ -3672,6 +3687,9 @@ namespace CS2M.Sync
             else
             {
                 int painted = PaintZoneNear(_xcCenter, 60f, zoneName);
+                _triZoneName = zoneName; // same deterministic first-match as PHASE1 — kept here too so
+                                          // REPAINT still has a value even if PHASE1 SKIPped (no blocks yet)
+                                          // but PHASE5 didn't.
                 L($"[Auto] TRIREPRO PHASE5 zone painted cells={painted} near X-CROSS (name='{zoneName}')");
             }
 
@@ -3750,14 +3768,62 @@ namespace CS2M.Sync
             L($"[Auto] TRIREPRO FARM PLACED name={farmName} pos=({pos.x:F0},{pos.z:F0}) syncId={cmd.SyncId}");
 
             // Give AreaSpawnSystem (every 64f) a couple of passes to generate + settle the Extractor
-            // field before Finish's DONE marker — 600f (~10s) instead of the usual 180f (~3s) gap.
+            // field before PHASE7/Finish — 600f (~10s) instead of the usual 180f (~3s) gap.
             _triTimer = 600;
         }
 
-        /// <summary>Step 11: final step of the TRIREPRO scenario — logs the "TRIREPRO DONE" marker every
-        /// runner/bot greps for (moved here from the old PHASE5 so PHASE6's farm placement, and its
-        /// 600-frame settle wait, run BEFORE the scenario is declared done), plus the phase-count summary
-        /// line.</summary>
+        /// <summary>Step 11: PHASE7 "REPAINT" — the actual bug report this scenario was extended for:
+        /// "quando eu pinto uma zona que JÁ EXISTIA, ela não sinca". PHASE1/PHASE5 only ever paint
+        /// Unzoned (index 0) cells, which is a DIFFERENT code path from repainting a cell that already
+        /// carries a real zone index — this phase is the first one in TRIREPRO to exercise that path.
+        ///
+        /// It repaints the EXACT SAME region(s) PHASE1 (near side A-B, center <c>_triMid</c>) and PHASE5
+        /// (near the X-CROSS, center <c>_xcCenter</c>) already zoned, reusing the identical center+radius
+        /// (60 m) pair each of them used. <see cref="PaintZoneNear"/> selects blocks purely by block
+        /// POSITION distance to that center — blocks don't move once GenerateEdges creates them — so this
+        /// finds the SAME Block entities, and for each one writes CellIndices 0..cells.Length-1 (same as
+        /// PHASE1/PHASE5), i.e. every cell in the block again. That is a genuine overwrite of
+        /// already-zoned cells, not a paint onto virgin ground.
+        ///
+        /// The zone name itself is deliberately NOT the one PHASE1/PHASE5 used: repainting a cell with the
+        /// SAME zone it already has would be a no-op as far as Cell.m_Zone is concerned and would prove
+        /// nothing about the reported bug. <see cref="TryGetZone"/>'s new <c>exclude</c> parameter walks
+        /// the same ZoneData registry PHASE1/PHASE5 read but skips <see cref="_triZoneName"/> (the name
+        /// they painted with, captured when either phase succeeded), returning the first OTHER real zone
+        /// type in this ruleset (e.g. residential -&gt; commercial/office/industrial, whichever sorts
+        /// first) — skips gracefully if only one zone type exists.</summary>
+        private void TriRepro_Phase7_Repaint()
+        {
+            if (_triRoadName == null)
+            {
+                L("[Auto] TRIREPRO PHASE7 REPAINT SKIP (setup never ran)");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_triZoneName))
+            {
+                L("[Auto] TRIREPRO PHASE7 REPAINT SKIP (PHASE1/PHASE5 never painted a zone — nothing to overwrite)");
+                return;
+            }
+
+            ZoneSync.EnsureBuilt(EntityManager, _prefabSystem);
+            if (!TryGetZone(out string zoneName, out ushort _, _triZoneName))
+            {
+                L($"[Auto] TRIREPRO PHASE7 REPAINT SKIP (no OTHER ZonePrefab besides '{_triZoneName}' in this ruleset)");
+                return;
+            }
+
+            int painted = PaintZoneNear(_triMid, 60f, zoneName);      // same spot as PHASE1
+            painted += PaintZoneNear(_xcCenter, 60f, zoneName);       // same spot as PHASE5
+
+            _triPhasesDone = 7;
+            L($"[Auto] TRIREPRO REPAINTED zone='{zoneName}' cells={painted}");
+        }
+
+        /// <summary>Step 12: final step of the TRIREPRO scenario — logs the "TRIREPRO DONE" marker every
+        /// runner/bot greps for (moved here from the old PHASE5, then past PHASE6/PHASE7, so the farm
+        /// placement's 600-frame settle wait and the PHASE7 repaint run BEFORE the scenario is declared
+        /// done), plus the phase-count summary line.</summary>
         private void TriRepro_Finish()
         {
             L("[Auto] TRIREPRO DONE");
