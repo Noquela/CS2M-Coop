@@ -53,13 +53,22 @@ namespace CS2M.Sync
 
         // CS2M_AP_TEST=3: TRIREPRO — host solo-draws a triangle+diagonal of real (capturable) road,
         // no human, to reproduce the zone-divergence bug automatically. See RunTriReproStep.
+        // PHASE1 = the original triangle+mid-span-diagonal+zone repro. PHASE2 "X-CROSS" adds two long
+        // straight roads crossing mid-span (both sides — a real X, not a T at a node). PHASE3 "CURVA"
+        // adds a 4-control-point S-curve through the same area (see TriRepro_Phase3_Curve doc for why
+        // no change to NetToolReplaySystems.cs was needed). PHASE4 "OVERDRAW" redraws exactly over half
+        // of a PHASE1 triangle side (same endpoints as an existing edge). PHASE5 paints zoning around
+        // the X-CROSS and logs the final DONE marker.
         private bool _triRepro;
         private int _triStep;
         private int _triTimer;
+        private int _triPhasesDone;
         private string _triRoadType;
         private string _triRoadName;
+        private float3 _triAnchor;
         private float3 _triA, _triB, _triC, _triMid;
-        private ulong _triNodeIdA, _triNodeIdB, _triNodeIdC;
+        private ulong _triNodeIdA, _triNodeIdB, _triNodeIdC, _triNodeIdMid;
+        private float3 _xcCenter, _xcA1, _xcD1, _xcA2, _xcD2;
 
         private GameMode _gameMode = GameMode.Other;
         private PrefabSystem _prefabSystem;
@@ -3318,9 +3327,17 @@ namespace CS2M.Sync
         //     NetDetectorSystem then captures them next frame (Applied edge, no CS2M_RemotePlaced, no
         //     echo mark) and ships a genuine NetPlaceCommand to the client — the same code path a real
         //     player's road would take, and the one under suspicion for the zone drift.
+        //
+        // Extended for the "chaotic human drawing" shapes the triangle-only PHASE1 didn't cover (curves,
+        // mid-span X crossings, overdraw-on-existing-road, rapid-fire junctions): PHASE2 "X-CROSS" (steps
+        // 5-6) draws two ~250m roads crossing mid-span in a fresh quadrant; PHASE3 "CURVA" (step 7) draws
+        // a true 4-control-point S-curve through that same area (see TriRepro_Phase3_Curve for why the
+        // existing N-control-point replay primitive already covers this with no changes needed to
+        // NetToolReplaySystems.cs); PHASE4 "OVERDRAW" (step 8) redraws exactly over half of PHASE1's
+        // triangle; PHASE5 (step 9) paints zoning around the X-CROSS and logs the final DONE marker.
         private void RunTriReproStep()
         {
-            if (_triStep > 4) { return; }
+            if (_triStep > 9) { return; }
             if (_triTimer > 0) { _triTimer--; return; }
             _triTimer = 180; // ~3s between traces, as requested
 
@@ -3330,7 +3347,12 @@ namespace CS2M.Sync
                 case 1: TriRepro_Side2(); break;
                 case 2: TriRepro_Side3(); break;
                 case 3: TriRepro_Diagonal(); break;
-                case 4: TriRepro_ZoneAndFinish(); break;
+                case 4: TriRepro_Phase1_ZoneAndDone(); break;
+                case 5: TriRepro_Phase2_XCrossLine1(); break;
+                case 6: TriRepro_Phase2_XCrossLine2(); break;
+                case 7: TriRepro_Phase3_Curve(); break;
+                case 8: TriRepro_Phase4_Overdraw(); break;
+                case 9: TriRepro_Phase5_ZoneAndFinish(); break;
             }
 
             _triStep++;
@@ -3345,16 +3367,19 @@ namespace CS2M.Sync
             if (!TryAnchor(out float3 anchor))
             {
                 L("[Auto] TRIREPRO SKIP no anchor point in city");
-                _triStep = 4; // skip straight to a harmless finish
+                _triStep = 9; // skip straight to a harmless finish
                 return;
             }
 
             if (!TryGetRoadPrefab(out _triRoadType, out _triRoadName))
             {
                 L("[Auto] TRIREPRO SKIP no Road prefab found");
-                _triStep = 4;
+                _triStep = 9;
                 return;
             }
+
+            _triAnchor = anchor; // reused by every later phase — DON'T re-call TryAnchor once roads
+                                  // exist: its edge-query fallback would then pick up OUR OWN edges.
 
             // Far quadrant, clear of every other scene's offsets (CONCURRENT: anchor+400..560/+400..730;
             // RunHostStep sends top out around anchor+600). ~(anchor.x+900, anchor.z+1200) — the example
@@ -3422,9 +3447,10 @@ namespace CS2M.Sync
 
         /// <summary>Step 4: paint residential zoning on whatever zoning blocks landed near side 1 (the
         /// side carrying the mid-span T-junction) — skips gracefully if none exist yet (some net prefabs
-        /// have no zoneable variant, or the block hasn't been generated this soon). Then logs the done
-        /// marker the operator watches for.</summary>
-        private void TriRepro_ZoneAndFinish()
+        /// have no zoneable variant, or the block hasn't been generated this soon). Then logs the PHASE1
+        /// done marker (the scenario continues into PHASE2+ below; the final "TRIREPRO DONE" marker the
+        /// operator watches for now comes from <see cref="TriRepro_Phase5_ZoneAndFinish"/>).</summary>
+        private void TriRepro_Phase1_ZoneAndDone()
         {
             ZoneSync.EnsureBuilt(EntityManager, _prefabSystem);
             if (_blockQuery.IsEmptyIgnoreFilter || !TryGetZone(out string zoneName, out ushort _))
@@ -3437,7 +3463,142 @@ namespace CS2M.Sync
                 L($"[Auto] TRIREPRO zone painted cells={painted} near side A-B (name='{zoneName}')");
             }
 
+            _triPhasesDone = 1;
+            L("[Auto] TRIREPRO PHASE1 DONE");
+        }
+
+        /// <summary>Step 5: PHASE2 "X-CROSS" stroke 1 — a ~250 m straight road through
+        /// <c>_xcCenter</c> (triangle origin +400 on X, per the task's "quadrante livre deslocado"), open
+        /// ground (kind=0) at BOTH ends, diagonal along (1,1)/sqrt(2) so the two X-CROSS strokes meet at
+        /// 90°. Nothing here terminates at a node of anything else — this is a genuine mid-span crossing,
+        /// not a T at an existing junction, which is exactly the "traço cruzando no MEIO" shape that a
+        /// node-guessing receiver (rather than one that replays the real tool job, as this one does) would
+        /// get wrong.</summary>
+        private void TriRepro_Phase2_XCrossLine1()
+        {
+            // Triangle origin was _triAnchor + (900, 1200) (see TriRepro_Setup); X-CROSS quadrant is that
+            // origin shifted +400 on X, well clear of the triangle (side 200) and of side1's diagonal.
+            _xcCenter = new float3(_triAnchor.x + 900f + 400f, _triAnchor.y, _triAnchor.z + 1200f);
+
+            const float half = 88.3883f; // 125 * cos(45deg) -> total segment length 250m
+            _xcA1 = _xcCenter + new float3(-half, 0f, -half);
+            _xcD1 = _xcCenter + new float3(half, 0f, half);
+
+            ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _xcA1, _xcD1, 5010,
+                0, 0, float3.zero, 0, 0, float3.zero);
+            L($"[Auto] TRIREPRO PHASE2 X-CROSS line1 center=({_xcCenter.x:F0},{_xcCenter.z:F0}) " +
+              $"A=({_xcA1.x:F0},{_xcA1.z:F0}) D=({_xcD1.x:F0},{_xcD1.z:F0})");
+        }
+
+        /// <summary>Step 6: PHASE2 stroke 2 — the perpendicular diagonal (1,-1)/sqrt(2) through the SAME
+        /// <c>_xcCenter</c>, also ~250 m, also open ground at both ends. Its midpoint sits exactly on top
+        /// of stroke 1's midpoint but neither stroke's ENDPOINT is anywhere near the other — the crossing
+        /// is purely mid-span on both roads, forcing the receiver to split both at once from the same
+        /// intersection-detection pass the real game runs after GenerateEdges (not from our replay code).</summary>
+        private void TriRepro_Phase2_XCrossLine2()
+        {
+            const float half = 88.3883f;
+            _xcA2 = _xcCenter + new float3(-half, 0f, half);
+            _xcD2 = _xcCenter + new float3(half, 0f, -half);
+
+            ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _xcA2, _xcD2, 5011,
+                0, 0, float3.zero, 0, 0, float3.zero);
+            _triPhasesDone = 2;
+            L($"[Auto] TRIREPRO PHASE2 X-CROSS line2 A=({_xcA2.x:F0},{_xcA2.z:F0}) D=({_xcD2.x:F0},{_xcD2.z:F0})");
+            L("[Auto] TRIREPRO PHASE2 X-CROSS DONE");
+        }
+
+        /// <summary>Step 7: PHASE3 "CURVA" — an S-shaped road (genuine inflection, not a single bulge)
+        /// crossing PHASE2's line1 mid-span, at a point on that line other than the X center (a THIRD,
+        /// independent crossing, not just piling onto the same spot).
+        ///
+        /// Signature check done before writing this (see NetToolReplaySystems.cs): NetToolReplayCommand's
+        /// ControlPoint arrays are already fully N-length ("Arrays are parallel and all the same length N
+        /// = the control-point count", per that file's class doc), NetToolReplaySystem.ReplayOne loops
+        /// `for (i = 0; i &lt; n; i++)` with no length cap, and the game's OWN
+        /// NetToolSystem.CreateDefinitionsJob.Execute dispatches on m_ControlPoints.Length itself:
+        /// length==4 under Mode.ComplexCurve (decomp NetToolSystem.cs ~2647-2660) calls CreateComplexCurve,
+        /// which builds an actual cubic Bezier from all 4 raw control points (decomp ~4315:
+        /// `new Bezier4x3(controlPoint, controlPoint2, controlPoint3, controlPoint4)`) — no interpretation
+        /// of "drag gesture" involved, just the 4 points we hand it. So the primitive ALREADY accepts 3+
+        /// (in fact N) control points and needed ZERO changes to NetToolReplaySystems.cs: this phase ships
+        /// Mode=2 (ComplexCurve) with 4 explicit points, start/end open ground, and the two inner points
+        /// offset to OPPOSITE sides of the start-end line — that opposite-side offset is what makes the
+        /// job produce a true S (one bend one way, one the other) instead of a single-direction bulge.</summary>
+        private void TriRepro_Phase3_Curve()
+        {
+            // Point on X-CROSS line1 at t=60 along its (1,1)/sqrt2 direction (half-length is ~88.4, so
+            // this is well inside the segment, ~28m from the X center — a distinct crossing point).
+            const float t = 60f;
+            const float inv = 0.70710678f; // 1/sqrt(2)
+            var crossPoint = new float3(_xcCenter.x + t * inv, _xcCenter.y, _xcCenter.z + t * inv);
+
+            float3 s0 = crossPoint + new float3(0f, 0f, -100f);
+            float3 p1 = crossPoint + new float3(40f, 0f, -33f);   // elbow 1: bend to +X
+            float3 p2 = crossPoint + new float3(-40f, 0f, 33f);   // elbow 2: bend to -X (opposite -> S)
+            float3 s3 = crossPoint + new float3(0f, 0f, 100f);
+
+            ReplayRoadCurveLocal(_triRoadType, _triRoadName, new[] { s0, p1, p2, s3 }, 5012,
+                (int) NetToolSystem.Mode.ComplexCurve, 0, 0, float3.zero, 0, 0, float3.zero);
+            _triPhasesDone = 3;
+            L($"[Auto] TRIREPRO PHASE3 CURVA s0=({s0.x:F0},{s0.z:F0}) p1=({p1.x:F0},{p1.z:F0}) " +
+              $"p2=({p2.x:F0},{p2.z:F0}) s3=({s3.x:F0},{s3.z:F0}) crossing X-CROSS line1 at " +
+              $"({crossPoint.x:F0},{crossPoint.z:F0})");
+            L("[Auto] TRIREPRO PHASE3 CURVA DONE");
+        }
+
+        /// <summary>Step 8: PHASE4 "OVERDRAW" — redraw exactly over the A-&gt;mid half of the PHASE1
+        /// triangle's side 1 (the half that carries the diagonal's T-junction, split out of the original
+        /// A-B edge back in <see cref="TriRepro_Diagonal"/>). Same two endpoints as that existing edge
+        /// (node A, node at the mid-span split point) — the "player redraws a road on top of an existing
+        /// one" case. Tags the split's node fresh here (it didn't exist yet when PHASE1 ran).</summary>
+        private void TriRepro_Phase4_Overdraw()
+        {
+            _triNodeIdMid = TagNodeNear(_triMid, 8f);
+            if (_triNodeIdMid == 0)
+            {
+                L("[Auto] TRIREPRO PHASE4 WARN mid-split node not found (diagonal may not have split side1) " +
+                  "— overdraw falls back to open ground at that end");
+            }
+
+            ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _triA, _triMid, 5013,
+                _triNodeIdA != 0 ? 1 : 0, _triNodeIdA, _triA,
+                _triNodeIdMid != 0 ? 1 : 0, _triNodeIdMid, _triMid);
+            _triPhasesDone = 4;
+            L($"[Auto] TRIREPRO PHASE4 OVERDRAW A=({_triA.x:F0},{_triA.z:F0}) -> " +
+              $"mid=({_triMid.x:F0},{_triMid.z:F0}) (same endpoints as existing side1 A-mid edge)");
+            L("[Auto] TRIREPRO PHASE4 OVERDRAW DONE");
+        }
+
+        /// <summary>Step 9: PHASE5 — paint zoning around the X-CROSS intersection (reuses the same
+        /// <see cref="PaintZoneNear"/> helper PHASE1 used near the triangle), then logs the final
+        /// "TRIREPRO DONE" marker every runner/bot greps for, plus a phase-count summary line.</summary>
+        private void TriRepro_Phase5_ZoneAndFinish()
+        {
+            if (_triRoadName == null)
+            {
+                // Reached here via an early SKIP in TriRepro_Setup (no anchor / no Road prefab) — nothing
+                // was ever built, so there is nothing to zone. Log and finish harmlessly.
+                L("[Auto] TRIREPRO PHASE5 SKIP (setup never ran — nothing to zone)");
+                L("[Auto] TRIREPRO DONE");
+                L($"[Auto] TRIREPRO PHASES={_triPhasesDone}");
+                return;
+            }
+
+            ZoneSync.EnsureBuilt(EntityManager, _prefabSystem);
+            if (_blockQuery.IsEmptyIgnoreFilter || !TryGetZone(out string zoneName, out ushort _))
+            {
+                L("[Auto] TRIREPRO PHASE5 zone SKIP (no blocks or no ZonePrefab yet)");
+            }
+            else
+            {
+                int painted = PaintZoneNear(_xcCenter, 60f, zoneName);
+                L($"[Auto] TRIREPRO PHASE5 zone painted cells={painted} near X-CROSS (name='{zoneName}')");
+            }
+
+            _triPhasesDone = 5;
             L("[Auto] TRIREPRO DONE");
+            L($"[Auto] TRIREPRO PHASES={_triPhasesDone}");
         }
 
         /// <summary>Any live NetGeometryData prefab named "Small Road" (falls back to any non-invisible
@@ -3509,6 +3670,71 @@ namespace CS2M.Sync
             };
             RemoteReplayQueue.Enqueue(cmd); // HOST-LOCAL ONLY — see header comment
             L($"[Auto] TRIREPRO road-replay name={name} A=({a.x:F0},{a.z:F0}) D=({d.x:F0},{d.z:F0}) " +
+              $"snap=({startSnapKind}:{startSnapNodeId},{endSnapKind}:{endSnapNodeId})");
+        }
+
+        /// <summary>PHASE3-only generalization of <see cref="ReplayRoadSegmentLocal"/> to N &gt;= 2 control
+        /// points (needed for curves — see <see cref="TriRepro_Phase3_Curve"/>'s doc for why
+        /// NetToolReplayCommand/NetToolReplaySystem already support this with no changes to
+        /// NetToolReplaySystems.cs). Only the FIRST and LAST points carry snap info (open ground/node/edge,
+        /// same 3 kinds as the 2-point helper); every interior point is open ground, and its direction is
+        /// estimated from its neighbours (central difference) instead of the single start-&gt;end direction
+        /// the straight helper uses, so mid-curve pylons/lanes get a sane per-point tangent.</summary>
+        private void ReplayRoadCurveLocal(string type, string name, float3[] pts, int seed, int mode,
+            int startSnapKind, ulong startSnapNodeId, float3 startSnapPos,
+            int endSnapKind, ulong endSnapNodeId, float3 endSnapPos)
+        {
+            int n = pts.Length;
+            var posX = new float[n]; var posY = new float[n]; var posZ = new float[n];
+            var dirX = new float[n]; var dirZ = new float[n];
+            var hitDirX = new float[n]; var hitDirZ = new float[n];
+            var rotX = new float[n]; var rotY = new float[n]; var rotZ = new float[n]; var rotW = new float[n];
+            var snapPriX = new float[n]; var snapPriY = new float[n];
+            var elemIdxX = new int[n]; var elemIdxY = new int[n];
+            var curvePos = new float[n]; var elev = new float[n];
+            var snapPosX = new float[n]; var snapPosZ = new float[n];
+            var snapKind = new int[n]; var snapNodeId = new ulong[n];
+
+            for (int i = 0; i < n; i++)
+            {
+                float3 p = pts[i];
+                float3 prev = i > 0 ? pts[i - 1] : pts[i];
+                float3 next = i < n - 1 ? pts[i + 1] : pts[i];
+                float3 dir = math.normalizesafe(next - prev, new float3(1f, 0f, 0f));
+                quaternion rot = quaternion.LookRotationSafe(new float3(dir.x, 0f, dir.z), math.up());
+
+                posX[i] = p.x; posY[i] = p.y; posZ[i] = p.z;
+                dirX[i] = dir.x; dirZ[i] = dir.z;
+                hitDirX[i] = dir.x; hitDirZ[i] = dir.z;
+                rotX[i] = rot.value.x; rotY[i] = rot.value.y; rotZ[i] = rot.value.z; rotW[i] = rot.value.w;
+                elemIdxX[i] = -1; elemIdxY[i] = -1;
+                snapKind[i] = 0; // interior points are always open ground
+                snapPosX[i] = 0f; snapPosZ[i] = 0f; snapNodeId[i] = 0UL;
+            }
+
+            snapKind[0] = startSnapKind; snapNodeId[0] = startSnapNodeId;
+            snapPosX[0] = startSnapPos.x; snapPosZ[0] = startSnapPos.z;
+            snapKind[n - 1] = endSnapKind; snapNodeId[n - 1] = endSnapNodeId;
+            snapPosX[n - 1] = endSnapPos.x; snapPosZ[n - 1] = endSnapPos.z;
+
+            var cmd = new NetToolReplayCommand
+            {
+                PrefabType = type, PrefabName = name,
+                Mode = mode, RandomSeed = seed, EditorMode = false, LeftHandTraffic = false,
+                RemoveUpgrade = false, ParallelOffset = 0f, ParallelCount = 0,
+                PosX = posX, PosY = posY, PosZ = posZ,
+                HitX = posX, HitY = posY, HitZ = posZ,
+                DirX = dirX, DirZ = dirZ,
+                HitDirX = hitDirX, HitDirY = new float[n], HitDirZ = hitDirZ,
+                RotX = rotX, RotY = rotY, RotZ = rotZ, RotW = rotW,
+                SnapPriX = snapPriX, SnapPriY = snapPriY,
+                ElemIdxX = elemIdxX, ElemIdxY = elemIdxY,
+                CurvePos = curvePos, Elev = elev,
+                SnapPosX = snapPosX, SnapPosZ = snapPosZ,
+                SnapKind = snapKind, SnapNodeId = snapNodeId,
+            };
+            RemoteReplayQueue.Enqueue(cmd); // HOST-LOCAL ONLY — see ReplayRoadSegmentLocal's header comment
+            L($"[Auto] TRIREPRO curve-replay name={name} points={n} mode={mode} " +
               $"snap=({startSnapKind}:{startSnapNodeId},{endSnapKind}:{endSnapNodeId})");
         }
 
