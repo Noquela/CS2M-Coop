@@ -53,6 +53,9 @@ namespace CS2M.Sync
             { "NetDeleteCommand",       SyncClass.WorldContract },
             // ---- Zoning ----------------------------------------------------------------------------
             { "ZonePaintCommand",       SyncClass.WorldContract },
+            // Host mirrors its own derived zone-Block geometry to heal client-side derivation drift — not
+            // a player action, so it's a mirror of a host-derived value (HostAuthoritative), not a tool.
+            { "ZoneBlockAuthorityCommand", SyncClass.HostAuthoritative },
             // ---- Areas (districts / farm fields / forestry / extraction lots / map tiles) -----------
             { "AreaEditCommand",        SyncClass.WorldContract },
             { "DistrictCommand",        SyncClass.WorldContract },

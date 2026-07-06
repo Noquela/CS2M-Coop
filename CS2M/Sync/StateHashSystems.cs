@@ -526,6 +526,56 @@ namespace CS2M.Sync
             finally { arr.Dispose(); }
         }
 
+        // DIAGNOSTIC (buildings): dump every building's position + prefab NAME so a host/client
+        // building-COUNT divergence (buildings NvsM) can be pinned to the exact phantom/missing
+        // building. SAME query filter as AccBuildings (BuildingDesc: All Building+Transform, None
+        // Temp/Deleted/Owner) so the dump and the hash never disagree on what counts as "a building".
+        // Env-gated like DumpNodes. Prefab name resolved via PrefabSystem.TryGetPrefab(PrefabRef.m_Prefab)
+        // — same lookup DeleteDetectorSystem uses to get a cross-machine-stable identifier (prefab
+        // ENTITY index is per-boot, but the name is not). Long dumps (400+ buildings) are split across
+        // "part=k" lines so no single log line explodes; statediff.py's parser joins the parts back.
+        public static void DumpBuildings(EntityManager em, EntityQuery q, Game.Prefabs.PrefabSystem prefabs, string tag)
+        {
+            NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                var list = new List<string>(arr.Length);
+                foreach (Entity e in arr)
+                {
+                    Unity.Mathematics.float3 p = em.GetComponentData<Game.Objects.Transform>(e).m_Position;
+                    string name = "?";
+                    if (em.HasComponent<Game.Prefabs.PrefabRef>(e))
+                    {
+                        Entity prefabEntity = em.GetComponentData<Game.Prefabs.PrefabRef>(e).m_Prefab;
+                        if (prefabs.TryGetPrefab(prefabEntity, out Game.Prefabs.PrefabBase pb) && pb != null)
+                        {
+                            name = pb.name.Replace(' ', '_'); // spaces would break statediff's whitespace split
+                        }
+                    }
+
+                    list.Add($"{p.x:F1}/{p.z:F1}:{name}");
+                }
+
+                list.Sort(System.StringComparer.Ordinal);
+
+                const int ChunkSize = 400;
+                if (list.Count <= ChunkSize)
+                {
+                    CS2M.Log.Info($"[BldgDump:{tag}] count={list.Count} {string.Join(" ", list)}");
+                }
+                else
+                {
+                    for (int part = 0, i = 0; i < list.Count; part++, i += ChunkSize)
+                    {
+                        int n = math.min(ChunkSize, list.Count - i);
+                        CS2M.Log.Info($"[BldgDump:{tag}] part={part} count={list.Count} " +
+                                      $"{string.Join(" ", list.GetRange(i, n))}");
+                    }
+                }
+            }
+            finally { arr.Dispose(); }
+        }
+
         // Semantic composition flags (General/Left/Right) of a net composition entity — cross-machine stable
         // because they are the same enum bits on both PCs, unlike the composition entity's index.
         private static long CompFlags(EntityManager em, Entity comp)
@@ -759,6 +809,7 @@ namespace CS2M.Sync
                 StateHash.DumpEdges(EntityManager, _edges, "HOST");
                 StateHash.DumpAreas(EntityManager, _areas, "HOST");
                 StateHash.DumpBlocks(EntityManager, _blocks, "HOST");
+                StateHash.DumpBuildings(EntityManager, _buildings, _prefabs, "HOST");
             }
         }
     }
@@ -860,6 +911,11 @@ namespace CS2M.Sync
                     if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("zones")))
                     {
                         StateHash.DumpBlocks(EntityManager, _blocks, "CLIENT");
+                    }
+
+                    if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("buildings")))
+                    {
+                        StateHash.DumpBuildings(EntityManager, _buildings, _prefabs, "CLIENT");
                     }
                     if (_strikes >= 2)
                     {

@@ -38,17 +38,42 @@ SUBSYS = {
     "EdgeDump": ("edges", "par de extremidades a-b"),
     "AreaDump": ("areas", "centro cx/cz : nós : owned"),
     "BlockDump": ("zones", "bloco x/z : WxH = células run-length por NOME de zona"),
+    "BldgDump": ("buildings", "posicao x/z : nome do prefab"),
 }
 
 
 def last_dump(path, tag, role):
-    """Retorna (count, [tokens]) da ULTIMA linha [tag:role] no arquivo, ou None."""
-    pat = re.compile(r"\[" + re.escape(tag) + ":" + role + r"\]\s+count=(\d+)\s*(.*)")
+    """Retorna (count, [tokens]) da ULTIMA dump [tag:role] no arquivo, ou None.
+
+    Dumps grandes (400+ entidades, hoje só BldgDump) vêm quebrados em várias linhas
+    'part=k count=N ...' em vez de uma linha 'count=N ...' única — junta as partes
+    de uma mesma rodada (part=0,1,2,... emitidas de volta pra volta no mesmo tick)
+    antes de comparar. A ULTIMA rodada completa (tokens acumulados >= count) vence.
+    """
+    single_pat = re.compile(r"\[" + re.escape(tag) + ":" + role + r"\]\s+count=(\d+)\s*(.*)")
+    part_pat = re.compile(r"\[" + re.escape(tag) + ":" + role + r"\]\s+part=(\d+)\s+count=(\d+)\s*(.*)")
     found = None
+    cur_parts = {}
+    cur_count = None
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
-                m = pat.search(line)
+                mp = part_pat.search(line)
+                if mp:
+                    part_idx = int(mp.group(1))
+                    count = int(mp.group(2))
+                    toks = mp.group(3).split()
+                    if part_idx == 0:
+                        cur_parts = {}
+                        cur_count = count
+                    cur_parts[part_idx] = toks
+                    all_toks = []
+                    for k in sorted(cur_parts):
+                        all_toks.extend(cur_parts[k])
+                    if cur_count is not None and len(all_toks) >= cur_count:
+                        found = (cur_count, all_toks)
+                    continue
+                m = single_pat.search(line)
                 if m:
                     count = int(m.group(1))
                     toks = m.group(2).split()

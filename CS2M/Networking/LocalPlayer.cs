@@ -434,6 +434,7 @@ namespace CS2M.Networking
             Sync.RemoteNetEcho.Clear();
             Sync.RemoteProgressionQueue.Clear();
             Sync.RemoteZoneQueue.Clear();
+            Sync.RemoteZoneBlockQueue.Clear();
             Sync.ZoneSync.Clear();
             Sync.ZoneEcho.Clear();
             Sync.RemoteJoinState.Clear();

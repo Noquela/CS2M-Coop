@@ -228,6 +228,11 @@ namespace CS2M
             updateSystem.UpdateBefore<ZoneDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<ZonePaintApplySystem>(SystemUpdatePhase.Modification5);
 
+            // ZoneBlockAuthority (gated CS2M_ZONEAUTH=1): host-authoritative zone-block healer, the probe
+            // for the "derivation-uma-vez" architecture pillar (docs/zoneauth-spec.md).
+            updateSystem.UpdateBefore<ZoneBlockAuthoritySystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateAt<ZoneBlockAuthorityApplySystem>(SystemUpdatePhase.Modification5);
+
             // Pause the sim for everyone while a player is joining (+ chat notice).
             updateSystem.UpdateAt<JoinPauseSystem>(SystemUpdatePhase.Rendering);
 
