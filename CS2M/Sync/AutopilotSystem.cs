@@ -3355,10 +3355,15 @@ namespace CS2M.Sync
         // PHASE7 "REPAINT" (step 11) repaints the SAME blocks PHASE1/PHASE5 already zoned, with a
         // DIFFERENT ZonePrefab, to reproduce the user report "quando eu pinto uma zona que JÁ EXISTIA, ela
         // não sinca" (as opposed to painting a fresh Unzoned cell, which PHASE1/PHASE5 already cover);
-        // TriRepro_Finish (step 12) logs the final DONE marker.
+        // PHASE8 "XSESSION-OVERDRAW" (step 12) redraws exactly over a PRE-EXISTING edge left behind by a
+        // PREVIOUS ci round (found by querying Edge+Curve for a midpoint far outside this round's
+        // quadrant), at snap=0 on both ends — the "draw a road exactly on top of a road synced in an
+        // earlier session" case that round 8's BOUND-MERGE/DUP-MISMATCH fixes (commit ce54b5f) were
+        // written for but, until now, never actually exercised (their counters read 0 in every later run);
+        // TriRepro_Finish (step 13) logs the final DONE marker.
         private void RunTriReproStep()
         {
-            if (_triStep > 12) { return; }
+            if (_triStep > 13) { return; }
             if (_triTimer > 0) { _triTimer--; return; }
             _triTimer = 180; // ~3s between traces, as requested (phases can override this — see PHASE6)
 
@@ -3376,7 +3381,8 @@ namespace CS2M.Sync
                 case 9: TriRepro_Phase5_ZoneAndFinish(); break;
                 case 10: TriRepro_Phase6_FarmPlace(); break;
                 case 11: TriRepro_Phase7_Repaint(); break;
-                case 12: TriRepro_Finish(); break;
+                case 12: TriRepro_Phase8_XSessionOverdraw(); break;
+                case 13: TriRepro_Finish(); break;
             }
 
             _triStep++;
@@ -3391,9 +3397,9 @@ namespace CS2M.Sync
             if (!TryAnchor(out float3 anchor))
             {
                 L("[Auto] TRIREPRO SKIP no anchor point in city");
-                _triStep = 8; // -> Phase5(SKIP)->Phase6(SKIP)->Phase7(SKIP)->Finish(DONE); RunTriReproStep's
-                              // trailing _triStep++ makes this land on case 9 (Phase5) next call, not case 8
-                              // again.
+                _triStep = 8; // -> Phase5(SKIP)->Phase6(SKIP)->Phase7(SKIP)->Phase8(SKIP)->Finish(DONE);
+                              // RunTriReproStep's trailing _triStep++ makes this land on case 9 (Phase5)
+                              // next call, not case 8 again.
                 return;
             }
 
@@ -3820,10 +3826,83 @@ namespace CS2M.Sync
             L($"[Auto] TRIREPRO REPAINTED zone='{zoneName}' cells={painted}");
         }
 
-        /// <summary>Step 12: final step of the TRIREPRO scenario — logs the "TRIREPRO DONE" marker every
-        /// runner/bot greps for (moved here from the old PHASE5, then past PHASE6/PHASE7, so the farm
-        /// placement's 600-frame settle wait and the PHASE7 repaint run BEFORE the scenario is declared
-        /// done), plus the phase-count summary line.</summary>
+        /// <summary>Step 12: PHASE8 "XSESSION-OVERDRAW" — the deliberate exercise of the BOUND-MERGE/
+        /// DUP-MISMATCH fixes (commit ce54b5f). Those fixes were born from round 8 stumbling, BY ACCIDENT,
+        /// onto "draw a road exactly on top of a road already synced in a PREVIOUS session" (the saved
+        /// world accumulates every prior CI round's triangles/X-CROSS/curve — nothing here is ever
+        /// deleted, see <see cref="TriRepro_Setup"/>'s quadrant-search comment), and have had their
+        /// counters read 0 in every run since (nothing deliberately re-triggers that exact collision).
+        /// This phase finds a genuinely PRE-EXISTING edge — one whose curve midpoint sits far outside THIS
+        /// round's quadrant (<see cref="_triOrigin"/>), i.e. it can only have been born in an earlier
+        /// session — and redraws a fresh road with the SAME two endpoints, snap=0 (open ground) on BOTH
+        /// ends: no TagNodeNear help, no snap hint, exactly like a player who free-hand drags a road right
+        /// on top of one that's already there. That forces the raw pipeline (NetDetectorSystem capture ->
+        /// client apply) to deal with the resulting duplicate/overlapping geometry with zero assistance,
+        /// which is precisely the collision BOUND-MERGE/DUP-MISMATCH guard against.</summary>
+        private void TriRepro_Phase8_XSessionOverdraw()
+        {
+            if (_triRoadName == null)
+            {
+                L("[Auto] TRIREPRO PHASE8 XSESSION-OVERDRAW SKIP (setup never ran)");
+                return;
+            }
+
+            if (!TryFindPriorSessionEdge(out float3 a, out float3 d))
+            {
+                L("[Auto] TRIREPRO PHASE8 XSESSION-OVERDRAW WARN no pre-existing edge found " +
+                  ">800m from this round's quadrant (fresh world / first CI round?) — skipping");
+                return;
+            }
+
+            ReplayRoadSegmentLocal(_triRoadType, _triRoadName, a, d, 5014,
+                0, 0UL, float3.zero, 0, 0UL, float3.zero);
+
+            _triPhasesDone = 8;
+            float3 mid = (a + d) * 0.5f;
+            _triTimer = 300;
+            L($"[Auto] TRIREPRO XSESSION-OVERDRAW done at=({mid.x:F0},{mid.z:F0})");
+        }
+
+        /// <summary>Finds the FIRST live road edge (Edge+Curve, no Temp/Deleted — reuses <c>_edgeQuery</c>,
+        /// same query <see cref="IsQuadrantFree"/> uses, which already excludes CS2M_RemotePlaced; every
+        /// TRIREPRO edge in every round is born as ordinary LOCAL construction, so a previous round's
+        /// roads DO show up here) whose curve midpoint is farther than 800m (XZ only) from
+        /// <see cref="_triOrigin"/> — i.e. outside THIS round's quadrant, so it can only be a leftover from
+        /// an earlier session. Returns that edge's raw Bezier endpoints (<c>m_Bezier.a</c>/<c>.d</c>)
+        /// unmodified — no snap, no nearest-node search — so the caller redraws the exact same span.
+        /// Returns false (a/d left at default) if no candidate qualifies.</summary>
+        private bool TryFindPriorSessionEdge(out float3 a, out float3 d)
+        {
+            a = default;
+            d = default;
+            if (_edgeQuery.IsEmptyIgnoreFilter) { return false; }
+
+            const float minDist2 = 800f * 800f;
+            NativeArray<Entity> ents = _edgeQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    Colossal.Mathematics.Bezier4x3 bz = EntityManager.GetComponentData<Game.Net.Curve>(e).m_Bezier;
+                    float3 mid = (bz.a + bz.d) * 0.5f;
+                    float dx = mid.x - _triOrigin.x;
+                    float dz = mid.z - _triOrigin.z;
+                    if (dx * dx + dz * dz <= minDist2) { continue; } // still inside THIS round's quadrant
+
+                    a = bz.a;
+                    d = bz.d;
+                    return true;
+                }
+
+                return false;
+            }
+            finally { ents.Dispose(); }
+        }
+
+        /// <summary>Step 13: final step of the TRIREPRO scenario — logs the "TRIREPRO DONE" marker every
+        /// runner/bot greps for (moved here from the old PHASE5, then past PHASE6/PHASE7/PHASE8, so the
+        /// farm placement's 600-frame settle wait, the PHASE7 repaint and the PHASE8 cross-session
+        /// overdraw all run BEFORE the scenario is declared done), plus the phase-count summary line.</summary>
         private void TriRepro_Finish()
         {
             L("[Auto] TRIREPRO DONE");
