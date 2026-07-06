@@ -1,0 +1,1233 @@
+[
+  {
+    "type": "Game.Prefabs.AdditionalBuildingTerraformElement",
+    "file": "Prefabs/AdditionalBuildingTerraformElement.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.AreaGeometryData",
+    "file": "Prefabs/AreaGeometryData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.AttractionData",
+    "file": "Prefabs/AttractionData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.BatteryData",
+    "file": "Prefabs/BatteryData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.BuildingData",
+    "file": "Prefabs/BuildingData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.BuildingExtensionData",
+    "file": "Prefabs/BuildingExtensionData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.BuildingPropertyData",
+    "file": "Prefabs/BuildingPropertyData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.BuildingTerraformData",
+    "file": "Prefabs/BuildingTerraformData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.CarLaneData",
+    "file": "Prefabs/CarLaneData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.CompositionFlags",
+    "file": "Prefabs/CompositionFlags.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "NetCompositionData / prefabs de rede (fora deste namespace)"
+    ],
+    "syncPath": "NONE",
+    "note": "Struct de flags (General/Side) usada para descrever combinacoes de composicao de rede; os valores concretos por instancia vivem em Game.Net.Composition (fora do escopo Prefabs) — aqui e so o tipo/mascara (Prefabs/CompositionFlags.cs:6-107)."
+  },
+  {
+    "type": "Game.Prefabs.ConsumptionData",
+    "file": "Prefabs/ConsumptionData.cs:9",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ContentData",
+    "file": "Prefabs/ContentData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ContentPrerequisiteData",
+    "file": "Prefabs/ContentPrerequisiteData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.CoverageData",
+    "file": "Prefabs/CoverageData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.DeathcareFacilityData",
+    "file": "Prefabs/DeathcareFacilityData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.DeliveryTruckData",
+    "file": "Prefabs/DeliveryTruckData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ElectricityConnectionData",
+    "file": "Prefabs/ElectricityConnectionData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.EmergencyGeneratorData",
+    "file": "Prefabs/EmergencyGeneratorData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.EmergencyShelterData",
+    "file": "Prefabs/EmergencyShelterData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ExtractorAreaData",
+    "file": "Prefabs/ExtractorAreaData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ExtractorFacilityData",
+    "file": "Prefabs/ExtractorFacilityData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.FireEngineData",
+    "file": "Prefabs/FireEngineData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.FireStationData",
+    "file": "Prefabs/FireStationData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.FixedNetElement",
+    "file": "Prefabs/FixedNetElement.cs:9",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.GarbageFacilityData",
+    "file": "Prefabs/GarbageFacilityData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.GarbagePoweredData",
+    "file": "Prefabs/GarbagePoweredData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.GarbageTruckData",
+    "file": "Prefabs/GarbageTruckData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.GroundWaterPoweredData",
+    "file": "Prefabs/GroundWaterPoweredData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.HospitalData",
+    "file": "Prefabs/HospitalData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.IndustrialProcessData",
+    "file": "Prefabs/IndustrialProcessData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.LeisureProviderData",
+    "file": "Prefabs/LeisureProviderData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.LocalConnectData",
+    "file": "Prefabs/LocalConnectData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.LocalModifierData",
+    "file": "Prefabs/LocalModifierData.cs:9",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.LotData",
+    "file": "Prefabs/LotData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.MailBoxData",
+    "file": "Prefabs/MailBoxData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.MaintenanceDepotData",
+    "file": "Prefabs/MaintenanceDepotData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.GameModeSystem",
+    "file": "Prefabs/Modes/GameModeSystem.cs:11",
+    "class": "META",
+    "writtenBy": [
+      "GameModeSystem.OnUpdate (Prefabs/Modes/GameModeSystem.cs:55-60)"
+    ],
+    "syncPath": "NONE",
+    "note": "Guarda o modo de jogo ativo (ex.: Game vs modos de editor); definido na carga do mundo, nao e uma acao do jogador durante a partida (Prefabs/Modes/GameModeSystem.cs:11-28)."
+  },
+  {
+    "type": "Game.Prefabs.ModPrerequisiteData",
+    "file": "Prefabs/ModPrerequisiteData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.MoveableBridgeData",
+    "file": "Prefabs/MoveableBridgeData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.NavigationAreaData",
+    "file": "Prefabs/NavigationAreaData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.NetData",
+    "file": "Prefabs/NetData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.NetGeometryData",
+    "file": "Prefabs/NetGeometryData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.NetLaneData",
+    "file": "Prefabs/NetLaneData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.NetLaneGeometryData",
+    "file": "Prefabs/NetLaneGeometryData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.NetObjectData",
+    "file": "Prefabs/NetObjectData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.NetZoneData",
+    "file": "Prefabs/NetZoneData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.NotificationIconDisplayData",
+    "file": "Prefabs/NotificationIconDisplayData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ObjectGeometryData",
+    "file": "Prefabs/ObjectGeometryData.cs:9",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ParkData",
+    "file": "Prefabs/ParkData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ParkingFacilityData",
+    "file": "Prefabs/ParkingFacilityData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ParkingLaneData",
+    "file": "Prefabs/ParkingLaneData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PathwayData",
+    "file": "Prefabs/PathwayData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PersonalCarData",
+    "file": "Prefabs/PersonalCarData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PillarData",
+    "file": "Prefabs/PillarData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PlaceableNetData",
+    "file": "Prefabs/PlaceableNetData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PlaceableObjectData",
+    "file": "Prefabs/PlaceableObjectData.cs:9",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PlaceholderBuildingData",
+    "file": "Prefabs/PlaceholderBuildingData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PoliceCarData",
+    "file": "Prefabs/PoliceCarData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PoliceStationData",
+    "file": "Prefabs/PoliceStationData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PollutionData",
+    "file": "Prefabs/PollutionData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PostFacilityData",
+    "file": "Prefabs/PostFacilityData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PostVanData",
+    "file": "Prefabs/PostVanData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PowerPlantData",
+    "file": "Prefabs/PowerPlantData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.PrefabData",
+    "file": "Prefabs/PrefabData.cs:7",
+    "class": "META",
+    "writtenBy": [
+      "PrefabSystem.AddPrefab (Prefabs/PrefabSystem.cs:147,215-238)"
+    ],
+    "syncPath": "NONE",
+    "note": "m_Index e a posicao do prefab na lista m_Prefabs de PrefabSystem; depende da ORDEM de carregamento dos mods/DLC — risco se host e cliente carregarem mods em ordem diferente (Prefabs/PrefabData.cs:7-30)."
+  },
+  {
+    "type": "Game.Prefabs.PrefabID",
+    "file": "Prefabs/PrefabID.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem (indexacao no load)"
+    ],
+    "syncPath": "NONE",
+    "note": "Chave de identidade (tipo+nome+hash) do prefab; identica entre instalacoes com o mesmo conteudo/mods carregado (Prefabs/PrefabID.cs:7-99)."
+  },
+  {
+    "type": "Game.Prefabs.PrefabRef",
+    "file": "Prefabs/PrefabRef.cs:6",
+    "class": "DERIVED",
+    "writtenBy": [
+      "PrefabSystem (resolve de referencia)",
+      "sistemas de criacao que aplicam CreationDefinition"
+    ],
+    "syncPath": "NetPlaceCommand/ObjectPlaceCommand/ZonePaintCommand (via CreationDefinition.m_Prefab)",
+    "note": "Aponta Entity do prefab usado por uma instancia; CS2M ja resolve por identidade de prefab (nome/PrefabID) dentro das CreationDefinition, nao por indice de Entity cru (Prefabs/PrefabRef.cs:6-33)."
+  },
+  {
+    "type": "Game.Prefabs.PrefabSystem",
+    "file": "Prefabs/PrefabSystem.cs:24",
+    "class": "META",
+    "writtenBy": [
+      "PrefabSystem.Serialize/Deserialize (Prefabs/PrefabSystem.cs:761-799)"
+    ],
+    "syncPath": "NONE",
+    "note": "Serializa a lista ordenada de PrefabID (m_Prefabs) salva no save para remapear indices no load; NAO VERIFICADO se CS2M valida que host/cliente tem a mesma lista de mods/ordem (Prefabs/PrefabSystem.cs:24,44,761-799)."
+  },
+  {
+    "type": "Game.Prefabs.PrisonData",
+    "file": "Prefabs/PrisonData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ResourceProductionData",
+    "file": "Prefabs/ResourceProductionData.cs:9",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ResourceStack",
+    "file": "Prefabs/ResourceStack.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "dados de prefab (ex.: buffers de recurso em StorageCompanyData/ExtractorFacilityData)"
+    ],
+    "syncPath": "NONE",
+    "note": "Par (Resource, Amount) usado dentro de buffers de dados de prefab; valor de config de asset, nao de instancia (Prefabs/ResourceStack.cs:6-24)."
+  },
+  {
+    "type": "Game.Prefabs.RoadData",
+    "file": "Prefabs/RoadData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.RouteConnectionData",
+    "file": "Prefabs/RouteConnectionData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.RouteData",
+    "file": "Prefabs/RouteData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.SchoolData",
+    "file": "Prefabs/SchoolData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ServiceBudget",
+    "file": "Prefabs/ServiceBudget.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ServiceObjectData",
+    "file": "Prefabs/ServiceObjectData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ServiceUpgradeData",
+    "file": "Prefabs/ServiceUpgradeData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.SewageOutletData",
+    "file": "Prefabs/SewageOutletData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.SolarPoweredData",
+    "file": "Prefabs/SolarPoweredData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.SpawnableBuildingData",
+    "file": "Prefabs/SpawnableBuildingData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.StackData",
+    "file": "Prefabs/StackData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.StorageAreaData",
+    "file": "Prefabs/StorageAreaData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.StorageCompanyData",
+    "file": "Prefabs/StorageCompanyData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TaxiData",
+    "file": "Prefabs/TaxiData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TaxiwayData",
+    "file": "Prefabs/TaxiwayData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TelecomFacilityData",
+    "file": "Prefabs/TelecomFacilityData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TrackData",
+    "file": "Prefabs/TrackData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TrackLaneData",
+    "file": "Prefabs/TrackLaneData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TrafficSpawnerData",
+    "file": "Prefabs/TrafficSpawnerData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TransportDepotData",
+    "file": "Prefabs/TransportDepotData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TransportLineData",
+    "file": "Prefabs/TransportLineData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TransportStationData",
+    "file": "Prefabs/TransportStationData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TransportStopData",
+    "file": "Prefabs/TransportStopData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.TreeData",
+    "file": "Prefabs/TreeData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.UpkeepModifierData",
+    "file": "Prefabs/UpkeepModifierData.cs:8",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.UtilityLaneData",
+    "file": "Prefabs/UtilityLaneData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WastewaterTreatmentPlantData",
+    "file": "Prefabs/WastewaterTreatmentPlantData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WaterPipeConnectionData",
+    "file": "Prefabs/WaterPipeConnectionData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WaterPoweredData",
+    "file": "Prefabs/WaterPoweredData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WaterPumpingStationData",
+    "file": "Prefabs/WaterPumpingStationData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WaterwayData",
+    "file": "Prefabs/WaterwayData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WindPoweredData",
+    "file": "Prefabs/WindPoweredData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WorkplaceData",
+    "file": "Prefabs/WorkplaceData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WorkRouteData",
+    "file": "Prefabs/WorkRouteData.cs:9",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WorkStopData",
+    "file": "Prefabs/WorkStopData.cs:6",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.WorkVehicleData",
+    "file": "Prefabs/WorkVehicleData.cs:9",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Prefabs.ZoneData",
+    "file": "Prefabs/ZoneData.cs:7",
+    "class": "STATIC",
+    "writtenBy": [
+      "PrefabSystem / importadores de asset (Colossal.Assets) no load"
+    ],
+    "syncPath": "NONE",
+    "note": "Dado de prefab (asset), populado por importadores no carregamento; nenhum sistema de gameplay decompilado escreve neste componente (so leitura) — identico entre instalacoes com mesmo conteudo/mods."
+  },
+  {
+    "type": "Game.Common.TimeData",
+    "file": "Common/TimeData.cs:7",
+    "class": "AUTHORED",
+    "writtenBy": [
+      "TimeSystem (config inicial de horario/ano da cidade)"
+    ],
+    "syncPath": "NONE",
+    "note": "m_StartingYear/Month/Hour/Minutes e m_FirstFrame definem o relogio inicial da cidade; e configuracao definida na criacao da cidade (menu de mapa/cidade), nao um comando in-game do CS2M — gap potencial se puder ser alterado apos o inicio (Common/TimeData.cs:7-44)."
+  },
+  {
+    "type": "Game.Common.Destroyed",
+    "file": "Common/Destroyed.cs:6",
+    "class": "EMERGENT",
+    "writtenBy": [
+      "Game.Objects.DestroySystem (marca entidades para remocao)"
+    ],
+    "syncPath": "NONE",
+    "note": "Componente de ciclo de vida (marca 'a caminho de ser destruida' com timer m_Cleared); e mecanismo interno de cleanup por tick, nao acao autorada diretamente — a AUTORIA da remocao (ex.: bulldoze) e sincada via DeleteCommand/NetDeleteCommand, mas a marca Destroyed em si e reconstruida localmente por cada simulacao (Common/Destroyed.cs:6-32; Objects/DestroySystem.cs)."
+  },
+  {
+    "type": "Game.Common.Target",
+    "file": "Common/Target.cs:6",
+    "class": "DERIVED",
+    "writtenBy": [
+      "dezenas de sistemas de IA/rota (ex.: sistemas de veiculo/cidadao) que apontam Entity alvo"
+    ],
+    "syncPath": "NONE",
+    "note": "Referencia generica a uma Entity-alvo (ex.: destino de rota, alvo de reparo); reconstruida deterministicamente pela logica de IA a partir de estado autorado (posicoes/servicos) — se a IA por-tick diverge, o alvo tambem diverge (classificado DERIVED mas com risco de arrasto por EMERGENT upstream)."
+  },
+  {
+    "type": "Game.Common.Owner",
+    "file": "Common/Owner.cs:6",
+    "class": "DERIVED",
+    "writtenBy": [
+      "dezenas de sistemas de criacao/spawn (ex.: HouseholdInitializeSystem, AreaConnectionSystem, AI de servico) que atribuem hierarquia dono->subobjeto"
+    ],
+    "syncPath": "NONE",
+    "note": "Relacao pai/filho entre entidades (ex.: sub-lane pertence a edge, sub-building pertence a lot); recalculada a partir da entidade autorada quando o dono e recriado — precisa que a identidade do dono resolva igual nas duas maquinas (mesmo risco de resolucao de Entity que motivou CS2M_NodeSyncId para rua; NAO VERIFICADO se Owner de outros dominios usa identidade estavel ou Entity cru)."
+  },
+  {
+    "type": "Game.Common.PseudoRandomSeed",
+    "file": "Common/PseudoRandomSeed.cs:7",
+    "class": "EMERGENT",
+    "writtenBy": [
+      "dezenas de *SelectData systems (ex.: PersonalCarSelectData, PoliceCarSelectData) via 'new PseudoRandomSeed(ref random)'"
+    ],
+    "syncPath": "NONE",
+    "note": "Semente pseudo-aleatoria por-entidade usada para variacao visual (cor, animacao, estilo); gerada a partir de um Random LOCAL de cada simulacao no momento da criacao — nao ha sync explicito do valor, entao duas maquinas podem sortear sementes diferentes para a 'mesma' entidade. CANDIDATO a explicar divergencias visuais tipo o campo de fazenda citado em architecture-decision.md (NAO VERIFICADO — precisa confirmar se o campo usa este componente)."
+  },
+  {
+    "type": "Game.Common.PointOfInterest",
+    "file": "Common/PointOfInterest.cs:7",
+    "class": "DERIVED",
+    "writtenBy": [
+      "sistemas de IA de servico (ex.: FireStationAISystem, HospitalAISystem, PoliceStationAISystem) — posicao de interesse calculada"
+    ],
+    "syncPath": "NONE",
+    "note": "Posicao (m_Position) e validade (m_IsValid) de um ponto de interesse calculado por IA de servico a partir do estado da cidade; puramente derivado, recalculado por tick — pode divergir como qualquer estado emergente de IA."
+  },
+  {
+    "type": "Game.Common.RandomLocalizationIndex",
+    "file": "Common/RandomLocalizationIndex.cs:9",
+    "class": "EMERGENT",
+    "writtenBy": [
+      "RandomLocalizationIndex.GenerateRandomIndices/EnsureValidRandomIndices (chamado por sistemas de UI/nome)"
+    ],
+    "syncPath": "NONE",
+    "note": "Indice sorteado localmente (via ref Random) para escolher qual variante de texto localizado exibir; cosmetico (texto exibido), sorteio local sem sync explicito — pode divergir entre host/cliente sem impacto funcional (Common/RandomLocalizationIndex.cs:20-47)."
+  },
+  {
+    "type": "Game.UI.NameSystem",
+    "file": "UI/NameSystem.cs:29",
+    "class": "AUTHORED",
+    "writtenBy": [
+      "NameSystem.SetCustomName (UI/NameSystem.cs:207)"
+    ],
+    "syncPath": "RenameCommand",
+    "note": "Dicionario Entity->string (m_Names, UI/NameSystem.cs:155) com nomes customizados dados pelo jogador (cidade/distrito/edificio/rota); e exatamente o dado que RenameCommand ja cobre no SyncContract — cobertura CONFIRMADA."
+  },
+  {
+    "type": "Game.UI.InGame.CityInfoUISystem",
+    "file": "UI/InGame/CityInfoUISystem.cs:19",
+    "class": "EMERGENT",
+    "writtenBy": [
+      "CityInfoUISystem (cache de demanda residencial/comercial/industrial para binding de UI)"
+    ],
+    "syncPath": "NONE",
+    "note": "So armazena valores de demanda (m_ResidentialLowDemand etc.) derivados a cada frame dos sistemas de demanda/simulacao para exibir no painel de info da cidade; puramente cosmetico/leitura, sem efeito de jogo (UI/InGame/CityInfoUISystem.cs:81-146)."
+  },
+  {
+    "type": "Game.UI.InGame.MilestoneUISystem",
+    "file": "UI/InGame/MilestoneUISystem.cs:28",
+    "class": "META",
+    "writtenBy": [
+      "MilestoneUISystem (Serialize so grava m_victoryPopupShown, UI/InGame/MilestoneUISystem.cs:1186-1194)"
+    ],
+    "syncPath": "NONE",
+    "note": "So serializa uma flag booleana (m_victoryPopupShown) indicando se o popup de vitoria/marco ja foi mostrado nesta maquina; bookkeeping de UI local, nao progresso de jogo (o progresso real de marcos/populacao fica em outro sistema fora do escopo desta pasta)."
+  },
+  {
+    "type": "Game.UI.InGame.ChirpLinkSystem",
+    "file": "UI/InGame/ChirpLinkSystem.cs:14",
+    "class": "EMERGENT",
+    "writtenBy": [
+      "ChirpLinkSystem (m_CachedChirpData, cache de nomes de remetente/links de um chirp, UI/InGame/ChirpLinkSystem.cs:147-159)"
+    ],
+    "syncPath": "NONE",
+    "note": "Cache de exibicao (nomes resolvidos via NameSystem) dos 'chirps' (feed social de cidadaos), que sao em si gerados proceduralmente (Game.Triggers); puramente cosmetico e derivado de dado emergente, divergencia sem impacto funcional."
+  },
+  {
+    "type": "Game.Rendering.WaterRenderSystem",
+    "file": "Rendering/WaterRenderSystem.cs:31",
+    "class": "STATIC",
+    "writtenBy": [
+      "WaterRenderSystem (m_WaterRenderSettings/m_SeaWindStrength/m_SeaWindDirection, config de renderizacao de agua do mapa)"
+    ],
+    "syncPath": "NONE",
+    "note": "Guarda o prefab/entidade de configuracao de renderizacao de agua e parametros de vento do mar; e config de mapa/ambiente definida na criacao do mundo, NAO VERIFICADO se e editavel pelo jogador durante a partida normal (fora do editor de mapas) (Rendering/WaterRenderSystem.cs:218-263)."
+  },
+  {
+    "type": "Game.Rendering.TerrainMaterialSystem",
+    "file": "Rendering/TerrainMaterialSystem.cs:26",
+    "class": "STATIC",
+    "writtenBy": [
+      "TerrainMaterialSystem (m_MaterialPrefabs/m_TerrainRenderSettings, Rendering/TerrainMaterialSystem.cs:239-254)"
+    ],
+    "syncPath": "NONE",
+    "note": "Lista de prefabs de material de terreno e entidade de configuracoes de render de terreno; e tema visual do mapa (bioma/estilo), definido na criacao do mundo — nao e uma acao de jogador durante o jogo normal."
+  },
+  {
+    "type": "Game.Rendering.MarkerIconSystem",
+    "file": "Rendering/MarkerIconSystem.cs:24",
+    "class": "META",
+    "writtenBy": [
+      "MarkerIconSystem (m_SelectedMarker/m_FollowedMarker, Rendering/MarkerIconSystem.cs:376-388)"
+    ],
+    "syncPath": "NONE",
+    "note": "Guarda qual marcador (ex.: veiculo/cidadao) o jogador tem selecionado/esta seguindo com a camera; e estado de UI/camera LOCAL de cada jogador, nao deveria ser sincado entre jogadores (cada um segue o que quiser)."
+  },
+  {
+    "type": "Game.Effects.EffectFlagSystem",
+    "file": "Effects/EffectFlagSystem.cs:10",
+    "class": "EMERGENT",
+    "writtenBy": [
+      "EffectFlagSystem (EffectFlagData: m_IsNightTime/m_LastTimeChange/m_IsColdSeason/m_LastSeasonChange)"
+    ],
+    "syncPath": "NONE",
+    "note": "Flags de dia/noite e estacao fria, recalculadas deterministicamente a partir do relogio da simulacao (TimeSystem) a cada tick; deve CONVERGIR naturalmente pois deriva de TimeData/tick que e compartilhado — risco de ordem/float BAIXO (so compara contra thresholds kNightBegin/kDayBegin) mas NAO VERIFICADO neste namespace se TimeData em si esta sincronizado entre host/cliente (ver gap Game.Common.TimeData)."
+  },
+  {
+    "type": "Game.Audio.AudioManager",
+    "file": "Audio/AudioManager.cs:34",
+    "class": "META",
+    "writtenBy": [
+      "AudioManager (m_LastSaveRadioChannel/m_LastSaveRadioSkipAds, Audio/AudioManager.cs:1528-1537)"
+    ],
+    "syncPath": "NONE",
+    "note": "Guarda a estacao de radio e preferencia de pular anuncios; e preferencia de audio LOCAL de cada jogador (cada maquina pode ouvir radio diferente), nao e dado de cidade que precise convergir."
+  }
+]

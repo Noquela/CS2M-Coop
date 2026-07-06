@@ -3,9 +3,12 @@
 > Referência dos sistemas ECS **vanilla** do CS2 1.5.3f1 que o CS2M-Coop precisa espelhar entre
 > máquinas. Cada afirmação aqui foi validada na prática — pelas 58 cenas do selftest passando e por
 > correções de bugs de campo reais. Complemento de `COOP_SYNC.md` (que descreve o MOD); este arquivo
-> descreve o JOGO. Quando em dúvida sobre um detalhe, decompile a fonte da verdade:
-> `ilspycmd -t Game.Net.GenerateNodesSystem "$GAME/Managed/Game.dll"` (nunca `-o`; joga no stdout e
-> `grep`). O caminho do `Game.dll` está nas env vars `CSII_MANAGEDPATH`.
+> descreve o JOGO. Quando em dúvida sobre um detalhe, leia a fonte da verdade: o **Game.dll inteiro
+> está decompilado em `decomp/Game/`** (4184 .cs, namespaces em pastas — `Grep`/`Read` direto; regerar
+> com `ilspycmd --nested-directories -p -o decomp/Game "$CSII_MANAGEDPATH/Game.dll"`). Para uma classe
+> avulsa sem poluir contexto: `ilspycmd -t Game.Net.GenerateNodesSystem "$CSII_MANAGEDPATH/Game.dll"`.
+> REGRA: nenhuma afirmação sobre comportamento do jogo entra em spec/código sem citar o arquivo
+> decompilado que a prova.
 
 ---
 
