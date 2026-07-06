@@ -62,6 +62,22 @@ namespace CS2M.Sync
         // NetPlaceApplySystem._pendingDefinitions.
         private readonly List<Entity> _pendingDefinitions = new List<Entity>();
 
+        // Per-edge Game.Net.BuildOrder correction queued by EmitEdgeCourse (see there for the "why"): the
+        // edge doesn't exist yet when its course is emitted, so GenerateEdges@Mod2 assigns m_Start/m_End
+        // from ITS OWN per-process counter this frame. Resolved by identity at the TOP of the FOLLOWING
+        // OnUpdate (same slot as the _pendingDefinitions cleanup above), once the edge is live.
+        private readonly List<PendingOrderFix> _pendingOrderFixes = new List<PendingOrderFix>();
+
+        /// <summary>One edge's wire-authoritative BuildOrder, queued until the edge it names exists.</summary>
+        private struct PendingOrderFix
+        {
+            public ulong StartId;
+            public ulong EndId;
+            public uint OrderStart;
+            public uint OrderEnd;
+            public int Age;
+        }
+
         // A batch whose boundary nodes are not all resolvable yet (a sibling batch that creates them may still
         // be in flight). Held until they resolve or it ages out — never applied partially.
         private NetBatchCommand _parked;
@@ -99,6 +115,58 @@ namespace CS2M.Sync
             }
 
             _pendingDefinitions.Clear();
+
+            // BuildOrder corrector: the edges queued last frame (EmitEdgeCourse) now exist (GenerateEdges
+            // consumed their definitions before this OnUpdate ran again) — resolve by node-pair identity
+            // and stamp the WIRE m_Start/m_End over the receiver's local-counter value. This re-derives
+            // BlockSystem@Mod4's zone blocks with the SAME cell-overlap priority (Zones.BuildOrder folds
+            // Game.Net.BuildOrder, see CellOverlapJobs.CheckPriority) both machines used to build the edge,
+            // instead of each PC's own process-local GenerateEdgesSystem counter (decomp
+            // GenerateEdgesSystem.cs:2093) — the root cause of the visibility split. Runs before the
+            // PLAYING gate, same as the _pendingDefinitions cleanup above, so a fix in flight never leaks
+            // past a disconnect.
+            for (int i = _pendingOrderFixes.Count - 1; i >= 0; i--)
+            {
+                PendingOrderFix fix = _pendingOrderFixes[i];
+                if (FindEdgeById(fix.StartId, fix.EndId, out Entity fixEdge))
+                {
+                    if (EntityManager.HasComponent<Game.Net.BuildOrder>(fixEdge))
+                    {
+                        Game.Net.BuildOrder localOrder = EntityManager.GetComponentData<Game.Net.BuildOrder>(fixEdge);
+                        if (localOrder.m_Start != fix.OrderStart || localOrder.m_End != fix.OrderEnd)
+                        {
+                            EntityManager.SetComponentData(fixEdge, new Game.Net.BuildOrder
+                            {
+                                m_Start = fix.OrderStart,
+                                m_End = fix.OrderEnd,
+                            });
+                            if (!EntityManager.HasComponent<Updated>(fixEdge))
+                            {
+                                EntityManager.AddComponent<Updated>(fixEdge);
+                            }
+
+                            CS2M.Log.Info($"[Batch] ORDER-FIX edge={fixEdge.Index} " +
+                                          $"order={localOrder.m_Start}-{localOrder.m_End}->{fix.OrderStart}-{fix.OrderEnd}");
+                        }
+                    }
+
+                    _pendingOrderFixes.RemoveAt(i);
+                }
+                else
+                {
+                    fix.Age++;
+                    if (fix.Age >= 60)
+                    {
+                        CS2M.Log.Info($"[Batch] ORDER-DROP startId={fix.StartId} endId={fix.EndId} " +
+                                      $"(unresolved {fix.Age}f)");
+                        _pendingOrderFixes.RemoveAt(i);
+                    }
+                    else
+                    {
+                        _pendingOrderFixes[i] = fix;
+                    }
+                }
+            }
 
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
@@ -510,9 +578,29 @@ namespace CS2M.Sync
             EntityManager.AddComponent<Updated>(def); // required by GenerateEdgesSystem's definition query
             _pendingDefinitions.Add(def);
 
-            // BuildOrder is NOT set here: the vanilla GenerateEdges pipeline assigns it locally (it always
-            // did on the legacy net path, which produced correct geometry). cmd.EdgeBuildOrderStart/End stay
-            // in the wire format (unused on apply) rather than churn the command struct + captor.
+            // BuildOrder is NOT set here — GenerateEdges hasn't created the edge yet this frame (this is
+            // only a definition), so there is nothing to stamp it on. The vanilla pipeline assigns it from
+            // its OWN per-process counter (decomp GenerateEdgesSystem.cs:2093) the instant it materializes
+            // the edge, and that counter diverges builder-vs-receiver — the confirmed root cause of the
+            // cross-machine zone-visibility split (Zones.BuildOrder derives from it; CellOverlapJobs.
+            // CheckPriority uses Zones.BuildOrder to break cell-overlap ties). Queue the WIRE-authoritative
+            // order for the post-materialization corrector at the top of NEXT frame's OnUpdate instead —
+            // by then the edge exists and FindEdgeById can resolve it by node-pair identity.
+            if (cmd.EdgeBuildOrderStart != null && cmd.EdgeBuildOrderEnd != null
+                && i < cmd.EdgeBuildOrderStart.Length && i < cmd.EdgeBuildOrderEnd.Length
+                // 0/0 is the CAPTURE's own fallback for a builder edge that had no BuildOrder component —
+                // stamping it over the receiver's real local order would be strictly worse than skipping.
+                && (cmd.EdgeBuildOrderStart[i] != 0 || cmd.EdgeBuildOrderEnd[i] != 0))
+            {
+                _pendingOrderFixes.Add(new PendingOrderFix
+                {
+                    StartId = cmd.EdgeStartNodeIds[i],
+                    EndId = cmd.EdgeEndNodeIds[i],
+                    OrderStart = cmd.EdgeBuildOrderStart[i],
+                    OrderEnd = cmd.EdgeBuildOrderEnd[i],
+                    Age = 0,
+                });
+            }
 
             // Upgraded (sidewalks/trees/sound barriers/quays/lighting): applied BY IDENTITY via the existing
             // net-edit pipeline instead of the CreationDefinition. NetEditApplySystem drains
