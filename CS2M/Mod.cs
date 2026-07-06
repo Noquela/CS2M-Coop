@@ -208,6 +208,18 @@ namespace CS2M
             // construction). Same slot as NetPlaceApplySystem so GenerateNodes/Edges consume it this frame.
             updateSystem.UpdateBefore<NetToolReplaySystem>(SystemUpdatePhase.Modification1);
 
+            // v56.1 fix: NetToolReplaySystem stamps CreationFlags.Permanent on its definitions (so the
+            // road survives instead of being stripped as a stale preview) — but that flag makes
+            // GenerateNodes/EdgesSystem skip Temp entirely, so the resulting Node/Edge never reaches
+            // ApplyNetSystem and never gains Applied/Created ([Batch] CAPTURED=0 even though the road is
+            // really there). NetToolReplayApplySystem stamps Applied/Created/Updated by hand on exactly
+            // what the replay just built. Modification5 runs strictly before the ModificationEnd slot
+            // where NetBatchCaptureSystem lives, and well after GenerateNodes/Edges (Mod2) materialized
+            // the replayed entities in this same frame — so the capture sees the stamps this frame.
+            // NEVER the two-type UpdateBefore<A,B> overload here: it REGISTERS THE SYSTEM A SECOND TIME
+            // (the v50 double-register lesson a few lines below).
+            updateSystem.UpdateAt<NetToolReplayApplySystem>(SystemUpdatePhase.Modification5);
+
             // v56 INPUT-REPLAY capture (gated CS2M_REPLAY=1): grabs the tool's ControlPoints on Apply.
             // ModificationEnd is a first guess for the phase; runtime-verify applyMode==Apply lands here.
             updateSystem.UpdateAt<NetToolCaptureSystem>(SystemUpdatePhase.ModificationEnd);

@@ -79,11 +79,34 @@ namespace CS2M.Sync
                 return;
             }
 
-            while (RemoteReplayQueue.TryDequeue(out NetToolReplayCommand cmd))
+            var cmds = new List<NetToolReplayCommand>();
+            while (RemoteReplayQueue.TryDequeue(out NetToolReplayCommand cmd)) { cmds.Add(cmd); }
+            if (cmds.Count == 0)
+            {
+                return;
+            }
+
+            // Snapshot the live (non-Temp, non-Deleted) nodes/edges BEFORE replaying, so
+            // NetToolReplayApplySystem (ModificationEnd, later this SAME frame) can diff the
+            // post-Generate state and know exactly which entities THIS batch created. Needed because the
+            // Permanent stamp below makes GenerateNodes/EdgesSystem skip Temp entirely (see that
+            // system's doc comment) -- so there is no other way to identify "what did we just build".
+            var preNodes = new HashSet<Entity>();
+            NativeArray<Entity> preN = _liveNodes.ToEntityArray(Allocator.Temp);
+            foreach (Entity e in preN) { preNodes.Add(e); }
+            preN.Dispose();
+            var preEdges = new HashSet<Entity>();
+            NativeArray<Entity> preE = _liveEdges.ToEntityArray(Allocator.Temp);
+            foreach (Entity e in preE) { preEdges.Add(e); }
+            preE.Dispose();
+
+            foreach (NetToolReplayCommand cmd in cmds)
             {
                 try { ReplayOne(cmd); }
                 catch (System.Exception ex) { CS2M.Log.Info($"[Guard] replay failed: {ex.Message}"); }
             }
+
+            NetToolReplayApplySystem.Arm(preNodes, preEdges);
         }
 
         private void ReplayOne(NetToolReplayCommand cmd)
@@ -297,6 +320,122 @@ namespace CS2M.Sync
                 return best;
             }
             finally { ents.Dispose(); }
+        }
+    }
+
+    /// <summary>
+    ///     v56.1 fix for "[Batch] CAPTURED=0 on replayed roads": <see cref="NetToolReplaySystem"/> stamps
+    ///     <see cref="CreationFlags.Permanent"/> on the definitions it creates so the road actually
+    ///     appears (decomp comment in <see cref="NetToolReplaySystem.ReplayOne"/>). That flag makes
+    ///     GenerateNodesSystem/GenerateEdgesSystem SKIP adding <see cref="Temp"/> to the resulting
+    ///     Node/Edge (decomp <c>GenerateNodesSystem.cs:1593-1596</c>, <c>GenerateEdgesSystem.cs:1643-1646</c>
+    ///     -- both gate the <c>AddComponent(..., Temp)</c> call on <c>(flags &amp; Permanent) == 0</c>).
+    ///     <see cref="Applied"/>/<see cref="Created"/> are added ONLY by the game's own
+    ///     <c>ApplyNetSystem</c>, whose entire query requires <c>Temp</c>
+    ///     (decomp <c>ApplyNetSystem.cs:879-895</c>: <c>m_TempQuery</c> = <c>All: Temp</c>,
+    ///     <c>RequireForUpdate(m_TempQuery)</c>; the promotion itself,
+    ///     <c>RemoveComponent&lt;Temp&gt;</c> + <c>AddComponent(Applied, Created, Updated)</c>, is
+    ///     <c>ApplyNetSystem.cs:687-699</c>). No <c>Temp</c> means the replayed entity never enters that
+    ///     query, in ANY frame -- this is a pipeline bypass, not a phase/timing race, so moving
+    ///     <see cref="NetToolReplaySystem"/> to a different phase cannot fix it.
+    ///
+    ///     This system stands in for <c>ApplyNetSystem</c> for JUST the replay's output: it diffs the
+    ///     live Node/Edge queries against the pre-replay snapshot <see cref="NetToolReplaySystem"/> took
+    ///     this same frame (<see cref="Arm"/>) and stamps Applied+Created+Updated on the entities that
+    ///     appeared in between -- i.e. exactly what GenerateNodes/EdgesSystem just built from the
+    ///     Permanent definitions. Registered immediately before <see cref="NetBatchCaptureSystem"/> in the
+    ///     same ModificationEnd slot (explicit two-type <c>UpdateBefore</c>, not phase-offset luck), so a
+    ///     replayed road is indistinguishable from a real player's build to that system -- and to every
+    ///     other consumer that keys off Applied/Created.
+    /// </summary>
+    public partial class NetToolReplayApplySystem : GameSystemBase
+    {
+        private EntityQuery _liveNodes;
+        private EntityQuery _liveEdges;
+
+        // Single in-flight batch: NetToolReplaySystem arms this system in the same frame it drains the
+        // queue, and this system always runs later that same frame (ModificationEnd), so there is never
+        // more than one pending snapshot at a time.
+        private static HashSet<Entity> _preNodes;
+        private static HashSet<Entity> _preEdges;
+        private static bool _armed;
+
+        protected override void OnCreate()
+        {
+            base.OnCreate();
+            _liveNodes = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Node>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+            _liveEdges = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Curve>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+            CS2M.Log.Info("[Replay] NetToolReplayApplySystem created (Applied/Created stamp for replay)");
+        }
+
+        /// <summary>Called by <see cref="NetToolReplaySystem"/> right after it drains the replay queue,
+        /// with the pre-replay snapshot of live node/edge entities (excludes Temp/Deleted, same as
+        /// this system's own queries) so <see cref="OnUpdate"/> can diff post- vs pre-Generate state.</summary>
+        internal static void Arm(HashSet<Entity> preNodes, HashSet<Entity> preEdges)
+        {
+            _preNodes = preNodes;
+            _preEdges = preEdges;
+            _armed = true;
+        }
+
+        protected override void OnUpdate()
+        {
+            if (!_armed)
+            {
+                return;
+            }
+
+            _armed = false;
+            HashSet<Entity> preNodes = _preNodes;
+            HashSet<Entity> preEdges = _preEdges;
+            _preNodes = null;
+            _preEdges = null;
+
+            int taggedNodes = 0;
+            NativeArray<Entity> nodes = _liveNodes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in nodes)
+                {
+                    if (preNodes.Contains(e)) { continue; }
+                    StampApplied(e);
+                    taggedNodes++;
+                }
+            }
+            finally { nodes.Dispose(); }
+
+            int taggedEdges = 0;
+            NativeArray<Entity> edges = _liveEdges.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in edges)
+                {
+                    if (preEdges.Contains(e)) { continue; }
+                    StampApplied(e);
+                    taggedEdges++;
+                }
+            }
+            finally { edges.Dispose(); }
+
+            if (taggedNodes > 0 || taggedEdges > 0)
+            {
+                CS2M.Log.Info($"[Replay] TAGGED nodes={taggedNodes} edges={taggedEdges} (Applied+Created for batch capture)");
+            }
+        }
+
+        private void StampApplied(Entity e)
+        {
+            if (!EntityManager.HasComponent<Applied>(e)) { EntityManager.AddComponent<Applied>(e); }
+            if (!EntityManager.HasComponent<Created>(e)) { EntityManager.AddComponent<Created>(e); }
+            if (!EntityManager.HasComponent<Updated>(e)) { EntityManager.AddComponent<Updated>(e); }
         }
     }
 }
