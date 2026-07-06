@@ -37,7 +37,7 @@ SUBSYS = {
     "NodeDump": ("nodes", "posicao x/z : grau (junção vs ponta-morta)"),
     "EdgeDump": ("edges", "par de extremidades a-b"),
     "AreaDump": ("areas", "centro cx/cz : nós : owned"),
-    "BlockDump": ("zones", "bloco x/z : WxH = células run-length por NOME de zona"),
+    "BlockDump": ("zones", "bloco x/z : WxH[:oORDEM] = células run-length por NOME[~FLAGS] de zona"),
     "BldgDump": ("buildings", "posicao x/z : nome do prefab"),
 }
 
@@ -89,6 +89,25 @@ def area_center(tok):
     return tok.split(":", 1)[0]
 
 
+# v56: BlockDump ganhou um campo opcional ":o<m_Order>" no cabecalho (BuildOrder do bloco — o
+# desempate de sobreposicao de zonas, Game.Zones.BlockSystem.m_Order) logo antes do "=" das celulas.
+# Retrocompativel: dumps antigos (sem ":oN") nao batem o regex -> order=None, stripped=tok intacto,
+# e o chamador cai no caminho generico de sempre.
+_BLOCK_ORDER_RE = re.compile(r":o(\d+)=")
+
+
+def block_strip_order(tok):
+    """Retorna (ordem_ou_None, token_com_:oN_removido) — usado pra achar um bloco cujo UNICO diff
+    entre host/client e o BuildOrder (mesma posicao/tamanho/celulas, prioridade de sobreposicao
+    diferente), caso em que vale a pena um alerta proprio em vez do "FORMA DIFERE" generico."""
+    m = _BLOCK_ORDER_RE.search(tok)
+    if not m:
+        return None, tok
+    order = m.group(1)
+    stripped = tok[:m.start()] + "=" + tok[m.end():]
+    return order, stripped
+
+
 def diff_subsys(tag, host_log, client_log):
     friendly, meaning = SUBSYS[tag]
     h = last_dump(host_log, tag, "HOST")
@@ -119,6 +138,13 @@ def diff_subsys(tag, host_log, client_log):
         c_by_c = {area_center(t): t for t in only_client}
         shape = sorted(set(h_by_c) & set(c_by_c))
         for ctr in shape:
+            if tag == "BlockDump":
+                h_order, h_rest = block_strip_order(h_by_c[ctr])
+                c_order, c_rest = block_strip_order(c_by_c[ctr])
+                if h_order is not None and c_order is not None and h_order != c_order and h_rest == c_rest:
+                    # Mesmo bloco (pos/tamanho/celulas identicos) — SO o BuildOrder difere.
+                    print(f"  ~ ORDEM DIFERE @ {ctr}:  host=o{h_order} client=o{c_order}")
+                    continue
             print(f"  ~ FORMA DIFERE @ {ctr}:  host={h_by_c[ctr]}  client={c_by_c[ctr]}")
         gone = [h_by_c[k] for k in h_by_c if k not in c_by_c]
         extra = [c_by_c[k] for k in c_by_c if k not in h_by_c]

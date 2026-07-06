@@ -413,11 +413,51 @@ namespace CS2M.Sync
             finally { arr.Dispose(); }
         }
 
-        // DIAGNOSTIC (zones): dump every zone block as position/size plus its per-cell zone NAMES
-        // (run-length compressed, spaces→_ so statediff can whitespace-split). Names, not indices —
+        // v56: which CellFlags bits are folded into the dump's per-cell "~<hex>" suffix. Chosen against
+        // decomp/Game/Game/Zones/CellFlags.cs so the dump goes blind exactly where the screen doesn't:
+        //   - Visible/Shared/Occupied are the literal inputs (together with Selected) of the game's own
+        //     ZoneUtils.GetColorIndex (decomp Zones/ZoneUtils.cs:141-147), which Prefabs/ZoneSystem.cs:
+        //     251-253 calls to pick which of the 3 paint variants (normal/occupied/selected) a cell
+        //     renders as.
+        //   - Blocked/Overridden gate whether a cell's zone paint is drawn AT ALL, independent of color:
+        //     a cell can carry the identical m_Zone name + BuildOrder on both machines yet paint
+        //     differently because one PC thinks it lost the block-overlap contest and the other doesn't
+        //     (CellOverlapJobs.cs:110,546 and CellBlockJobs.cs:421-426 set/clear Blocked;
+        //     CellOccupyJobs.cs:246,337,672-674 set/clear Overridden during building placement).
+        //   EXCLUDED — not render state, or transient/local-only:
+        //   - Selected (0x40): tool-drag preview only (GenerateZonesSystem.cs:501, ApplyZonesSystem.cs:
+        //     122-128, ZoneToolSystem.cs:141), live only during an active local zone-brush stroke and
+        //     gone by the time both sides settle — comparing it would manufacture drift out of whichever
+        //     player happens to be dragging a brush.
+        //   - Updating (0x100): scratch bit, cleared same-job before the buffer settles
+        //     (CellCheckHelpers.cs:483) — never observed set in a converged state.
+        //   - Redundant (0x80): overlap-resolution bookkeeping that CellCheckHelpers.cs:475 and
+        //     LotSizeJobs.cs:109 always test OR'd with Blocked — it never carries render information
+        //     Blocked doesn't already carry, and (like the m_Index-vs-name bug this dump exists to avoid
+        //     repeating) is recomputed by BlockSystem's overlap job on every touch, so folding it
+        //     independently risks a brand-new false-positive drift axis.
+        //   - Roadside/RoadLeft/RoadRight/RoadBack (0x4,0x200,0x400,0x800): CellBlockJobs.cs-internal
+        //     bookkeeping for a cell's direction relative to its owning road; never read by
+        //     GetColorIndex nor by any buildability check.
+        private const Game.Zones.CellFlags BlockDumpRenderMask =
+            Game.Zones.CellFlags.Blocked | Game.Zones.CellFlags.Shared | Game.Zones.CellFlags.Visible |
+            Game.Zones.CellFlags.Overridden | Game.Zones.CellFlags.Occupied;
+
+        // DIAGNOSTIC (zones): dump every zone block as position/size(/BuildOrder) plus its per-cell zone
+        // NAMES (run-length compressed, spaces→_ so statediff can whitespace-split). Names, not indices —
         // indices are per-machine. Diffing [BlockDump:HOST] vs [BlockDump:CLIENT] pins a zones drift
         // to the exact block: missing block = the road-derived block itself diverged (BuildOrder
-        // cascade); same block+different cells = paint/index divergence. Env-gated like DumpNodes.
+        // cascade); same block+different cells = paint/index divergence.
+        //
+        // v56: two additions the radar's ZoneHash folds away (by design — see AccBlocks) but the SCREEN
+        // renders, so the dump was blind to them even when the eye wasn't: (1) each cell token gets a
+        // "~<hex>" suffix — the render-relevant CellFlags bits (BlockDumpRenderMask, see above) — whenever
+        // m_State != 0, so a same-name-different-paint cell (blocked/occupied/overridden/shared/visible
+        // differs) shows up as a differing run-length token instead of comparing equal; (2) the block
+        // header gains ":o<m_Order>" when the block carries a Game.Zones.BuildOrder component — the
+        // overlap tie-breaker (BlockSystem.cs:403-404) that decides which of two overlapping zone claims
+        // wins, so a same-block-different-BuildOrder divergence (paint identical, priority isn't) is now
+        // visible instead of silently folded into "no diff". Env-gated like DumpNodes.
         public static void DumpBlocks(EntityManager em, EntityQuery q, string tag)
         {
             NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
@@ -428,7 +468,13 @@ namespace CS2M.Sync
                 {
                     Game.Zones.Block b = em.GetComponentData<Game.Zones.Block>(e);
                     var sb = new System.Text.StringBuilder();
-                    sb.Append($"{b.m_Position.x:F0}/{b.m_Position.z:F0}:{b.m_Size.x}x{b.m_Size.y}=");
+                    sb.Append($"{b.m_Position.x:F0}/{b.m_Position.z:F0}:{b.m_Size.x}x{b.m_Size.y}");
+                    if (em.HasComponent<Game.Zones.BuildOrder>(e))
+                    {
+                        sb.Append($":o{em.GetComponentData<Game.Zones.BuildOrder>(e).m_Order}");
+                    }
+
+                    sb.Append('=');
                     if (em.HasBuffer<Game.Zones.Cell>(e))
                     {
                         DynamicBuffer<Game.Zones.Cell> buf = em.GetBuffer<Game.Zones.Cell>(e, true);
@@ -436,8 +482,14 @@ namespace CS2M.Sync
                         int run = 0;
                         for (int i = 0; i < buf.Length; i++)
                         {
-                            string n = ZoneSync.Name(buf[i].m_Zone.m_Index);
+                            Game.Zones.Cell cell = buf[i];
+                            string n = ZoneSync.Name(cell.m_Zone.m_Index);
                             n = n.Length == 0 ? "-" : n.Replace(' ', '_');
+                            if (cell.m_State != 0)
+                            {
+                                n += $"~{(int) (cell.m_State & BlockDumpRenderMask):X}";
+                            }
+
                             if (n == cur)
                             {
                                 run++;
