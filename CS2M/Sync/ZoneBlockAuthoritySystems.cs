@@ -611,7 +611,16 @@ namespace CS2M.Sync
                 }
             }
 
-            if (sizeMatches && cellsMatch)
+            // v56 FIELD FIX (statediff com flags, 06/07 ~18h): posição TAMBÉM é conteúdo. Blocos com o
+            // mesmo tamanho + as mesmas zonas mas centro deslocado ~1 m entre as máquinas (ruído
+            // sub-métrico residual de geometria de rua) produzem contests de sobreposição diferentes →
+            // células Unzoned Visible num PC e Blocked no outro (o padrão branco-vs-verde que o olho
+            // pega e o radar não). O skip idempotente antigo ignorava posição e deixava exatamente esse
+            // caso passar sem heal.
+            bool posMatches = math.distance(localBlock.m_Position,
+                new float3(cmd.PosX[idx], cmd.PosY[idx], cmd.PosZ[idx])) <= 0.25f;
+
+            if (sizeMatches && cellsMatch && posMatches)
             {
                 return; // already converged — silent skip (idempotent)
             }
