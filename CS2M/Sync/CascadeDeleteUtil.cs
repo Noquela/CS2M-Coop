@@ -11,6 +11,16 @@ namespace CS2M.Sync
     ///     registered in the parent's Sub* buffers — so the game's own delete cascade misses them and
     ///     bulldozing the building on another PC leaves yards/paths/lights behind. Deleting through
     ///     here marks every live child (Owner == target, recursively) Deleted in the same frame.
+    ///
+    ///     v56: this is only ever called from remote-apply paths (<c>RemoteEditApplySystem.ApplyDelete</c>,
+    ///     <c>RemotePlacementApplySystem</c>) — the target AND every cascaded child get stamped
+    ///     <c>CS2M_RemoteDeleted</c> here (the delete-echo tag, same pattern the net path uses), otherwise
+    ///     an entity that independently carries a <c>CS2M_SyncId</c> (e.g. an installed service-upgrade
+    ///     extension wiped out because its owning building got deleted) would look like a fresh LOCAL
+    ///     delete to <c>DeleteDetectorSystem</c> and get re-broadcast — an echo. Deliberately NOT
+    ///     <c>CS2M_RemotePlaced</c>: that tag marks remote CREATION and lives for the entity's whole
+    ///     life, so using it for delete-echo would swallow a local player's delete of anything a remote
+    ///     player built (the exact conflation CS2M_RemoteDeleted.cs documents for nets).
     /// </summary>
     internal static class CascadeDeleteUtil
     {
@@ -19,6 +29,11 @@ namespace CS2M.Sync
             if (!em.HasComponent<Deleted>(target))
             {
                 em.AddComponent<Deleted>(target);
+            }
+
+            if (!em.HasComponent<CS2M_RemoteDeleted>(target))
+            {
+                em.AddComponent<CS2M_RemoteDeleted>(target);
             }
 
             // One query pass; recurse via repeated sweeps (children of children) — depth is tiny.
@@ -46,6 +61,11 @@ namespace CS2M.Sync
                                                 && IsUnder(em, owner, target, 4)))
                         {
                             em.AddComponent<Deleted>(child);
+                            if (!em.HasComponent<CS2M_RemoteDeleted>(child))
+                            {
+                                em.AddComponent<CS2M_RemoteDeleted>(child);
+                            }
+
                             any = true;
                         }
                     }

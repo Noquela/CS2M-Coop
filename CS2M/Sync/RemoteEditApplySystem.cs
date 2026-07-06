@@ -95,13 +95,11 @@ namespace CS2M.Sync
                 return;
             }
 
-            if (!EntityManager.HasComponent<CS2M_RemotePlaced>(e))
-            {
-                EntityManager.AddComponent<CS2M_RemotePlaced>(e);
-            }
-
             // v51: cascade every live child too — replica buildings hold definition-made
             // sub-nets/sub-areas the vanilla cascade can miss ("part of the building stays behind").
+            // Delete-echo stamping (CS2M_RemoteDeleted on target + children) happens inside the util —
+            // NOT CS2M_RemotePlaced, which marks remote CREATION and would swallow a local player's
+            // delete of anything a remote player built.
             CascadeDeleteUtil.DeleteWithChildren(EntityManager, e);
             if (cmd.SyncId != 0)
             {

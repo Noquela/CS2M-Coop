@@ -17,13 +17,25 @@ namespace CS2M.Sync
     ///     Detects when the local player bulldozes a synced object (one carrying <c>CS2M_SyncId</c>)
     ///     and broadcasts a <see cref="DeleteCommand"/>. Only top-level objects (no <c>Owner</c>) are
     ///     sent — the game cascades sub-object deletion. Objects we deleted from a remote command carry
-    ///     <c>CS2M_RemotePlaced</c> and are excluded (echo guard).
+    ///     <c>CS2M_RemoteDeleted</c> (stamped at remote-apply time by CascadeDeleteUtil) and are
+    ///     excluded (delete-echo guard — v56: was CS2M_RemotePlaced, which wrongly also swallowed a
+    ///     local player's delete of remote-built objects, since that tag marks CREATION and never dies).
+    ///
+    ///     v56: EXCEPTION for installed service-building extensions (hospital wings etc.) — the
+    ///     upgrades panel's "delete" button (<c>UpgradesSection.OnDelete</c>) marks <c>Deleted</c>
+    ///     DIRECTLY on the extension entity, which carries <c>Owner</c> (the building). That is a
+    ///     genuine top-level player action, not derived-sub-object cascade, and the extension already
+    ///     got a <c>CS2M_SyncId</c> when it was planted (<see cref="PlacementDetectorSystem.DetectExtensions"/>),
+    ///     so <see cref="_deletedExtensionQuery"/> re-admits Owner but gates on the SAME prefab check
+    ///     used at plant time (<c>ServiceUpgradeData</c>/<c>BuildingExtensionData</c>) so ordinary
+    ///     derived sub-objects (walls, pipes, decorations — never allocated a SyncId) still don't leak.
     /// </summary>
     public partial class DeleteDetectorSystem : GameSystemBase
     {
         private EntityQuery _deletedQuery;
         private EntityQuery _deletedNativeQuery;
         private EntityQuery _deletedRouteQuery;
+        private EntityQuery _deletedExtensionQuery;
         private ToolSystem _toolSystem;
         private PrefabSystem _prefabSystem;
         private readonly HashSet<ulong> _recentlySent = new HashSet<ulong>();
@@ -52,7 +64,10 @@ namespace CS2M.Sync
                 {
                     ComponentType.ReadOnly<Temp>(),
                     ComponentType.ReadOnly<Owner>(),
-                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                    // Delete-echo tag (stamped by CascadeDeleteUtil on remote-applied deletes). NOT
+                    // CS2M_RemotePlaced: that marks remote CREATION and lives forever, so excluding it
+                    // here swallowed a local player's bulldoze of anything a remote player had built.
+                    ComponentType.ReadOnly<CS2M_RemoteDeleted>(),
                 },
             });
 
@@ -93,11 +108,31 @@ namespace CS2M.Sync
                 {
                     ComponentType.ReadOnly<Temp>(),
                     ComponentType.ReadOnly<Owner>(),
-                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                    ComponentType.ReadOnly<CS2M_RemoteDeleted>(), // delete-echo, not creation-echo (see above)
                     ComponentType.ReadOnly<CS2M_SyncId>(),
                 },
             });
-            RequireAnyForUpdate(_deletedQuery, _deletedNativeQuery, _deletedRouteQuery);
+            // v56: installed service-upgrade extensions — deleted directly via the upgrades panel
+            // (Owner points at the building). Re-admits Owner (excluded above) but the prefab gate in
+            // DetectExtensionDeletes keeps ordinary owned sub-objects (which never got a CS2M_SyncId
+            // in the first place) from leaking through.
+            _deletedExtensionQuery = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(),
+                    ComponentType.ReadOnly<CS2M_SyncId>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<CS2M_RemoteDeleted>(), // delete-echo, not creation-echo (see above)
+                },
+            });
+
+            RequireAnyForUpdate(_deletedQuery, _deletedNativeQuery, _deletedRouteQuery, _deletedExtensionQuery);
             CS2M.Log.Info("[Del] DeleteDetectorSystem created");
         }
 
@@ -137,6 +172,57 @@ namespace CS2M.Sync
 
             DetectNativeDeletes();
             DetectRouteDeletes();
+            DetectExtensionDeletes();
+        }
+
+        /// <summary>
+        ///     v56: installed service-upgrade extensions deleted straight from the upgrades panel
+        ///     (<c>UpgradesSection.OnDelete</c> → bare <c>AddComponent&lt;Deleted&gt;</c> on the
+        ///     extension entity, which has <c>Owner</c> == the building). The main <see cref="_deletedQuery"/>
+        ///     deliberately excludes <c>Owner</c> so automatic sub-object cascade doesn't get resent —
+        ///     this is the one owned case that IS a top-level player action. Gated on the same prefab
+        ///     check <see cref="PlacementDetectorSystem.DetectExtensions"/> uses at plant time
+        ///     (<c>ServiceUpgradeData</c>/<c>BuildingExtensionData</c>) so plain derived sub-objects
+        ///     (which never got a <c>CS2M_SyncId</c> to begin with) can't leak through even if some
+        ///     future path stamped one on them.
+        /// </summary>
+        private void DetectExtensionDeletes()
+        {
+            if (_deletedExtensionQuery.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            NativeArray<Entity> ents = _deletedExtensionQuery.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    Entity prefabEntity = EntityManager.GetComponentData<PrefabRef>(e).m_Prefab;
+                    if (!EntityManager.HasComponent<ServiceUpgradeData>(prefabEntity)
+                        && !EntityManager.HasComponent<BuildingExtensionData>(prefabEntity))
+                    {
+                        continue; // not a building extension — leave it to the vanilla cascade
+                    }
+
+                    ulong id = EntityManager.GetComponentData<CS2M_SyncId>(e).m_Id;
+                    if (id == 0 || !_recentlySent.Add(id))
+                    {
+                        continue;
+                    }
+
+                    // Same command top-level objects use — the receiver resolves by SyncId regardless
+                    // of the target having an Owner (RemoteEditApplySystem.ApplyDelete never filters
+                    // on Owner, only on CS2M_SyncId resolution).
+                    Command.SendToAll?.Invoke(new DeleteCommand { SyncId = id });
+                    CS2M_SyncIdSystem.Map.Remove(id);
+                    CS2M.Log.Info($"[Del] DETECT+SEND extension id={id} entity={e.Index}");
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
         }
 
         /// <summary>v49: deleted transport lines. Waypoints/segments are NOT sent — both sides'

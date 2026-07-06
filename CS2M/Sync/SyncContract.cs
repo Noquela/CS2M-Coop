@@ -115,7 +115,11 @@ namespace CS2M.Sync
             { "ZoneToolSystem",      new[] { "ZonePaintCommand" } },
             { "AreaToolSystem",      new[] { "AreaEditCommand", "DistrictCommand", "TilePurchaseCommand" } },
             { "ObjectToolSystem",    new[] { "ObjectPlaceCommand", "MoveCommand" } },
-            { "UpgradeToolSystem",   new[] { "NetUpgradeCommand" } },
+            // v56: was pointing at NetUpgradeCommand, which is net/edge composition (lanes, traffic
+            // lights) via NetUpgradeDetectorSystem — unrelated to Game.Tools.UpgradeToolSystem
+            // (service-building extensions). The real commands: ObjectPlaceCommand (plant),
+            // PolicyCommand (toggle disable/enable), MoveCommand (relocate), DeleteCommand (remove).
+            { "UpgradeToolSystem",   new[] { "ObjectPlaceCommand", "PolicyCommand", "MoveCommand", "DeleteCommand" } },
             { "BulldozeToolSystem",  new[] { "DeleteCommand", "NetDeleteCommand" } },
             { "TerrainToolSystem",   new[] { "TerrainCommand" } },
             { "WaterToolSystem",     new[] { "WaterCommand" } },
