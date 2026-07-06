@@ -23,9 +23,10 @@ namespace CS2M.Sync
     ///
     ///     Positions are the hash inputs because world coordinates are identical across machines,
     ///     which sidesteps the fragile assumption that prefab entity indices match. Zone paint is
-    ///     hashed by <c>Cell.m_Zone.m_Index</c> — the exact value the zone sync already ships over the
-    ///     wire, so it is cross-machine stable by construction. Every accumulation uses commutative
-    ///     addition, so entity iteration order never affects the result.
+    ///     hashed by the zone's NAME (FNV via <c>ZoneSync.NameHash</c>) — <c>Cell.m_Zone.m_Index</c>
+    ///     is a per-boot registration index and is NOT cross-machine comparable (the wire ships
+    ///     names for the same reason). Every accumulation uses commutative addition, so entity
+    ///     iteration order never affects the result.
     /// </summary>
     internal struct HashBundle
     {
@@ -189,6 +190,10 @@ namespace CS2M.Sync
             EntityQuery water, EntityQuery routes, Game.Simulation.CitySystem city,
             Game.Simulation.TaxSystem tax, Game.Prefabs.PrefabSystem prefabs)
         {
+            // O hash de zonas folda o NOME via ZoneSync — o registro tem que existir antes do primeiro
+            // sample nos DOIS lados (senão NameHash=0 pra tudo). Idempotente, custo zero após a 1ª vez.
+            ZoneSync.EnsureBuilt(em, prefabs);
+
             var b = new HashBundle();
             b.EdgeHash = AccEdges(em, edges, out b.Edges);
             b.NodeHash = AccNodes(em, nodes, out b.Nodes);
@@ -408,6 +413,61 @@ namespace CS2M.Sync
             finally { arr.Dispose(); }
         }
 
+        // DIAGNOSTIC (zones): dump every zone block as position/size plus its per-cell zone NAMES
+        // (run-length compressed, spaces→_ so statediff can whitespace-split). Names, not indices —
+        // indices are per-machine. Diffing [BlockDump:HOST] vs [BlockDump:CLIENT] pins a zones drift
+        // to the exact block: missing block = the road-derived block itself diverged (BuildOrder
+        // cascade); same block+different cells = paint/index divergence. Env-gated like DumpNodes.
+        public static void DumpBlocks(EntityManager em, EntityQuery q, string tag)
+        {
+            NativeArray<Entity> arr = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                var list = new List<string>(arr.Length);
+                foreach (Entity e in arr)
+                {
+                    Game.Zones.Block b = em.GetComponentData<Game.Zones.Block>(e);
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append($"{b.m_Position.x:F0}/{b.m_Position.z:F0}:{b.m_Size.x}x{b.m_Size.y}=");
+                    if (em.HasBuffer<Game.Zones.Cell>(e))
+                    {
+                        DynamicBuffer<Game.Zones.Cell> buf = em.GetBuffer<Game.Zones.Cell>(e, true);
+                        string cur = null;
+                        int run = 0;
+                        for (int i = 0; i < buf.Length; i++)
+                        {
+                            string n = ZoneSync.Name(buf[i].m_Zone.m_Index);
+                            n = n.Length == 0 ? "-" : n.Replace(' ', '_');
+                            if (n == cur)
+                            {
+                                run++;
+                                continue;
+                            }
+
+                            if (cur != null)
+                            {
+                                sb.Append($"{run}*{cur}|");
+                            }
+
+                            cur = n;
+                            run = 1;
+                        }
+
+                        if (cur != null)
+                        {
+                            sb.Append($"{run}*{cur}");
+                        }
+                    }
+
+                    list.Add(sb.ToString());
+                }
+
+                list.Sort(System.StringComparer.Ordinal);
+                CS2M.Log.Info($"[BlockDump:{tag}] count={list.Count} {string.Join(" ", list)}");
+            }
+            finally { arr.Dispose(); }
+        }
+
         // DIAGNOSTIC (roads): dump every edge as its canonical endpoint pair so a host/client edge-COUNT
         // divergence (roads NvsM) can be pinned to the exact phantom edge. Env-gated like DumpNodes.
         public static void DumpEdges(EntityManager em, EntityQuery q, string tag)
@@ -512,9 +572,12 @@ namespace CS2M.Sync
                         DynamicBuffer<Cell> buf = em.GetBuffer<Cell>(e, true);
                         for (int i = 0; i < buf.Length; i++)
                         {
-                            // m_Zone.m_Index is the exact value the zone sync ships — hashing it makes
-                            // paint divergence (zoned here, blank there) show up as a hash mismatch.
-                            cells = unchecked(cells + Mix(i, buf[i].m_Zone.m_Index));
+                            // Fold the zone's NAME hash, never m_Index: the index is assigned per-boot in
+                            // prefab registration order (ZoneSystem.GetNextIndex) and is NOT cross-machine
+                            // stable — ZoneSync exists precisely because of that (the wire carries names).
+                            // Folding the raw index made this radar scream a permanent zones drift even
+                            // with pixel-identical paint (594vs594 hash-diff right after join, teste 2).
+                            cells = unchecked(cells + Mix(i, ZoneSync.NameHash(buf[i].m_Zone.m_Index)));
                         }
                     }
 
@@ -695,6 +758,7 @@ namespace CS2M.Sync
                 StateHash.DumpNodes(EntityManager, _nodes, "HOST");
                 StateHash.DumpEdges(EntityManager, _edges, "HOST");
                 StateHash.DumpAreas(EntityManager, _areas, "HOST");
+                StateHash.DumpBlocks(EntityManager, _blocks, "HOST");
             }
         }
     }
@@ -791,6 +855,11 @@ namespace CS2M.Sync
                     if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("areas")))
                     {
                         StateHash.DumpAreas(EntityManager, _areas, "CLIENT");
+                    }
+
+                    if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("zones")))
+                    {
+                        StateHash.DumpBlocks(EntityManager, _blocks, "CLIENT");
                     }
                     if (_strikes >= 2)
                     {

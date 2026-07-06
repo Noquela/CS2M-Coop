@@ -17,6 +17,7 @@ namespace CS2M.Sync
     {
         private static readonly Dictionary<ushort, string> IndexToName = new Dictionary<ushort, string>();
         private static readonly Dictionary<string, ushort> NameToIndex = new Dictionary<string, ushort>();
+        private static readonly Dictionary<ushort, long> IndexToHash = new Dictionary<ushort, long>();
         private static bool _built;
 
         public static readonly Dictionary<Entity, ushort[]> Snapshot = new Dictionary<Entity, ushort[]>();
@@ -39,6 +40,7 @@ namespace CS2M.Sync
                     {
                         IndexToName[zd.m_ZoneType.m_Index] = pb.name;
                         NameToIndex[pb.name] = zd.m_ZoneType.m_Index;
+                        IndexToHash[zd.m_ZoneType.m_Index] = Fnv(pb.name);
                     }
                 }
             }
@@ -48,7 +50,45 @@ namespace CS2M.Sync
             }
 
             _built = true;
-            CS2M.Log.Info($"[Zone] registry built: {IndexToName.Count} zone types");
+
+            // Fingerprints do registro pra comparar host vs client no log: nameSet igual = mesmo
+            // CONJUNTO de zonas; assignment igual = mesma ATRIBUIÇÃO índice→nome (se nameSet bate e
+            // assignment não, os índices locais diferem — Cell.m_Zone.m_Index cru NÃO é comparável
+            // e o save transferido no join chega com índices do host). Soma comutativa: ordem de
+            // iteração do dicionário não afeta.
+            long nameSet = 0, assignment = 0;
+            foreach (KeyValuePair<string, ushort> kv in NameToIndex)
+            {
+                nameSet = unchecked(nameSet + Fnv(kv.Key));
+                assignment = unchecked(assignment + Fnv(kv.Key + "=" + kv.Value));
+            }
+
+            CS2M.Log.Info($"[Zone] registry built: {IndexToName.Count} zone types " +
+                          $"nameSet={nameSet:X16} assignment={assignment:X16}");
+        }
+
+        /// <summary>FNV-1a 64 bits sobre UTF8 — estável cross-machine/cross-process (string.GetHashCode
+        /// não tem essa garantia). Base do radar de zonas e dos fingerprints do registro.</summary>
+        public static long Fnv(string s)
+        {
+            unchecked
+            {
+                ulong h = 14695981039346656037UL;
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(s ?? "");
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    h = (h ^ bytes[i]) * 1099511628211UL;
+                }
+
+                return (long) h;
+            }
+        }
+
+        /// <summary>Hash cross-machine do NOME da zona atrás do índice LOCAL (0 para None/desconhecido).
+        /// É isto que o radar folda — nunca o índice cru, que é por-máquina.</summary>
+        public static long NameHash(ushort index)
+        {
+            return IndexToHash.TryGetValue(index, out long h) ? h : 0L;
         }
 
         /// <summary>Local zone index → ZonePrefab name ("" for None/index 0).</summary>

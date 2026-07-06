@@ -37,6 +37,7 @@ SUBSYS = {
     "NodeDump": ("nodes", "posicao x/z : grau (junção vs ponta-morta)"),
     "EdgeDump": ("edges", "par de extremidades a-b"),
     "AreaDump": ("areas", "centro cx/cz : nós : owned"),
+    "BlockDump": ("zones", "bloco x/z : WxH = células run-length por NOME de zona"),
 }
 
 
@@ -84,8 +85,11 @@ def diff_subsys(tag, host_log, client_log):
         print("  [OK] IDENTICO - nenhuma entidade diverge neste subsistema")
         return True
 
-    # Para areas: separa "mudou de forma" (mesmo centro, token diferente) de "some/sobra de verdade".
-    if tag == "AreaDump":
+    # Para areas/blocos: separa "mudou de forma/pintura" (mesma posição, token diferente) de
+    # "some/sobra de verdade". Em BlockDump: FALTANDO = o próprio bloco derivado da rua não
+    # existe no client (cascata BuildOrder); FORMA DIFERE = bloco existe mas células/pintura
+    # divergem (índice/paint).
+    if tag in ("AreaDump", "BlockDump"):
         h_by_c = {area_center(t): t for t in only_host}
         c_by_c = {area_center(t): t for t in only_client}
         shape = sorted(set(h_by_c) & set(c_by_c))
