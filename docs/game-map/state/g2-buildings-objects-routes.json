@@ -906,7 +906,7 @@
   "file": "Routes/VehicleModel.cs:8",
   "class": "AUTHORED",
   "writtenBy": [],
-  "syncPath": "NONE",
+  "syncPath": "VehicleModelCommand (commit 8d0bb8e)",
   "note": "CORRIGIDO 06/07: jogador escolhe modelos via TriggerBinding selectVehicles/deselectVehicles (UI/InGame/SelectVehiclesSection.cs:218-270, escreve buffer VehicleModel direto) — EMERGENT anterior errado; gap real, sync em implementacao."
  },
  {

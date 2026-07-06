@@ -638,7 +638,7 @@
    "Simulation/ServiceCoverageSystem.cs",
    "Simulation/GarbageTruckAISystem.cs"
   ],
-  "syncPath": "NONE",
+  "syncPath": "ServiceDistrictCommand (commit 8d0bb8e)",
   "note": "CORRIGIDO 06/07: jogador EDITA via TriggerBinding removeDistrict (UI/InGame/DistrictsSection.cs:79-85) — classificacao DERIVED anterior errada; gap real, sync em implementacao."
  },
  {
