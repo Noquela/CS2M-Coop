@@ -944,6 +944,10 @@ namespace CS2M.Sync
                 if (StateHash.NodeDumpOn)
                 {
                     StateHash.DumpBlocks(EntityManager, _blocks, "CLIENT");
+                    // Areas too (farm fields): the drift-gated dump below never fires when the areas
+                    // hash is blind to the divergence (AreaInContract filtering / polygon shape not
+                    // fully folded) — same lesson as the flags-only zone split.
+                    StateHash.DumpAreas(EntityManager, _areas, "CLIENT");
                 }
 
                 if (drifts.Count > 0)
