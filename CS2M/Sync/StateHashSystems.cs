@@ -937,6 +937,15 @@ namespace CS2M.Sync
                 Check(drifts, "districts", local.Districts, host.Districts, _lastLocal.Districts, _lastHost.Districts, local.Districts, host.Districts);
                 Check(drifts, "water", local.WaterHash, host.WaterHash, _lastLocal.WaterHash, _lastHost.WaterHash, local.WaterSources, host.WaterSources);
 
+                // v56: cell-FLAG divergence (overlap visibility) is deliberately invisible to the zones
+                // hash, so it never enters `drifts` — dump blocks EVERY sample under NODEDUMP (like the
+                // host does) so statediff always has a CLIENT side to pair, drift or no drift. (First
+                // placed drift-gated by mistake — client produced zero dumps on a flags-only split.)
+                if (StateHash.NodeDumpOn)
+                {
+                    StateHash.DumpBlocks(EntityManager, _blocks, "CLIENT");
+                }
+
                 if (drifts.Count > 0)
                 {
                     _strikes++;
@@ -960,19 +969,7 @@ namespace CS2M.Sync
                         StateHash.DumpAreas(EntityManager, _areas, "CLIENT");
                     }
 
-                    if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("zones")))
-                    {
-                        StateHash.DumpBlocks(EntityManager, _blocks, "CLIENT");
-                    }
-                    else if (StateHash.NodeDumpOn)
-                    {
-                        // v56: cell-FLAG divergence (visibility/overlap outcome) is deliberately invisible
-                        // to the zones hash, so a flags-only split never trips the drift gate above — yet
-                        // it is exactly what the BlockDump's new ~hex suffix exists to catch. Dump every
-                        // sample under NODEDUMP so statediff always has a CLIENT side to pair with the
-                        // host's periodic dump, drift or no drift.
-                        StateHash.DumpBlocks(EntityManager, _blocks, "CLIENT");
-                    }
+                    // (zones BlockDump agora roda todo sample, fora do gate de drift — ver acima.)
 
                     if (StateHash.NodeDumpOn && drifts.Exists(d => d.StartsWith("buildings")))
                     {
