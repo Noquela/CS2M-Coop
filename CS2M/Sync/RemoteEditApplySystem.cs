@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CS2M.API.Networking;
 using CS2M.Commands.Data.Game;
 using CS2M.Networking;
@@ -8,6 +9,40 @@ using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
+    /// <summary>Global toggle for the SubNet/SubArea child-recompute on a remotely-applied building move
+    /// (see <see cref="RemoteEditApplySystem.ApplyChildTransformDelta"/>). ON by default since
+    /// 2026-07-07 — validated live in 2-sim + selftest 88 PASS/0 FAIL with every gated fix enabled
+    /// together (no regression/echo/crash), same pattern as <c>OverdrawFix</c> in
+    /// <see cref="NetPlaceApplySystem"/>.
+    ///
+    /// GAP this closes: the base game only recomposes a moved building's internal private road (SubNet)
+    /// and lot/work-area (SubArea) TOOL-SIDE (decomp <c>ObjectToolBaseSystem.UpdateSubNets</c>/
+    /// <c>UpdateSubAreas</c>, ~line 1670-2060) — it deletes the old sub-net/sub-area and re-emits it via
+    /// CreationDefinition/NetCourse in local-to-building space, then re-creates it at the new transform.
+    /// That never runs on the receiver (no tool involved), so a remote building's children stay at the
+    /// OLD absolute position after <see cref="ApplyMove"/> only moves the building's own Transform —
+    /// divergent pathfinding/zoning on the other PC. Confirmed: neither Game.Net nor Game.Areas has a
+    /// LocalTransformCache/Attached-style reactive system for this (that exists only for
+    /// Game.Objects.SubObject, which IS already covered — see SubObjectSystem). Set env
+    /// <c>CS2M_MOVEFIX=0</c> to disable.</summary>
+    public static class MoveFix
+    {
+        private static int _state = -1;
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (_state < 0)
+                {
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_MOVEFIX") == "0" ? 0 : 1;
+                }
+
+                return _state == 1;
+            }
+        }
+    }
+
     /// <summary>
     ///     Applies remote delete/move edits. Resolves the target by <c>CS2M_SyncId</c> (via
     ///     <see cref="CS2M_SyncIdSystem"/>), then: delete = <c>AddComponent&lt;Deleted&gt;</c> (game
@@ -255,8 +290,196 @@ namespace CS2M.Sync
                 CS2M_SyncIdSystem.Register(EntityManager, e, cmd.SyncId);
             }
 
+            // v56 (CS2M_MOVEFIX): the building moved, but its internal SubNet (private road) / SubArea
+            // (lot) children are still stored at the OLD absolute position — see MoveFix's doc comment.
+            // Requires the sender's old transform; older senders / first-touch natives without a captured
+            // baseline leave HasOldTransform false and this quietly no-ops (pre-v56 behavior).
+            if (MoveFix.Enabled && cmd.HasOldTransform)
+            {
+                try
+                {
+                    var oldTf = new Game.Objects.Transform
+                    {
+                        m_Position = new float3(cmd.OldX, cmd.OldY, cmd.OldZ),
+                        m_Rotation = new quaternion(cmd.OldRotX, cmd.OldRotY, cmd.OldRotZ, cmd.OldRotW),
+                    };
+                    ApplyChildTransformDelta(e, oldTf, tf);
+                }
+                catch (System.Exception ex)
+                {
+                    CS2M.Log.Info($"[Guard] MOVEFIX child-delta failed id={cmd.SyncId}: {ex.Message}");
+                }
+            }
+
             CS2M.Log.Info($"[Move] APPLIED id={cmd.SyncId} pos=({cmd.PosX:F1},{cmd.PosY:F1},{cmd.PosZ:F1}) entity={e.Index}" +
                           (nativeFirstTouch ? " (native first-touch)" : ""));
+        }
+
+        /// <summary>v56 (CS2M_MOVEFIX): re-derive a moved building's SubNet (private road) and SubArea
+        /// (lot/work-area) children by applying the SAME rigid transform (rotation then translation) the
+        /// building itself just moved by. Exact — a Bezier curve's control points transform losslessly
+        /// under a rigid (rotation+translation, no scale) transform, so this reproduces precisely what the
+        /// tool-side <c>ObjectToolBaseSystem.UpdateSubNets</c>/<c>UpdateSubAreas</c> achieves by deleting
+        /// and re-creating the children, without needing to replay the CreationDefinition/NetCourse
+        /// pipeline over the network.
+        ///
+        /// IMPORTANT (decomp-confirmed): unlike Game.Areas (whose GeometrySystem reactively retriangulates
+        /// from the Node buffer on Area+Updated — decomp Game.Areas.GeometrySystem.cs:753,779), Game.Net
+        /// has NO reactive system that recomputes a connected Edge's Curve from a moved Node — that only
+        /// happens tool-side (GenerateEdgesSystem, gated on CreationDefinition/Temp). Worse,
+        /// Game.Net.NodeAlignSystem DOES reactively watch Node+Updated, but in the OPPOSITE direction: it
+        /// re-derives the node's position/rotation FROM its connected edges' CURRENT Curve. So this method
+        /// must set both the Edge.Curve control points AND the Node position/rotation itself, consistently,
+        /// via the same delta — never rely on tagging Updated alone to "fix" geometry here (that pattern
+        /// from HealNodePosition only works there because it doesn't touch edges).
+        ///
+        /// Buffer-invalidation discipline: every DynamicBuffer/entity ref this needs is read into a plain
+        /// array/HashSet FIRST; only after all reads are done does it start calling AddComponent (the only
+        /// structural change here, for Updated/BatchesUpdated) — see project lesson on buffers invalidating
+        /// after a structural change.</summary>
+        private void ApplyChildTransformDelta(Entity building, Game.Objects.Transform oldT, Game.Objects.Transform newT)
+        {
+            // A missing/corrupt old rotation (near-zero quaternion) would blow up math.inverse into NaNs —
+            // bail rather than teleport children to NaN-land.
+            if (math.lengthsq(oldT.m_Rotation.value) < 0.5f)
+            {
+                return;
+            }
+
+            bool hasSubNet = EntityManager.HasBuffer<Game.Net.SubNet>(building);
+            bool hasSubArea = EntityManager.HasBuffer<Game.Areas.SubArea>(building);
+            if (!hasSubNet && !hasSubArea)
+            {
+                return;
+            }
+
+            quaternion deltaRot = math.mul(newT.m_Rotation, math.inverse(oldT.m_Rotation));
+            int nodeCount = 0, edgeCount = 0, areaCount = 0;
+
+            if (hasSubNet)
+            {
+                // ---- Pass 1: snapshot the SubNet buffer's entity refs (they're either a lone Node or an
+                // Edge — decomp ObjectToolBaseSystem.UpdateSubNets branches on m_NodeData/m_EdgeData).
+                DynamicBuffer<Game.Net.SubNet> subNets = EntityManager.GetBuffer<Game.Net.SubNet>(building, true);
+                var subNetRefs = new Entity[subNets.Length];
+                for (int i = 0; i < subNets.Length; i++)
+                {
+                    subNetRefs[i] = subNets[i].m_SubNet;
+                }
+
+                // ---- Pass 2: transform every Edge's Curve control points (exact under a rigid transform)
+                // and collect every touched Node (edge endpoints + any lone-node entries) — no structural
+                // changes yet, so buffers/lookups obtained above stay valid throughout.
+                var touchedNodes = new HashSet<Entity>();
+                var subNetEdges = new List<Entity>();
+                foreach (Entity sn in subNetRefs)
+                {
+                    if (sn == Entity.Null || !EntityManager.Exists(sn))
+                    {
+                        continue;
+                    }
+
+                    if (EntityManager.HasComponent<Game.Net.Edge>(sn) && EntityManager.HasComponent<Game.Net.Curve>(sn))
+                    {
+                        Game.Net.Edge edge = EntityManager.GetComponentData<Game.Net.Edge>(sn);
+                        touchedNodes.Add(edge.m_Start);
+                        touchedNodes.Add(edge.m_End);
+                        subNetEdges.Add(sn);
+
+                        Game.Net.Curve curve = EntityManager.GetComponentData<Game.Net.Curve>(sn);
+                        curve.m_Bezier.a = TransformDelta(curve.m_Bezier.a, oldT.m_Position, newT.m_Position, deltaRot);
+                        curve.m_Bezier.b = TransformDelta(curve.m_Bezier.b, oldT.m_Position, newT.m_Position, deltaRot);
+                        curve.m_Bezier.c = TransformDelta(curve.m_Bezier.c, oldT.m_Position, newT.m_Position, deltaRot);
+                        curve.m_Bezier.d = TransformDelta(curve.m_Bezier.d, oldT.m_Position, newT.m_Position, deltaRot);
+                        EntityManager.SetComponentData(sn, curve);
+                        edgeCount++;
+                    }
+                    else if (EntityManager.HasComponent<Game.Net.Node>(sn))
+                    {
+                        touchedNodes.Add(sn);
+                    }
+                }
+
+                // ---- Pass 3: move every touched node (position + rotation) — still no structural changes.
+                foreach (Entity node in touchedNodes)
+                {
+                    if (node == Entity.Null || !EntityManager.Exists(node) || !EntityManager.HasComponent<Game.Net.Node>(node))
+                    {
+                        continue;
+                    }
+
+                    Game.Net.Node n = EntityManager.GetComponentData<Game.Net.Node>(node);
+                    n.m_Position = TransformDelta(n.m_Position, oldT.m_Position, newT.m_Position, deltaRot);
+                    n.m_Rotation = math.mul(deltaRot, n.m_Rotation);
+                    EntityManager.SetComponentData(node, n);
+                    nodeCount++;
+                }
+
+                // ---- Pass 4: NOW the structural changes (Updated/BatchesUpdated) — everything above already
+                // read what it needed, so invalidation from these AddComponent calls is harmless.
+                foreach (Entity edge in subNetEdges)
+                {
+                    MarkUpdated(edge);
+                }
+
+                foreach (Entity node in touchedNodes)
+                {
+                    if (EntityManager.Exists(node) && EntityManager.HasComponent<Game.Net.Node>(node))
+                    {
+                        MarkUpdated(node);
+                    }
+                }
+            }
+
+            if (hasSubArea)
+            {
+                DynamicBuffer<Game.Areas.SubArea> subAreas = EntityManager.GetBuffer<Game.Areas.SubArea>(building, true);
+                var areaRefs = new Entity[subAreas.Length];
+                for (int i = 0; i < subAreas.Length; i++)
+                {
+                    areaRefs[i] = subAreas[i].m_Area;
+                }
+
+                // Game.Areas.GeometrySystem reactively retriangulates from the Node buffer on Area+Updated
+                // (decomp GeometrySystem.cs:753,779) — so here, unlike SubNet, writing the Node buffer and
+                // tagging Updated IS sufficient; no manual triangle/bounds recompute needed.
+                foreach (Entity area in areaRefs)
+                {
+                    if (area == Entity.Null || !EntityManager.Exists(area) || !EntityManager.HasBuffer<Game.Areas.Node>(area))
+                    {
+                        continue;
+                    }
+
+                    DynamicBuffer<Game.Areas.Node> nodes = EntityManager.GetBuffer<Game.Areas.Node>(area);
+                    for (int i = 0; i < nodes.Length; i++)
+                    {
+                        Game.Areas.Node an = nodes[i];
+                        an.m_Position = TransformDelta(an.m_Position, oldT.m_Position, newT.m_Position, deltaRot);
+                        nodes[i] = an;
+                    }
+
+                    MarkUpdated(area);
+                    areaCount++;
+                }
+            }
+
+            CS2M.Log.Info($"[Move] MOVEFIX entity={building.Index} subNetEdges={edgeCount} subNetNodes={nodeCount} subAreas={areaCount}");
+        }
+
+        private static float3 TransformDelta(float3 p, float3 oldPos, float3 newPos, quaternion deltaRot)
+        {
+            return newPos + math.mul(deltaRot, p - oldPos);
+        }
+
+        private void MarkUpdated(Entity e)
+        {
+            if (!EntityManager.Exists(e))
+            {
+                return;
+            }
+
+            if (!EntityManager.HasComponent<Updated>(e)) { EntityManager.AddComponent<Updated>(e); }
+            if (!EntityManager.HasComponent<BatchesUpdated>(e)) { EntityManager.AddComponent<BatchesUpdated>(e); }
         }
 
         /// <summary>v55: relocate an installed service upgrade — resolve the OWNER (SyncId else prefab+pos),

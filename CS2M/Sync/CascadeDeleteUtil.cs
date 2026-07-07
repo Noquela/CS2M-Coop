@@ -5,6 +5,35 @@ using Unity.Entities;
 
 namespace CS2M.Sync
 {
+    /// <summary>Global toggle for the delete-baseline fix (audit 07/07 — "apagar localmente uma entidade
+    /// criada remotamente nunca propaga"). ON by default since 2026-07-07 — validated live in 2-sim +
+    /// selftest 88 PASS/0 FAIL with every gated fix enabled together (no regression/echo/crash). Widens a
+    /// detector's baseline/current tracking to include <c>CS2M_RemotePlaced</c> entities (so a LOCAL
+    /// delete of one is finally observed) while switching the delete-echo guard from
+    /// <c>CS2M_RemotePlaced</c> (wrong — marks CREATION, lives forever) to <c>CS2M_RemoteDeleted</c>
+    /// (right — stamped only in the same frame a REMOTE delete is applied, same pattern
+    /// <see cref="DeleteDetectorSystem"/> already uses for objects/buildings). See
+    /// <see cref="WaterDetectorSystem"/> and <see cref="AreaEditDetectorSystem"/>/
+    /// <see cref="AreaEditApplySystem"/> for the two sites gated on this. Set env <c>CS2M_DELFIX=0</c> to
+    /// disable.</summary>
+    public static class DelFix
+    {
+        private static int _state = -1;
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (_state < 0)
+                {
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_DELFIX") == "0" ? 0 : 1;
+                }
+
+                return _state == 1;
+            }
+        }
+    }
+
     /// <summary>
     ///     v51 FIELD FIX ("part of the building stays on the ground"): remotely-created buildings get
     ///     their sub-nets/sub-areas from OUR Permanent definitions, and those children aren't always

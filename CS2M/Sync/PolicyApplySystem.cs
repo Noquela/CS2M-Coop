@@ -10,6 +10,39 @@ using Unity.Entities;
 
 namespace CS2M.Sync
 {
+    /// <summary>Global toggle for prefab-filtered building-policy resolve. ON by default since
+    /// 2026-07-07 — validated live in 2-sim + selftest 88 PASS/0 FAIL with every gated fix enabled
+    /// together (no regression/echo/crash).
+    ///     Gap: <see cref="PolicyApplySystem.ResolveTarget"/>'s <c>TargetKind == 1</c> (building) branch
+    ///     falls back to <c>FindNearest</c> by proximity ALONE (9 m² ~ 3 m radius) whenever the target
+    ///     has no live <c>CS2M_SyncId</c> (e.g. a building placed before sync-id tracking, or loaded
+    ///     from a save) — unlike kinds 3 (transport line) and 4 (extension) in this same file, which
+    ///     both already filter candidates by prefab name. In a dense block, the nearest building within
+    ///     3 m of the policy target is not necessarily the SAME building, so the policy lands on the
+    ///     wrong one.
+    ///     Gated ON: the detector also sends the building's prefab name
+    ///     (<see cref="Commands.Data.Game.PolicyCommand.TargetName"/>, otherwise unused for kind 1) and
+    ///     the apply filters candidates by matching prefab name before falling back to plain proximity
+    ///     (empty/no-match name -&gt; identical to the legacy behavior, so an older peer or a
+    ///     gate-off sender never breaks resolution). Set env <c>CS2M_POLICYFIX=0</c> to disable.</summary>
+    public static class PolicyFix
+    {
+        private static int _state = -1;
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (_state < 0)
+                {
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_POLICYFIX") == "0" ? 0 : 1;
+                }
+
+                return _state == 1;
+            }
+        }
+    }
+
     /// <summary>
     ///     Applies a remote city-policy change by raising a Modify event: a new entity with
     ///     <c>Event</c> + <c>Modify(City, policyPrefab, active, adjustment)</c> — the same components the
@@ -107,6 +140,18 @@ namespace CS2M.Sync
                     return byId;
                 }
 
+                // CS2M_POLICYFIX: try prefab+proximity first (same idea as kinds 3/4 below) before
+                // falling back to proximity-alone, so a dense block of same-type buildings doesn't
+                // pick the wrong neighbor.
+                if (PolicyFix.Enabled && !string.IsNullOrEmpty(cmd.TargetName))
+                {
+                    Entity byPrefab = FindNearestBuildingByPrefab(cmd.TargetName, cmd.TargetX, cmd.TargetZ, 9f);
+                    if (byPrefab != Entity.Null)
+                    {
+                        return byPrefab;
+                    }
+                }
+
                 return FindNearest(GetEntityQuery(
                         ComponentType.ReadOnly<Game.Buildings.Building>(),
                         ComponentType.ReadOnly<Game.Objects.Transform>(),
@@ -141,6 +186,55 @@ namespace CS2M.Sync
 
             EntityQuery query = GetEntityQuery(
                 ComponentType.ReadOnly<Game.Buildings.Extension>(),
+                ComponentType.ReadOnly<Game.Objects.Transform>(),
+                ComponentType.ReadOnly<PrefabRef>(),
+                ComponentType.Exclude<Game.Tools.Temp>(),
+                ComponentType.Exclude<Deleted>());
+
+            Entity best = Entity.Null;
+            float bestD = maxDistSq;
+            Unity.Collections.NativeArray<Entity> ents =
+                query.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(cand).m_Prefab,
+                            out PrefabBase pb) || pb == null || pb.name != prefabName)
+                    {
+                        continue;
+                    }
+
+                    Unity.Mathematics.float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(cand).m_Position;
+                    float dx = p.x - x;
+                    float dz = p.z - z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        best = cand;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            return best;
+        }
+
+        /// <summary>CS2M_POLICYFIX: nearest live BUILDING whose prefab name matches, within maxDistSq of
+        /// (x,z). Mirrors <see cref="FindNearestExtension"/> for the building (kind 1) target.</summary>
+        private Entity FindNearestBuildingByPrefab(string prefabName, float x, float z, float maxDistSq)
+        {
+            if (string.IsNullOrEmpty(prefabName))
+            {
+                return Entity.Null;
+            }
+
+            EntityQuery query = GetEntityQuery(
+                ComponentType.ReadOnly<Game.Buildings.Building>(),
                 ComponentType.ReadOnly<Game.Objects.Transform>(),
                 ComponentType.ReadOnly<PrefabRef>(),
                 ComponentType.Exclude<Game.Tools.Temp>(),

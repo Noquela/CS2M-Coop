@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using CS2M.API.Networking;
+using CS2M.Networking;
 using Game;
 using Game.Common;
 using Game.Tools;
@@ -130,6 +132,19 @@ namespace CS2M.Sync
         protected override void OnUpdate()
         {
             if (!ZoneAuthority.Enabled)
+            {
+                return;
+            }
+
+            // MP GUARD (added 2026-07-07 alongside the ZoneAuthority default-ON flip): unlike the
+            // detector/applier pair in ZoneBlockAuthoritySystems.cs, this system previously had NO
+            // PlayerStatus check — with the gate off by default that was harmless (OnUpdate returned
+            // above), but default-ON would have rewritten Zones.BuildOrder.m_Order in SINGLE-PLAYER
+            // too, silently swapping vanilla's "newest road wins" tiebreak for the position-hash
+            // scheme below even with no other player ever connected. This system's fix is pointless
+            // outside multiplayer (there's no second machine to converge with), so bail identically to
+            // every other gated system in this file.
+            if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
                 return;
             }

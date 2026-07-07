@@ -1,4 +1,15 @@
-19:51:58.544 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=False log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
-19:52:13.626 [Auto] loadingComplete purpose=LoadGame mode=Game
-19:52:13.626 [Auto] city loaded -> arming StartServer
-19:52:15.349 [Auto] StartServer on :1111 status=PLAYING
+11:19:52.987 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
+11:20:07.577 [Auto] loadingComplete purpose=LoadGame mode=Game
+11:20:07.577 [Auto] city loaded -> arming StartServer
+11:20:08.933 [Auto] StartServer on :1111 status=PLAYING
+11:20:58.878 [Auto] HOST client connected (peers=1); test begins in 600f
+11:21:01.009 [Auto] TEST6 DEVTREE forced points 0->2 (cost=4) node=ServerFarmNode gate CS2M_DEVTREEFIX=False
+11:21:01.011 [Auto] TEST6 DEVTREE points 2->2 cost=4 node=ServerFarmNode expectFloorAt0=True expectNegative=False
+11:21:01.302 [Auto] TEST6 POLICY setup target=50239 targetPrefab=IndustrialAgricultureHub01_L1 pos=(7602,3671) decoyPrefab=IndustrialManufacturing01_L1_4x3 decoyPos=(7605,3671) click=(7605,3671) distClickTarget=2,6m distClickDecoy=0,6m (decoy closer -> naive proximity would pick the WRONG one)
+11:21:01.628 [Auto] TEST6 MOVE found existing building entity=50241 hasSubNet=True hasSubArea=True (from save)
+11:21:01.925 [Auto] TEST6 ROUTE-REROUTE line=Bus Line#88 entity=50668 gate CS2M_ROUTEFIX=True — baselined, settling ~1.5s before the real move so the line has been seen untouched first (never measure/mutate before a baseline exists)
+11:21:01.937 [Auto] TEST6 MOVE building=50241 old=(4402,2771) new=(4422,2791) hasSubNet=True hasSubArea=True
+11:21:02.535 [Auto] TEST6 POLICY act target=50239 prefab=IndustrialAgricultureHub01_L1 click=(7605,3671) gate CS2M_POLICYFIX=True
+11:21:02.804 [Auto] TEST6 ROUTE-REROUTE moved a waypoint on line=Bus Line#88 gate CS2M_ROUTEFIX=True — the always-on RouteDetectorSystem.DetectSaveRouteReroutes should ship it on its own next scan (watch for [Route] DETECT+SEND reroute in the host log; gate=false here means it never will, regardless of this scene)
+11:21:03.095 [Auto] TEST6 POLICY VERIFY target=50239 onTarget=True decoy=54712 onDecoy=False gate CS2M_POLICYFIX=True -> CORRECT resolve
+11:21:09.686 [Auto] TEST6 DONE

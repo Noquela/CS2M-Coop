@@ -11,7 +11,8 @@
 param(
     [int]$LoadTimeoutSec = 300,
     [int]$TestTimeoutSec = 600,   # v55: era 220 -> dava timeout no passo ~22 quando a janela fica em background (framerate baixo). 30 passos * ~200 frames precisam de folga.
-    [switch]$Kill
+    [switch]$Kill,
+    [string]$StartGame = ""       # guid interno (.SaveGameData.cid dentro do .cok) p/ -startGame= (bypass do last-save; ver run_2sims v58)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,8 +34,9 @@ $env:CS2M_AP_TEST   = '1'
 $env:CS2M_AP_LOG    = $Log
 Remove-Item Env:CS2M_AP_IP -ErrorAction SilentlyContinue
 
-Say "===> Subindo SELFTEST (Cities2.exe -continuelastsave)"
-$proc = Start-Process -FilePath $Exe -WorkingDirectory $GameDir -ArgumentList '-continuelastsave' -PassThru
+$loadArg = if ($StartGame) { "-startGame=$StartGame" } else { '-continuelastsave' }
+Say "===> Subindo SELFTEST (Cities2.exe $loadArg)"
+$proc = Start-Process -FilePath $Exe -WorkingDirectory $GameDir -ArgumentList $loadArg -PassThru
 Say "pid=$($proc.Id). Carregando cidade..."
 
 function Wait-Line($pat,$sec,$what){

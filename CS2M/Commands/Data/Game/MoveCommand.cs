@@ -26,6 +26,18 @@ namespace CS2M.Commands.Data.Game
         public float OldY { get; set; }
         public float OldZ { get; set; }
 
+        /// <summary>v56: the building's OLD rotation, paired with <see cref="OldX"/>/Y/Z, so the receiver
+        /// can derive the full rigid delta (translation+rotation) the mover just applied — needed by
+        /// CS2M_MOVEFIX to re-derive SubNet/SubArea children (see <see cref="RemoteEditApplySystem"/>).
+        /// <see cref="HasOldTransform"/> is false on senders that never captured a baseline (older code
+        /// path, or a first-touch native where only the OLD POSITION was known) — MOVEFIX skips the
+        /// child-recompute in that case and falls back to the pre-v56 building-only move.</summary>
+        public bool HasOldTransform { get; set; }
+        public float OldRotX { get; set; }
+        public float OldRotY { get; set; }
+        public float OldRotZ { get; set; }
+        public float OldRotW { get; set; }
+
         /// <summary>v55: relocating an installed service UPGRADE/extension (an Owner-bearing sub-object the
         /// SyncId/native paths both exclude). The upgrade carries no shared id, so the receiver resolves the
         /// OWNER (SyncId else prefab+position) then picks the child whose prefab is <see cref="PrefabName"/>

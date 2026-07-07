@@ -80,6 +80,132 @@ namespace CS2M.Sync
         private ulong _triNodeIdA, _triNodeIdB, _triNodeIdC, _triNodeIdMid;
         private float3 _xcCenter, _xcA1, _xcD1, _xcA2, _xcD2;
 
+        // CS2M_AP_TEST=4: CLIENT-FARM — a SEPARATE scene from TRIREPRO. TRIREPRO's PHASE6 plants its
+        // farm HOST-side via the "fabricate an ObjectPlaceCommand + RemotePlacementQueue.EnqueueObject"
+        // primitive, which never exercises a genuinely LOCAL client build — the real "campo de fazenda
+        // não bate" field report (fix 59fcd25) is specifically about a farm planted BY THE CLIENT. This
+        // scene only acts when role==CLIENT (see RunClientFarmStep; the host stays idle — see
+        // ClientFarm_HostIdle in UpdateHost). It direct-archetype-instantiates the extractor building
+        // LOCALLY on the client (same steps RemotePlacementApplySystem.ApplyOne uses to materialize a
+        // remote command) but deliberately WITHOUT CS2M_RemotePlaced and WITH Applied stamped by hand —
+        // exactly what NetToolReplaySystems.cs:436 does after driving a headless CreateDefinitionsJob,
+        // for the same reason: Applied is the tag PlacementDetectorSystem's _appliedQuery keys off. The
+        // ALWAYS-ON PlacementDetectorSystem (not something autopilot drives) then picks this entity up
+        // on its own very next OnUpdate, reads the entity's OWN live Transform/PrefabRef/seed to build
+        // its OWN ObjectPlaceCommand, and calls Command.SendToAll — which for a CLIENT role resolves to
+        // "send to the server" (NetworkInterface.SendToAll -> LocalPlayer.SendToAll; see
+        // NetworkInterface.cs:95-98 / CommandInternal.SendToAll), landing on the host's
+        // ObjectPlaceHandler -> RemotePlacementQueue -> RemotePlacementApplySystem.ApplyOne, which
+        // creates the REMOTE copy there (tagged CS2M_RemotePlaced on the host). That LOCAL-on-client /
+        // REMOTE-on-host shape is exactly what the real bug needs to reproduce the area/field
+        // divergence when AreaSpawnSystem later grows the Extractor work area on both machines.
+        private bool _clientFarm;
+        private int _cfStep;
+        private int _cfTimer = 120; // ~2s settle after the join handshake before planting
+        private bool _cfHostIdleLogged;
+        // Set by ClientFarm_Plant once the CreationDefinition/ObjectDefinition batch is submitted;
+        // polled every frame by RunClientFarmStep until the REAL building (GenerateObjectsSystem +
+        // ApplyObjectsSystem's output) is found, at which point PLACED-REAL logs and this is cleared.
+        private Entity _cfPendingPrefab = Entity.Null;
+        private float3 _cfPendingPos;
+        private string _cfPendingName;
+        private bool _cfRealLogged;
+
+        // CS2M_AP_TEST=5: CLIENT-ACTIONS — a THIRD scene, separate from TRIREPRO (host-solo) and
+        // CLIENT-FARM (client-solo), built to exercise two audit gap-fixes that specifically need a
+        // CLIENT acting on something the HOST created:
+        //   DELFIX (CS2M_DELFIX=1, see WaterDetectorSystem's class doc): the host plants a real water
+        //   source LOCALLY (no CS2M_RemotePlaced — mirrors a human's water-tool click, same idea as
+        //   ClientFarm_Plant mirroring an Object-tool click), which the ALWAYS-ON WaterDetectorSystem
+        //   picks up and ships to the client on its own next OnUpdate — no manual Command.SendToAll
+        //   needed here, same reasoning ClientFarm's doc comment gives for PlacementDetectorSystem.
+        //   WaterApplySystem materializes the REMOTE copy on the client, tagged CS2M_RemotePlaced. The
+        //   client then bulldozes THAT entity (AddComponent<Deleted> — the same local-delete primitive
+        //   VerifyWater's own cleanup already uses for water) and, gated CS2M_DELFIX=1, the client's
+        //   own WaterDetectorSystem now tracks CS2M_RemotePlaced sources too, so it observes the vanish
+        //   and ships a delete back to the host. Off the gate, the client's detector never saw the
+        //   source in the first place (query excludes CS2M_RemotePlaced), so the delete is never
+        //   observed and the host keeps the source forever — the exact field-reported gap.
+        //   TAXFIX (CS2M_TAXFIX=1, see TaxDetectorSystem's class doc): host and client each write a
+        //   DIFFERENT index of the SAME live NativeArray TaxSystem.GetTaxRates() returns (exactly what
+        //   ActTax/TaxApplySystem already do in production — Game.City.TaxRate.ResidentialOffset=1 for
+        //   the host, .CommercialOffset=2 for the client; TaxSystem itself has no decompiled source to
+        //   confirm SetTaxRate's accessibility from a concrete-typed field, so this reuses the
+        //   ALREADY-PROVEN direct-array route instead of guessing at that API — see
+        //   docs/game-map/dossiers/ui-economy.md §7), at roughly the same wall-clock offset from their
+        //   own "join settled" signal (host's _testStarted gate / client's _joinReAnnounced — both fire
+        //   within ~1-2s of each other in real time, the same assumption RunConcurrentStep already
+        //   relies on for its own concurrent-edit race). Off the gate, TaxDetectorSystem broadcasts+
+        //   TaxApplySystem overwrites the WHOLE rates array, so whichever change lands second on each
+        //   machine stomps the other category back to its stale value; gated on, only the changed
+        //   indices travel, so both edits survive on both sides.
+        // Convergence for BOTH fixes is read by the existing StateHash (WaterHash/WaterSources + the
+        // tax-rates hash, StateHashSystems.cs) — this scene only drives the actions and logs markers;
+        // it does not implement its own diff.
+        private bool _test5;
+        private int _t5HostStep;
+        private int _t5HostTimer = 120; // ~2s settle after the join handshake before creating the water
+        private float3 _t5WaterPos;
+        private bool _t5ClientTaxDone;
+        private int _t5ClientTaxTimer = 420; // ~7s after join-settle — same order of magnitude as the
+                                              // host's own water+tax schedule below, so the two tax
+                                              // writes land close enough in wall-clock time to race.
+        private bool _t5ClientWaterDone;
+        private int _t5ClientWaterTimer = 300; // ~5s — gives the host's water time to be created,
+                                                // detected, sent and applied before polling starts.
+        private int _t5ClientWaterPollFrames;
+        private bool _t5ClientFinishLogged;
+
+        // CS2M_AP_TEST=6: FOUR-GAP — a single 2-sim scene exercising the four gated fixes that had no
+        // scene of their own yet: route-reroute (CS2M_ROUTEFIX), building-policy prefab-filter
+        // (CS2M_POLICYFIX), devtree negative-balance race (CS2M_DEVTREEFIX) and building move w/
+        // SubNet/SubArea children + rotation (CS2M_MOVEFIX). All four sub-scenarios are HOST-AUTHORED
+        // using the SAME "dual-apply" pattern every other 2-sim Send* helper in this class already uses
+        // (RemoteXQueue.Enqueue so the host's OWN world applies exactly what a genuinely remote command
+        // would, plus Command.SendToAll so the client applies the identical command) — see
+        // SendZone/SendMove/SendPolicy/SendDevTree for the established precedent this scene follows. No
+        // client-side scripted action is needed for any of the four: the client's own ALWAYS-ON apply
+        // systems (RouteApplySystem/PolicyApplySystem/DevTreeApplySystem/RemoteEditApplySystem) consume
+        // the shipped commands on their own — exactly the code path each fix lives on. Four independent
+        // step machines (dev/pol/move/route) run in parallel off one shared join-settle timer; the FINAL
+        // "TEST6 DONE" marker only fires once all four report done AND an extra settle window has
+        // elapsed — the TEST5 lesson: FINAL must be measured AFTER propagation, never before.
+        private bool _test6;
+        private int _t6HostTimer = 150; // ~2.5s settle after the join handshake, same order as TEST5's 120f
+
+        private bool _t6DevDone;
+        private int _t6DevTimer;
+
+        private bool _t6PolDone;
+        private int _t6PolStep;
+        private int _t6PolTimer = 30;
+        private Entity _t6PolBuilding;
+        private Entity _t6PolPolicy;
+        private string _t6PolPrefabName;
+        private string _t6PolPrefabType;
+        private ulong _t6PolDecoySyncId;   // v56: real DIFFERENT-prefab decoy the naive proximity-only
+                                            // resolve should wrongly prefer — see Test6_PolicySetup
+        private float3 _t6PolClickPos;     // deliberately-ambiguous sent coords (NOT the target's own
+                                            // exact center) — closer to the decoy than to the target
+
+        private bool _t6MoveDone;
+        private int _t6MoveStep;
+        private int _t6MoveTimer = 60;
+        private Entity _t6MoveBuilding;
+        private int _t6MoveFallbackSettle = -1;
+
+        private bool _t6RouteDone;
+        private int _t6RouteTimer = 90;
+        private int _t6RouteStep;          // v56: 0 = find + baseline settle, 1 = act (move + mark Updated)
+        private Entity _t6RouteEntity;
+        private string _t6RoutePrefabName;
+        private int _t6RouteNumber;
+
+        private bool _t6FinalLogged;
+        private int _t6FinalTimer = 600; // ~10s settle after every sub-scenario reports done before DONE
+
+        private bool _t6ClientIdleLogged;
+
         private GameMode _gameMode = GameMode.Other;
         private PrefabSystem _prefabSystem;
         private CitySystem _citySystem;
@@ -200,6 +326,9 @@ namespace CS2M.Sync
             _testEnabled = Environment.GetEnvironmentVariable("CS2M_AP_TEST") != "0";
             _concurrent = Environment.GetEnvironmentVariable("CS2M_AP_CONCURRENT") == "1";
             _triRepro = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "3";
+            _clientFarm = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "4";
+            _test5 = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "5";
+            _test6 = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "6";
 
             GameManager.instance.onGameLoadingComplete += OnLoadingComplete;
 
@@ -455,6 +584,18 @@ namespace CS2M.Sync
                 else if (_triRepro)
                 {
                     RunTriReproStep();
+                }
+                else if (_clientFarm)
+                {
+                    ClientFarm_HostIdle(); // test=4 drives the CLIENT side only — host runs no roteiro
+                }
+                else if (_test5)
+                {
+                    RunTest5HostStep();
+                }
+                else if (_test6)
+                {
+                    RunTest6HostStep();
                 }
                 else
                 {
@@ -3731,7 +3872,7 @@ namespace CS2M.Sync
                 return;
             }
 
-            if (!TryGetFarmPrefab(out string farmType, out string farmName))
+            if (!TryGetFarmPrefab(out Entity _, out string farmType, out string farmName))
             {
                 L("[Auto] TRIREPRO PHASE6 FARM WARN skipped (no Agricultur/Farm/Extractor " +
                   "BuildingPrefab found in this ruleset)");
@@ -3953,8 +4094,9 @@ namespace CS2M.Sync
         /// "[Auto] TRIREPRO farm prefab=" line, per the task's requirement) and returns the FIRST one that
         /// also has a valid placeable ObjectData archetype (what RemotePlacementApplySystem.ApplyOne
         /// needs to direct-archetype-instantiate it).</summary>
-        private bool TryGetFarmPrefab(out string type, out string name)
+        private bool TryGetFarmPrefab(out Entity prefabEntity, out string type, out string name)
         {
+            prefabEntity = Entity.Null;
             type = null;
             name = null;
             EntityQuery q = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.BuildingData>());
@@ -3980,6 +4122,7 @@ namespace CS2M.Sync
                     Game.Prefabs.ObjectData od = EntityManager.GetComponentData<Game.Prefabs.ObjectData>(e);
                     if (!od.m_Archetype.Valid) { continue; }
 
+                    prefabEntity = e;
                     type = pb.GetType().Name;
                     name = pb.name;
                 }
@@ -4768,6 +4911,1235 @@ namespace CS2M.Sync
 
         // ---------------------------------------------------------------- CLIENT
 
+        // ------------------------- CS2M_AP_TEST=4: CLIENT-FARM (client-only scene) -------------------------
+
+        /// <summary>Host side of the CLIENT-FARM scene: intentionally does nothing scripted. The whole
+        /// point of this scene is to isolate "client plants a farm -> host receives it as remote" with no
+        /// other host-authored traffic in flight, so a divergence can only come from that one build. The
+        /// host's normal ALWAYS-ON systems (RemotePlacementApplySystem, PlacementDetectorSystem,
+        /// AreaSpawnSystem…) keep running exactly as they would for a real human host — only the
+        /// autopilot's own scripted roteiro (RunHostStep/RunConcurrentStep/RunTriReproStep) is suppressed
+        /// here.</summary>
+        private void ClientFarm_HostIdle()
+        {
+            if (_cfHostIdleLogged) { return; }
+            _cfHostIdleLogged = true;
+            L("[Auto] CLIENTFARM host idle (test=4 drives the CLIENT side only — waiting for the " +
+              "client's farm to arrive as a normal remote ObjectPlaceCommand)");
+        }
+
+        /// <summary>Client-side pacing for the CLIENT-FARM scene: step 0 plants the farm locally once the
+        /// join handshake has fully settled (<see cref="_joinReAnnounced"/> — same signal RunHostStep's
+        /// 2-sim roteiro waits on), then step 1 (~900f / ~15s later, per the task's spec — long enough for
+        /// the host to receive+apply the remote build, AreaSpawnSystem (every 64f) to grow the Extractor
+        /// work area on both machines, and any area-sync rewrite to settle) logs the DONE marker every
+        /// runner/bot greps for.</summary>
+        private void RunClientFarmStep()
+        {
+            if (_cfStep > 1 || !_joinReAnnounced) { return; }
+
+            // Independent of the step timer below: once step 0 has submitted the CreationDefinition
+            // batch, poll every frame for the REAL entity GenerateObjectsSystem+ApplyObjectsSystem
+            // materialize from it (proof this scene drove the actual tool pipeline, not a stand-in).
+            if (_cfPendingPrefab != Entity.Null && !_cfRealLogged)
+            {
+                TryLogClientFarmReal();
+            }
+
+            if (_cfTimer > 0) { _cfTimer--; return; }
+            _cfTimer = 900;
+
+            switch (_cfStep)
+            {
+                case 0: ClientFarm_Plant(); break;
+                case 1: ClientFarm_Finish(); break;
+            }
+
+            _cfStep++;
+        }
+
+        /// <summary>Looks for the real building entity (PrefabRef+Transform+Applied, no CreationDefinition
+        /// — i.e. past GenerateObjectsSystem/ApplyObjectsSystem, not the transient definition entity)
+        /// matching <see cref="_cfPendingPrefab"/> near <see cref="_cfPendingPos"/>. Logs PLACED-REAL the
+        /// first frame it's found — this is the proof the client's local build went through the same
+        /// GenerateObjectsSystem→FindOwnersSystem→ApplyObjectsSystem pipeline a human's Object-tool click
+        /// does (and, by construction, that AreaSpawnSystem now has a real Extractor building + work-area
+        /// Lot to grow crops in — see ClientFarm_Plant's doc comment for the full chain).</summary>
+        private void TryLogClientFarmReal()
+        {
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                    ComponentType.ReadOnly<Applied>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Game.Tools.CreationDefinition>() },
+            });
+
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (EntityManager.GetComponentData<PrefabRef>(e).m_Prefab != _cfPendingPrefab) { continue; }
+
+                    float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(e).m_Position;
+                    float dx = p.x - _cfPendingPos.x, dz = p.z - _cfPendingPos.z;
+                    if (dx * dx + dz * dz > 4f) { continue; } // 2m — same building, not a coincidence
+
+                    _cfRealLogged = true;
+                    L($"[Auto] CLIENTFARM PLACED-REAL name={_cfPendingName} " +
+                      $"pos=({p.x:F0},{p.y:F0},{p.z:F0}) entity={e.Index} (materialized by " +
+                      "GenerateObjectsSystem/ApplyObjectsSystem — real tool pipeline, PlacementDetectorSystem " +
+                      "will ship it to the host next ModificationEnd)");
+                    return;
+                }
+            }
+            finally { ents.Dispose(); }
+        }
+
+        /// <summary>Step 0: plants a real agricultural extractor BUILDING LOCALLY on the client the SAME
+        /// way a human player's Object-tool click does — by submitting the definition entities
+        /// <c>ObjectToolBaseSystem.CreateDefinitionsJob</c> would have produced (that job itself is a
+        /// PRIVATE nested struct — decomp/Game/Game/Tools/ObjectToolBaseSystem.cs:35 — so unlike
+        /// NetToolReplaySystem (which drives NetToolSystem's PUBLIC CreateDefinitionsJob directly), it
+        /// can't be invoked here; this hand-builds the same definition SHAPE instead) — and letting the
+        /// game's own systems consume them:
+        ///   1. <c>CreationDefinition</c> + <c>ObjectDefinition</c> + <c>Updated</c> on a bare entity
+        ///      (mirrors ObjectToolBaseSystem.cs:1095-1251's UpdateObject, "brand new top-level object"
+        ///      branch: no Original/Owner/Attach/Upgrade/Relocate — a freestanding new build) →
+        ///      <c>GenerateObjectsSystem</c> (decomp/Game/Game/Tools/GenerateObjectsSystem.cs:1696-1715,
+        ///      query All&lt;CreationDefinition,Updated&gt;/Any&lt;ObjectDefinition,NetCourse&gt;) creates the
+        ///      REAL building entity from <c>ObjectData.m_Archetype</c> with <c>Temp(TempFlags.Create)</c>
+        ///      (GenerateObjectsSystem.cs:1077,1225-1266 — Permanent is deliberately NOT set, unlike
+        ///      NetToolReplaySystem, so this stays on the pipeline's normal rails instead of bypassing it).
+        ///   2. One <c>CreationDefinition</c> + <c>OwnerDefinition</c> + <c>Game.Areas.Node</c> buffer per
+        ///      entry in the prefab's <c>Game.Prefabs.SubArea</c>/<c>SubAreaNode</c> buffers (mirrors
+        ///      ObjectToolBaseSystem.cs:1926-2010's UpdateSubAreas) → <c>GenerateAreasSystem</c>
+        ///      (SystemOrder.cs:98, same Modification1 phase) creates the work-area Lot, Temp too.
+        ///      THIS is the piece the old direct-archetype version skipped entirely — without it
+        ///      <c>AreaSpawnSystem</c> (decomp/Game/Game/Simulation/AreaSpawnSystem.cs:768-770: query
+        ///      All&lt;Area,Geometry,SubObject&gt;, RequireForUpdate) has no Area entity to grow crops in at
+        ///      all, which is why the old scene never spawned an Extractor field.
+        ///   3. <c>FindOwnersSystem</c> (SystemOrder.cs:137, Modification3 — same frame, after both of the
+        ///      above) resolves the area's OwnerDefinition back to the building by EXACT prefab+position+
+        ///      rotation match against Temp candidates (FindOwnersSystem.cs:78-86) — this is why the
+        ///      building's ObjectDefinition and the area's OwnerDefinition below share the literal same
+        ///      <c>pos</c>/<c>rot</c> values, and why the building must ALSO still be Temp at this point
+        ///      (mixing a direct-Applied building with a definition-based area would flag-mismatch here
+        ///      and leave the area unowned).
+        ///   4. <c>ApplyObjectsSystem</c>/<c>ApplyAreasSystem</c> (SystemOrder.cs:713,716, ApplyTool phase,
+        ///      same frame, after FindOwnersSystem) promote both Temp entities to Applied+Created+Updated
+        ///      (ApplyObjectsSystem.cs:432,669-685) — exactly what PlacementDetectorSystem's
+        ///      <c>_appliedQuery</c> requires, with Temp itself stripped by end of frame (ClearTool phase)
+        ///      so the query's <c>None: Temp</c> is satisfied by the time ModificationEnd next sees it.
+        ///
+        /// No custom "apply" stand-in system is needed here (unlike NetToolReplayApplySystem for roads):
+        /// because Permanent is never set, the definitions stay on the STOCK apply pipeline the whole way.
+        ///
+        /// Prefab lookup reuses <see cref="TryGetFarmPrefab"/>. Position: a fixed spot far from every
+        /// other autopilot scene's offsets, reusing <see cref="IsQuadrantFree"/> to walk a small local
+        /// grid if a previous CI round's farm already sits there. <see cref="TryLogClientFarmReal"/>
+        /// (polled every frame by <see cref="RunClientFarmStep"/>) confirms the real building actually
+        /// materializes before logging PLACED-REAL.</summary>
+        private void ClientFarm_Plant()
+        {
+            if (!TryAnchor(out float3 anchor))
+            {
+                L("[Auto] CLIENTFARM SKIP no anchor point in city");
+                return;
+            }
+
+            if (!TryGetFarmPrefab(out Entity prefabEntity, out string farmType, out string farmName))
+            {
+                L("[Auto] CLIENTFARM SKIP no Agricultur/Farm/Extractor BuildingPrefab found in this ruleset");
+                return;
+            }
+
+            const float placeRadius = 150f;
+            float3 candidate = anchor + new float3(1500f, 0f, -300f);
+            for (int k = 0; k < 8 && !IsQuadrantFree(candidate, placeRadius); k++)
+            {
+                candidate = anchor + new float3(1500f + (k % 4) * 180f, 0f, -300f - (k / 4) * 180f);
+            }
+
+            if (!EntityManager.HasComponent<Game.Prefabs.ObjectData>(prefabEntity))
+            {
+                L($"[Auto] CLIENTFARM SKIP prefab {farmName} has no ObjectData/archetype");
+                return;
+            }
+
+            Game.Prefabs.ObjectData objectData = EntityManager.GetComponentData<Game.Prefabs.ObjectData>(prefabEntity);
+            if (!objectData.m_Archetype.Valid)
+            {
+                L($"[Auto] CLIENTFARM SKIP prefab {farmName} archetype is invalid");
+                return;
+            }
+
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            float y = TerrainUtils.SampleHeight(ref hd, candidate);
+            var pos = new float3(candidate.x, y, candidate.z);
+            // Identity rotation matters beyond "facing": FindOwnersSystem below resolves ownership by
+            // EXACT float equality of position AND rotation between the building's ObjectDefinition and
+            // the area's OwnerDefinition, and the area-node transform math further down assumes
+            // world = pos + local (valid only because rot is identity — see that comment).
+            quaternion rot = quaternion.identity;
+
+            // ---- 1. Building definition — GenerateObjectsSystem consumes this next Modification1 ----
+            var buildCd = default(Game.Tools.CreationDefinition);
+            buildCd.m_Prefab = prefabEntity;
+            buildCd.m_RandomSeed = 5199;
+
+            var buildOd = default(Game.Tools.ObjectDefinition);
+            buildOd.m_Position = pos;
+            buildOd.m_Rotation = rot;
+            buildOd.m_LocalPosition = pos;
+            buildOd.m_LocalRotation = rot;
+            buildOd.m_Scale = new float3(1f, 1f, 1f);
+            buildOd.m_Intensity = 1f;
+            buildOd.m_Probability = 100;
+            buildOd.m_PrefabSubIndex = -1;
+            buildOd.m_ParentMesh = -1; // ground building, not attached to a parent mesh/net
+            buildOd.m_Elevation = 0f;  // flat terrain (height already baked into pos.y above)
+
+            Entity buildDef = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(buildDef, buildCd);
+            EntityManager.AddComponentData(buildDef, buildOd);
+            EntityManager.AddComponent<Updated>(buildDef);
+
+            // ---- 2. Work-area definition(s) from the prefab's own SubArea/SubAreaNode template ----
+            var ownerDef = default(Game.Tools.OwnerDefinition);
+            ownerDef.m_Prefab = prefabEntity;
+            ownerDef.m_Position = pos;
+            ownerDef.m_Rotation = rot;
+
+            int areasCreated = 0;
+            if (EntityManager.HasBuffer<Game.Prefabs.SubArea>(prefabEntity)
+                && EntityManager.HasBuffer<Game.Prefabs.SubAreaNode>(prefabEntity))
+            {
+                DynamicBuffer<Game.Prefabs.SubArea> subAreas =
+                    EntityManager.GetBuffer<Game.Prefabs.SubArea>(prefabEntity);
+                DynamicBuffer<Game.Prefabs.SubAreaNode> subAreaNodes =
+                    EntityManager.GetBuffer<Game.Prefabs.SubAreaNode>(prefabEntity);
+
+                for (int i = 0; i < subAreas.Length; i++)
+                {
+                    Game.Prefabs.SubArea subArea = subAreas[i];
+                    Entity areaPrefab = subArea.m_Prefab;
+                    if (areaPrefab == Entity.Null) { continue; }
+
+                    // Some work-area prefabs are a placeholder LIST (crop-type visual variants) instead of
+                    // one concrete area prefab; the real tool weighted-randomly picks one via
+                    // AreaUtils.SelectAreaPrefab (undecompiled/inaccessible from here — see class doc).
+                    // Deterministically taking the first variant gives the same shape/behavior for
+                    // AreaSpawnSystem; only the crop-texture RNG differs, which this scene doesn't verify.
+                    if (EntityManager.HasBuffer<Game.Prefabs.PlaceholderObjectElement>(areaPrefab))
+                    {
+                        DynamicBuffer<Game.Prefabs.PlaceholderObjectElement> placeholders =
+                            EntityManager.GetBuffer<Game.Prefabs.PlaceholderObjectElement>(areaPrefab);
+                        if (placeholders.Length == 0) { continue; }
+                        areaPrefab = placeholders[0].m_Object;
+                    }
+
+                    var areaCd = default(Game.Tools.CreationDefinition);
+                    areaCd.m_Prefab = areaPrefab;
+                    areaCd.m_RandomSeed = 5200 + i;
+                    if (EntityManager.HasComponent<Game.Prefabs.AreaGeometryData>(areaPrefab))
+                    {
+                        Game.Prefabs.AreaGeometryData geo =
+                            EntityManager.GetComponentData<Game.Prefabs.AreaGeometryData>(areaPrefab);
+                        if (geo.m_Type != Game.Areas.AreaType.Lot)
+                        {
+                            areaCd.m_Flags |= Game.Tools.CreationFlags.Hidden;
+                        }
+                    }
+
+                    int start = subArea.m_NodeRange.x;
+                    int end = subArea.m_NodeRange.y;
+                    int count = end - start + 1;
+                    if (count <= 0 || end >= subAreaNodes.Length) { continue; }
+
+                    Entity areaDef = EntityManager.CreateEntity();
+                    EntityManager.AddComponentData(areaDef, areaCd);
+                    EntityManager.AddComponentData(areaDef, ownerDef);
+                    EntityManager.AddComponent<Updated>(areaDef);
+
+                    DynamicBuffer<Game.Areas.Node> nodeBuf = EntityManager.AddBuffer<Game.Areas.Node>(areaDef);
+                    nodeBuf.ResizeUninitialized(count);
+                    for (int j = start; j <= end; j++)
+                    {
+                        Game.Prefabs.SubAreaNode localNode = subAreaNodes[j];
+                        // rot is identity here, so world = pos + local (no math.mul needed).
+                        float3 worldPos = pos + localNode.m_Position;
+                        float elevation = localNode.m_ParentMesh >= 0 ? localNode.m_Position.y : float.MinValue;
+                        nodeBuf[j - start] = new Game.Areas.Node(worldPos, elevation);
+                    }
+
+                    areasCreated++;
+                }
+            }
+
+            _cfPendingPrefab = prefabEntity;
+            _cfPendingPos = pos;
+            _cfPendingName = farmName;
+            _cfRealLogged = false;
+
+            L($"[Auto] CLIENTFARM SUBMIT name={farmName} pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) " +
+              $"areaDefs={areasCreated} defEntity={buildDef.Index} (CreationDefinition/ObjectDefinition " +
+              "submitted — GenerateObjectsSystem+GenerateAreasSystem materialize the real building+field " +
+              "next Modification1, same as a player's Object-tool click)");
+        }
+
+        /// <summary>Step 1: final marker every runner/bot greps for. By now (~15s after PLACED) the host
+        /// should have received the client's build over the wire (RemotePlacementApplySystem.ApplyOne,
+        /// tagged CS2M_RemotePlaced there), and AreaSpawnSystem should have grown an Extractor work area
+        /// around it independently on BOTH machines — the actual convergence this scene exists to
+        /// exercise. This phase only logs; comparing the two sides' state is the job of whatever drove
+        /// this scene (bot/StateHash), same as every other autopilot scenario in this file.</summary>
+        private void ClientFarm_Finish()
+        {
+            L("[Auto] CLIENTFARM DONE");
+        }
+
+        // ------------------------- CS2M_AP_TEST=5: CLIENT-ACTIONS (DELFIX + TAXFIX) -------------------------
+
+        /// <summary>Host side of the CLIENT-ACTIONS scene. Step 0 plants a real water source LOCALLY
+        /// (once the 2-peer join gate that guards every non-selftest roteiro — see UpdateHost — is
+        /// healthy); step 1 bumps the RESIDENTIAL tax-rate index; step 2 logs the final read-back plus
+        /// the "TEST5 DONE" marker every runner/bot greps for (mirrors TriRepro_Finish's "TRIREPRO
+        /// DONE"). Both actions are genuinely LOCAL — see the class-level TEST5 doc comment (near
+        /// _test5's declaration) for why no manual Command.SendToAll call is needed for either one.</summary>
+        private void RunTest5HostStep()
+        {
+            if (_t5HostStep > 2) { return; }
+            if (_t5HostTimer > 0) { _t5HostTimer--; return; }
+
+            switch (_t5HostStep)
+            {
+                case 0: Test5_HostCreateWater(); _t5HostTimer = 300; break;
+                case 1: Test5_HostSetTax(); _t5HostTimer = 900; break;
+                case 2: Test5_HostFinish(); break;
+            }
+
+            _t5HostStep++;
+        }
+
+        /// <summary>Plants a plain WaterSourceData+Transform entity — the same shape
+        /// <c>WaterApplySystem.ApplyOne</c> materializes for a REMOTE command, minus
+        /// CS2M_RemotePlaced (this is the host's own LOCAL action, not something that arrived over the
+        /// wire). WaterSourceInitializeSystem only fixes up entities that ALSO carry PrefabRef
+        /// (decomp/Game/Game/Simulation/WaterSourceInitializeSystem.cs:87 requires it in its query), so
+        /// — exactly like ApplyOne — every field the sim needs is stamped by hand here, including
+        /// m_Modifier=1f (without it the source's effective radius is zero, per ApplyOne's own comment).
+        /// Position: own quadrant, far from every other scene's offsets (TRIREPRO's quadrant search,
+        /// CLIENT-FARM's anchor+(1500,-300), CONCURRENT's anchor+(400,400+i*30) all live much closer in).</summary>
+        private void Test5_HostCreateWater()
+        {
+            if (!TryAnchor(out float3 anchor))
+            {
+                L("[Auto] TEST5 SKIP no anchor point in city (water)");
+                return;
+            }
+
+            var target = anchor + new float3(-1800f, 0f, 1200f);
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            float y = TerrainUtils.SampleHeight(ref hd, target);
+            var pos = new float3(target.x, y, target.z);
+
+            Entity e = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(e, new Game.Simulation.WaterSourceData
+            {
+                m_Radius = 20f,
+                m_Height = 5f,
+                m_Multiplier = 1f,
+                m_Polluted = 0f,
+                m_ConstantDepth = 0,
+                m_Modifier = 1f,
+            });
+            EntityManager.AddComponentData(e, new Game.Objects.Transform(pos, quaternion.identity));
+            EntityManager.AddComponent<Created>(e);
+            EntityManager.AddComponent<Updated>(e);
+
+            _t5WaterPos = pos;
+            L($"[Auto] TEST5 HOST-CREATED-WATER pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) entity={e.Index}");
+        }
+
+        /// <summary>Bumps the RESIDENTIAL slot of the SAME live NativeArray TaxDetectorSystem diffs
+        /// (<c>TaxSystem.GetTaxRates()</c>) — index <c>Game.City.TaxRate.ResidentialOffset</c>=1, per
+        /// decomp/Game/Game/City/TaxRate.cs. This is the exact primitive ActTax/TaxApplySystem already
+        /// use in production (index 0 = Main there); TaxSystem itself has no decompiled source to
+        /// confirm a concrete-typed SetTaxRate/GetTaxRate call would even compile (see the class-level
+        /// TEST5 doc comment), so this scene deliberately stays on the already-proven route.</summary>
+        private void Test5_HostSetTax()
+        {
+            NativeArray<int> rates = _taxSystem.GetTaxRates();
+            int idx = (int)TaxRate.ResidentialOffset;
+            if (!rates.IsCreated || rates.Length <= idx)
+            {
+                L("[Auto] TEST5 HOST-TAX SKIP no tax rates");
+                return;
+            }
+
+            int before = rates[idx];
+            int after = before + 3;
+            rates[idx] = after; // live array write — TaxDetectorSystem sees this exactly like a slider drag
+            L($"[Auto] TEST5 HOST-TAX res={after} (was {before}, idx={idx})");
+        }
+
+        /// <summary>Final step: reads back both tax indices and the live water-source count near the
+        /// spot TEST5 planted (host's own local view only — the real cross-machine convergence check is
+        /// StateHash's job, see the class-level TEST5 doc comment), then logs the DONE marker.</summary>
+        private void Test5_HostFinish()
+        {
+            NativeArray<int> rates = _taxSystem.GetTaxRates();
+            int res = rates.IsCreated && rates.Length > (int)TaxRate.ResidentialOffset ? rates[(int)TaxRate.ResidentialOffset] : int.MinValue;
+            int com = rates.IsCreated && rates.Length > (int)TaxRate.CommercialOffset ? rates[(int)TaxRate.CommercialOffset] : int.MinValue;
+            int waterNear = CountWaterNear(_t5WaterPos, 2500f);
+            L($"[Auto] TEST5 FINAL host res={res} com={com} waterSourcesNear={waterNear}");
+            L("[Auto] TEST5 DONE");
+        }
+
+        /// <summary>Counts live (non-Temp/Deleted) water sources within <paramref name="radius"/> of
+        /// <paramref name="center"/> — used only for the host's own FINAL log line above; the real
+        /// convergence check is StateHash's WaterHash/WaterSources (StateHashSystems.cs).</summary>
+        private int CountWaterNear(float3 center, float radius)
+        {
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Simulation.WaterSourceData>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+
+            float r2 = radius * radius;
+            int n = 0;
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(e).m_Position;
+                    float dx = p.x - center.x, dz = p.z - center.z;
+                    if (dx * dx + dz * dz <= r2) { n++; }
+                }
+            }
+            finally { ents.Dispose(); }
+
+            return n;
+        }
+
+        /// <summary>Client side of the CLIENT-ACTIONS scene: two INDEPENDENT timers, not a linear step
+        /// machine — the whole point is that the tax edit and the water delete are unrelated and should
+        /// race the host's own actions, not queue behind each other. Gated the same way CLIENT-FARM
+        /// gates its own pacing (<see cref="_joinReAnnounced"/>).</summary>
+        private void RunTest5ClientStep()
+        {
+            if (!_joinReAnnounced) { return; }
+
+            if (!_t5ClientTaxDone)
+            {
+                if (_t5ClientTaxTimer > 0) { _t5ClientTaxTimer--; }
+                else { Test5_ClientSetTax(); _t5ClientTaxDone = true; }
+            }
+
+            if (!_t5ClientWaterDone)
+            {
+                if (_t5ClientWaterTimer > 0) { _t5ClientWaterTimer--; }
+                else { Test5_ClientTryDeleteWater(); }
+            }
+
+            if (_t5ClientTaxDone && _t5ClientWaterDone && !_t5ClientFinishLogged)
+            {
+                _t5ClientFinishLogged = true;
+                NativeArray<int> rates = _taxSystem.GetTaxRates();
+                int res = rates.IsCreated && rates.Length > (int)TaxRate.ResidentialOffset ? rates[(int)TaxRate.ResidentialOffset] : int.MinValue;
+                int com = rates.IsCreated && rates.Length > (int)TaxRate.CommercialOffset ? rates[(int)TaxRate.CommercialOffset] : int.MinValue;
+                L($"[Auto] TEST5 FINAL client res={res} com={com}");
+                L("[Auto] TEST5 CLIENT DONE");
+            }
+        }
+
+        /// <summary>Bumps the COMMERCIAL slot (the host bumps RESIDENTIAL — see Test5_HostSetTax) of the
+        /// same live tax-rates array, at roughly the same wall-clock offset from its own join-settled
+        /// signal as the host's — close enough in real time (loopback/LAN latency is a few ms) to race
+        /// the two edits, which is the whole point of TAXFIX.</summary>
+        private void Test5_ClientSetTax()
+        {
+            NativeArray<int> rates = _taxSystem.GetTaxRates();
+            int idx = (int)TaxRate.CommercialOffset;
+            if (!rates.IsCreated || rates.Length <= idx)
+            {
+                L("[Auto] TEST5 CLIENT-TAX SKIP no tax rates");
+                return;
+            }
+
+            int before = rates[idx];
+            int after = before - 3;
+            rates[idx] = after;
+            L($"[Auto] TEST5 CLIENT-TAX com={after} (was {before}, idx={idx})");
+        }
+
+        /// <summary>Polls (every frame, once the initial settle timer above elapses) for the water
+        /// source <see cref="Test5_HostCreateWater"/> planted on the host — identified the same way
+        /// CleanupOrphanTestWater finds stray test sources: WaterSourceData + CS2M_RemotePlaced, no
+        /// Temp/Deleted (this is a fresh scene, so the first such entity found IS the host's). Deletes
+        /// it the same way a bulldoze does (AddComponent&lt;Deleted&gt; — the exact primitive
+        /// VerifyWater's own cleanup already uses for water). Gives up with a WARN after ~30s so the
+        /// scene can't stall forever if the host's water never arrived (a missing arrival would be a
+        /// CREATE-path problem, not the delete-propagation gap this scene targets).</summary>
+        private void Test5_ClientTryDeleteWater()
+        {
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Simulation.WaterSourceData>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+
+            if (q.IsEmptyIgnoreFilter)
+            {
+                if (++_t5ClientWaterPollFrames >= 1800) // ~30s
+                {
+                    L("[Auto] TEST5 CLIENT WARN no remote water source arrived after 30s — giving up");
+                    _t5ClientWaterDone = true;
+                }
+
+                return;
+            }
+
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            Entity target = ents[0];
+            float3 pos = EntityManager.HasComponent<Game.Objects.Transform>(target)
+                ? EntityManager.GetComponentData<Game.Objects.Transform>(target).m_Position
+                : float3.zero;
+            ents.Dispose();
+
+            EntityManager.AddComponent<Deleted>(target);
+            _t5ClientWaterDone = true;
+            L($"[Auto] TEST5 CLIENT-DELETED-WATER pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) entity={target.Index}");
+        }
+
+        // ------------------------- CS2M_AP_TEST=6: FOUR-GAP (ROUTEFIX/POLICYFIX/DEVTREEFIX/MOVEFIX) -------------------------
+
+        /// <summary>Host driver: one shared join-settle timer, then four independent step machines run
+        /// every frame in parallel (they touch disjoint entities, so there is no ordering dependency
+        /// between them). Logs the "TEST6 DONE" marker only once ALL FOUR report done AND an extra
+        /// settle window has elapsed, so the client's apply systems have had time to consume every
+        /// shipped command before anything downstream reads the client's state as final.</summary>
+        private void RunTest6HostStep()
+        {
+            if (_t6HostTimer > 0) { _t6HostTimer--; return; }
+
+            if (!_t6DevDone) { RunTest6Dev(); }
+            if (!_t6PolDone) { RunTest6Policy(); }
+            if (!_t6MoveDone) { RunTest6Move(); }
+            if (!_t6RouteDone) { RunTest6Route(); }
+
+            if (_t6DevDone && _t6PolDone && _t6MoveDone && _t6RouteDone && !_t6FinalLogged)
+            {
+                if (_t6FinalTimer > 0) { _t6FinalTimer--; return; }
+                _t6FinalLogged = true;
+                L("[Auto] TEST6 DONE");
+            }
+        }
+
+        /// <summary>DEVTREE sub-scenario (CS2M_DEVTREEFIX): buys a locked node the SAME way the normal
+        /// roteiro's SendDevTree does (host applies via the real RemoteDevTreeQueue/DevTreeApplySystem
+        /// primitive, then ships the identical command), but also logs the points balance before/after
+        /// so a runner can confirm it doesn't get floored to 0 when the mirrored XP hasn't crossed the
+        /// milestone yet on one side — see DevTreeApplySystem's class doc for the exact race.
+        ///
+        /// v56: a fresh/near-fresh save has the host sitting at DevTreePoints=0, so a 0-cost-or-covered
+        /// purchase floors to 0 whether or not CS2M_DEVTREEFIX is on — 0-cost=0 either way, never
+        /// exercising the no-floor branch. Force a real negative-balance race the same way the doc
+        /// comment on DevTreeFix describes it happening naturally (mirrored purchase lands before the
+        /// mirrored XP crosses the milestone): set DevTreePoints — the EXACT singleton
+        /// DevTreeApplySystem.ApplyOne itself reads/writes — to LESS than the chosen node's cost right
+        /// before buying, so the deduction goes negative with the fix on (or is silently floored/erased
+        /// with it off).</summary>
+        private void RunTest6Dev()
+        {
+            if (_t6DevTimer > 0) { _t6DevTimer--; return; }
+
+            EntityQuery nodes = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.DevTreeNodeData>());
+            Entity node = Entity.Null;
+            NativeArray<Entity> ents = nodes.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity n in ents)
+                {
+                    if (EntityManager.HasComponent<Game.Prefabs.Locked>(n)
+                        && EntityManager.IsComponentEnabled<Game.Prefabs.Locked>(n))
+                    {
+                        node = n;
+                        break;
+                    }
+                }
+            }
+            finally { ents.Dispose(); }
+
+            if (node == Entity.Null)
+            {
+                L("[Auto] TEST6 DEVTREE SKIP no locked node left to buy in this save");
+                _t6DevDone = true;
+                return;
+            }
+
+            if (!_prefabSystem.TryGetPrefab(node, out PrefabBase p) || p == null)
+            {
+                L("[Auto] TEST6 DEVTREE SKIP no prefab for locked node");
+                _t6DevDone = true;
+                return;
+            }
+
+            int cost = EntityManager.HasComponent<Game.Prefabs.DevTreeNodeData>(node)
+                ? EntityManager.GetComponentData<Game.Prefabs.DevTreeNodeData>(node).m_Cost
+                : 0;
+            if (cost <= 0)
+            {
+                L($"[Auto] TEST6 DEVTREE SKIP node={p.name} has cost={cost} — can't force the no-floor " +
+                  "path without a positive cost (0-0 floors to 0 with or without the fix)");
+                _t6DevDone = true;
+                return;
+            }
+
+            EntityQuery pointsQuery = GetEntityQuery(ComponentType.ReadWrite<DevTreePoints>());
+            if (pointsQuery.IsEmptyIgnoreFilter)
+            {
+                L("[Auto] TEST6 DEVTREE SKIP no DevTreePoints singleton in this save");
+                _t6DevDone = true;
+                return;
+            }
+
+            int before = pointsQuery.GetSingleton<DevTreePoints>().m_Points;
+            int forcedPoints = Math.Max(1, cost / 2); // strictly less than cost -> deduction MUST go negative
+            pointsQuery.SetSingleton(new DevTreePoints { m_Points = forcedPoints });
+            L($"[Auto] TEST6 DEVTREE forced points {before}->{forcedPoints} (cost={cost}) node={p.name} " +
+              $"gate CS2M_DEVTREEFIX={DevTreeFix.Enabled}");
+
+            var cmd = new CS2M.Commands.Data.Game.DevTreeCommand { NodeName = p.name };
+            RemoteDevTreeQueue.Enqueue(cmd);     // host buys (same primitive SendDevTree/DevTreeApplySystem use)
+            Command.SendToAll?.Invoke(cmd);      // client buys -> exercises DEVTREEFIX's negative-balance path
+
+            int after = pointsQuery.IsEmptyIgnoreFilter ? int.MinValue : pointsQuery.GetSingleton<DevTreePoints>().m_Points;
+            L($"[Auto] TEST6 DEVTREE points {forcedPoints}->{after} cost={cost} node={p.name} " +
+              $"expectFloorAt0={!DevTreeFix.Enabled} expectNegative={DevTreeFix.Enabled}");
+            _t6DevDone = true;
+        }
+
+        /// <summary>POLICY sub-scenario (CS2M_POLICYFIX): toggles a BUILDING-scope policy (TargetKind=1)
+        /// on a native (save-loaded, no CS2M_SyncId) target, sent with a DELIBERATELY-ambiguous click
+        /// position so the naive proximity-only resolve (PolicyApplySystem.ResolveTarget's legacy
+        /// fallback) picks the WRONG building unless PolicyFix's prefab filter is on.
+        ///
+        /// v56: the old version placed a SAME-prefab neighbor and sent the TARGET's own exact
+        /// coordinates — since exact coords always win proximity (dist=0 beats any neighbor a few
+        /// meters away) AND a same-prefab neighbor can never be excluded by the prefab filter anyway
+        /// (both candidates match the filter, so fix-on and fix-off would pick the identical winner),
+        /// that setup could never expose the gap: <see cref="PolicyFix"/>.Enabled changing the outcome
+        /// requires a candidate that proximity-alone would wrongly prefer AND that prefab-filtering
+        /// correctly excludes — i.e. a DIFFERENT-prefab decoy placed CLOSER to the sent click than the
+        /// real (correct-prefab) target. Step 0 finds the target plus a real different-prefab building
+        /// already in this save to use as the decoy's prefab, plants a real decoy instance of it near a
+        /// deliberately-offset click point (dual-apply), and settles. Step 1 raises the real
+        /// {Event,Modify} pair PoliciesUISystem.ModifyPolicy raises for a UI click (decomp-confirmed
+        /// shape), addressed at the ambiguous click — not the target's own center. Step 2 reads back
+        /// each candidate's real <c>Game.Policies.Policy</c> buffer (the same buffer
+        /// BuildingModifierInitializeSystem/ModifiedSystem maintain) to confirm which one the policy
+        /// actually landed on.</summary>
+        private void RunTest6Policy()
+        {
+            if (_t6PolTimer > 0) { _t6PolTimer--; return; }
+
+            if (_t6PolStep == 0)
+            {
+                Test6_PolicySetup();
+                _t6PolTimer = 120;
+                _t6PolStep = 1;
+                return;
+            }
+
+            if (_t6PolStep == 1)
+            {
+                Test6_PolicyAct();
+                _t6PolTimer = 60;
+                _t6PolStep = 2;
+                return;
+            }
+
+            if (_t6PolStep == 2)
+            {
+                Test6_PolicyVerify();
+            }
+        }
+
+        private void Test6_PolicySetup()
+        {
+            // v57 FIX: this scene picked the FIRST native building in the save as its target — but so
+            // does TEST6 MOVE's Test6_MoveFindOrPlant (an independent sub-scenario the class doc claims
+            // "touch[es] disjoint entities"). On a save where that first building happens to have a
+            // SubNet/SubArea (e.g. an extractor/hub), BOTH sub-scenarios grabbed the SAME entity: MOVE
+            // relocated it ~28 m away between this setup and Test6_PolicyAct, so the (stationary) decoy
+            // ended up the only building left inside the click's 3 m search radius and "won" by naive
+            // proximity after the (correct!) prefab filter found nothing there anymore — a false
+            // "WRONG resolve" caused by the scene, not by PolicyApplySystem. Fix: never pick a building
+            // TEST6 MOVE could also claim — exclude SubNet/SubArea bearers (MOVE's own Any-filter) so
+            // the two sub-scenarios' entity pools are actually disjoint, as intended.
+            EntityQuery bq = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(), ComponentType.ReadOnly<CS2M_SyncId>(),
+                },
+            });
+
+            // v58: a exclusão por COMPONENTE (None: SubNet/SubArea) esvaziou o pool neste save — TODO
+            // prédio nativo tem driveway (SubNet). A disjunção com TEST6 MOVE tem que ser por ENTIDADE:
+            // replicar a escolha do MOVE (primeiro prédio do query Any<SubNet,SubArea>, ver
+            // Test6_MoveFindOrPlant) e PULAR exatamente esse prédio na seleção abaixo.
+            Entity moveWouldPick = Entity.Null;
+            EntityQuery mq = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<Game.Net.SubNet>(),
+                    ComponentType.ReadOnly<Game.Areas.SubArea>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+            });
+            if (!mq.IsEmptyIgnoreFilter)
+            {
+                NativeArray<Entity> ments = mq.ToEntityArray(Allocator.Temp);
+                try { moveWouldPick = ments[0]; } finally { ments.Dispose(); }
+            }
+
+            EntityQuery pq = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.BuildingOptionData>());
+
+            if (bq.IsEmptyIgnoreFilter || pq.IsEmptyIgnoreFilter)
+            {
+                L($"[Auto] TEST6 POLICY SKIP noNativeBuilding={bq.IsEmptyIgnoreFilter} noBuildingPolicyPrefab={pq.IsEmptyIgnoreFilter}");
+                _t6PolDone = true;
+                return;
+            }
+
+            NativeArray<Entity> bents = bq.ToEntityArray(Allocator.Temp);
+            NativeArray<Entity> pents = pq.ToEntityArray(Allocator.Temp);
+            string decoyPrefabName = null, decoyPrefabType = null;
+            try
+            {
+                // v58: nunca escolher o prédio que o TEST6 MOVE vai mover (disjunção por entidade).
+                _t6PolBuilding = Entity.Null;
+                for (int i = 0; i < bents.Length; i++)
+                {
+                    if (bents[i] != moveWouldPick) { _t6PolBuilding = bents[i]; break; }
+                }
+
+                if (_t6PolBuilding == Entity.Null)
+                {
+                    L("[Auto] TEST6 POLICY SKIP only candidate is MOVE's target");
+                    _t6PolDone = true;
+                    return;
+                }
+
+                _t6PolPolicy = pents[0];
+
+                PrefabRef pr0 = EntityManager.GetComponentData<PrefabRef>(_t6PolBuilding);
+                _prefabSystem.TryGetPrefab(pr0.m_Prefab, out PrefabBase tgtPrefab0);
+                string tgtName0 = tgtPrefab0?.name;
+
+                // v56: a REAL building with a DIFFERENT prefab already in this save — see class doc on
+                // why a same-prefab neighbor can never expose the gap. v58: skip the target itself AND
+                // MOVE's pick (um decoy que se move no meio do teste falsearia o VERIFY igual).
+                for (int i = 0; i < bents.Length; i++)
+                {
+                    if (bents[i] == _t6PolBuilding || bents[i] == moveWouldPick) { continue; }
+                    if (!EntityManager.HasComponent<PrefabRef>(bents[i])) { continue; }
+                    PrefabRef pri = EntityManager.GetComponentData<PrefabRef>(bents[i]);
+                    if (!_prefabSystem.TryGetPrefab(pri.m_Prefab, out PrefabBase cand) || cand == null
+                        || cand.name == tgtName0)
+                    {
+                        continue;
+                    }
+
+                    decoyPrefabName = cand.name;
+                    decoyPrefabType = cand.GetType().Name;
+                    break;
+                }
+            }
+            finally
+            {
+                bents.Dispose();
+                pents.Dispose();
+            }
+
+            PrefabRef pr = EntityManager.GetComponentData<PrefabRef>(_t6PolBuilding);
+            _prefabSystem.TryGetPrefab(pr.m_Prefab, out PrefabBase bldPrefab);
+            if (bldPrefab == null)
+            {
+                L("[Auto] TEST6 POLICY SKIP target has no resolvable prefab");
+                _t6PolDone = true;
+                return;
+            }
+
+            _t6PolPrefabName = bldPrefab.name;
+            _t6PolPrefabType = bldPrefab.GetType().Name;
+
+            if (decoyPrefabName == null)
+            {
+                L("[Auto] TEST6 POLICY SKIP only one distinct building prefab in this save — can't force " +
+                  "the wrong-neighbor ambiguity PolicyFix's gap needs (a same-prefab neighbor can't " +
+                  "disambiguate — see class doc)");
+                _t6PolDone = true;
+                return;
+            }
+
+            Game.Objects.Transform t1 = EntityManager.GetComponentData<Game.Objects.Transform>(_t6PolBuilding);
+            // Click 2.6 m from the target's own center (still inside FindNearest's 3 m / 9 m^2 radius) —
+            // the decoy is planted 3.2 m from the target on the same axis, i.e. only 0.6 m from the
+            // click, deliberately CLOSER than the real target. Proximity-alone must pick the decoy;
+            // prefab-filtering must exclude it (different prefab) and fall through to the target.
+            _t6PolClickPos = new float3(t1.m_Position.x + 2.6f, t1.m_Position.y, t1.m_Position.z);
+            var decoyPos = new float3(t1.m_Position.x + 3.2f, t1.m_Position.y, t1.m_Position.z);
+
+            _t6PolDecoySyncId = CS2M_SyncIdSystem.Allocate();
+            var placeCmd = new ObjectPlaceCommand
+            {
+                SyncId = _t6PolDecoySyncId,
+                PrefabType = decoyPrefabType, PrefabName = decoyPrefabName,
+                PosX = decoyPos.x, PosY = decoyPos.y, PosZ = decoyPos.z,
+                RotX = t1.m_Rotation.value.x, RotY = t1.m_Rotation.value.y,
+                RotZ = t1.m_Rotation.value.z, RotW = t1.m_Rotation.value.w,
+                RandomSeed = 0,
+            };
+            RemotePlacementQueue.EnqueueObject(placeCmd);  // host places the DIFFERENT-prefab decoy
+            Command.SendToAll?.Invoke(placeCmd);            // client places the same decoy at the same spot
+
+            L($"[Auto] TEST6 POLICY setup target={_t6PolBuilding.Index} targetPrefab={_t6PolPrefabName} " +
+              $"pos=({t1.m_Position.x:F0},{t1.m_Position.z:F0}) decoyPrefab={decoyPrefabName} " +
+              $"decoyPos=({decoyPos.x:F0},{decoyPos.z:F0}) click=({_t6PolClickPos.x:F0},{_t6PolClickPos.z:F0}) " +
+              $"distClickTarget={math.distance(_t6PolClickPos, t1.m_Position):F1}m " +
+              $"distClickDecoy={math.distance(_t6PolClickPos, decoyPos):F1}m (decoy closer -> naive " +
+              "proximity would pick the WRONG one)");
+        }
+
+        private void Test6_PolicyAct()
+        {
+            if (_t6PolBuilding == Entity.Null || !EntityManager.Exists(_t6PolBuilding)
+                || !EntityManager.HasComponent<Game.Objects.Transform>(_t6PolBuilding))
+            {
+                L("[Auto] TEST6 POLICY SKIP target vanished before act");
+                _t6PolDone = true;
+                return;
+            }
+
+            _prefabSystem.TryGetPrefab(_t6PolPolicy, out PrefabBase policyPb);
+            var cmd = new PolicyCommand
+            {
+                PolicyType = policyPb?.GetType().Name, PolicyName = policyPb?.name,
+                Active = true, Adjustment = 0f,
+                TargetKind = 1, TargetSyncId = 0,
+                // v56: the AMBIGUOUS click, not the target's own exact center — see Test6_PolicySetup.
+                TargetX = _t6PolClickPos.x, TargetZ = _t6PolClickPos.z,
+                TargetName = _t6PolPrefabName,
+            };
+
+            RemotePolicyQueue.Enqueue(cmd);       // host toggles (same primitive SendPolicy/PolicyApplySystem use)
+            Command.SendToAll?.Invoke(cmd);       // client toggles -> exercises PolicyFix's prefab-filtered resolve
+
+            L($"[Auto] TEST6 POLICY act target={_t6PolBuilding.Index} prefab={_t6PolPrefabName} " +
+              $"click=({_t6PolClickPos.x:F0},{_t6PolClickPos.z:F0}) gate CS2M_POLICYFIX={PolicyFix.Enabled}");
+        }
+
+        /// <summary>Reads back the REAL per-building <c>Game.Policies.Policy</c> buffer on both the
+        /// target and the decoy to confirm which one the resolve actually landed on — the concrete,
+        /// observable pass/fail signal for this sub-scenario.</summary>
+        private void Test6_PolicyVerify()
+        {
+            bool onTarget = HasActivePolicy(_t6PolBuilding, _t6PolPolicy);
+            bool decoyResolved = CS2M_SyncIdSystem.Map.TryGetValue(_t6PolDecoySyncId, out Entity decoy)
+                && EntityManager.Exists(decoy);
+            bool onDecoy = decoyResolved && HasActivePolicy(decoy, _t6PolPolicy);
+
+            string verdict = onTarget && !onDecoy ? "CORRECT resolve"
+                : onDecoy ? "WRONG resolve (landed on the decoy -- exactly the gap PolicyFix closes)"
+                : "policy not found on either (Modify may not be consumed yet, or no Policy buffer)";
+
+            L($"[Auto] TEST6 POLICY VERIFY target={_t6PolBuilding.Index} onTarget={onTarget} " +
+              $"decoy={(decoyResolved ? decoy.Index.ToString() : "unresolved")} onDecoy={onDecoy} " +
+              $"gate CS2M_POLICYFIX={PolicyFix.Enabled} -> {verdict}");
+            _t6PolDone = true;
+        }
+
+        private bool HasActivePolicy(Entity target, Entity policy)
+        {
+            if (target == Entity.Null || !EntityManager.Exists(target)
+                || !EntityManager.HasBuffer<Game.Policies.Policy>(target))
+            {
+                return false;
+            }
+
+            DynamicBuffer<Game.Policies.Policy> buf = EntityManager.GetBuffer<Game.Policies.Policy>(target, true);
+            for (int i = 0; i < buf.Length; i++)
+            {
+                if (buf[i].m_Policy == policy && (buf[i].m_Flags & Game.Policies.PolicyFlags.Active) != 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>MOVE sub-scenario (CS2M_MOVEFIX): relocates AND rotates a building that owns SubNet
+        /// (private driveway) or SubArea (work-area lot) children — the exact gap
+        /// RemoteEditApplySystem.ApplyChildTransformDelta closes (without it those children stay at the
+        /// OLD absolute position on the receiver; see MoveFix's class doc). Prefers an EXISTING native
+        /// building from the save; if none has SubNet/SubArea, falls back to planting a real extractor
+        /// via the SAME genuinely-local CreationDefinition/ObjectDefinition recipe CLIENT-FARM (test=4)
+        /// already validated (<see cref="ClientFarm_Plant"/>), which grows a real SubArea work-area
+        /// field around it. Dual-apply, same pattern as every other Send* helper:
+        /// RemoteEditQueue.EnqueueMove so the host's OWN world also exercises the child-transform
+        /// recompute (useful for a host-vs-client statediff), plus Command.SendToAll so the client
+        /// applies the identical command. SyncId is 0 for a save-native target (resolved on the
+        /// receiver by prefab+OLD position, the same "first-touch" contract MoveDetectorSystem's
+        /// DetectNativeMoves already uses) or the real id when the fallback farm already got one from
+        /// PlacementDetectorSystem.</summary>
+        private void RunTest6Move()
+        {
+            if (_t6MoveStep == 1)
+            {
+                Test6_MovePollFallback(); // polls every frame, ignores the shared step timer
+                return;
+            }
+
+            if (_t6MoveTimer > 0) { _t6MoveTimer--; return; }
+
+            if (_t6MoveStep == 0)
+            {
+                Test6_MoveFindOrPlant();
+                return;
+            }
+
+            if (_t6MoveStep == 2)
+            {
+                Test6_MoveAct();
+                _t6MoveDone = true;
+            }
+        }
+
+        private void Test6_MoveFindOrPlant()
+        {
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<Game.Net.SubNet>(),
+                    ComponentType.ReadOnly<Game.Areas.SubArea>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+            });
+
+            if (!q.IsEmptyIgnoreFilter)
+            {
+                NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+                try { _t6MoveBuilding = ents[0]; } finally { ents.Dispose(); }
+
+                L($"[Auto] TEST6 MOVE found existing building entity={_t6MoveBuilding.Index} " +
+                  $"hasSubNet={EntityManager.HasBuffer<Game.Net.SubNet>(_t6MoveBuilding)} " +
+                  $"hasSubArea={EntityManager.HasBuffer<Game.Areas.SubArea>(_t6MoveBuilding)} (from save)");
+                _t6MoveStep = 2;
+                _t6MoveTimer = 30;
+                return;
+            }
+
+            L("[Auto] TEST6 MOVE no existing SubNet/SubArea building in this save — planting an extractor " +
+              "via the CLIENT-FARM (test=4) recipe (ClientFarm_Plant) to get one");
+            ClientFarm_Plant();
+            _t6MoveStep = 1;
+        }
+
+        /// <summary>Polls every frame for the fallback extractor <see cref="Test6_MoveFindOrPlant"/>
+        /// planted (same match technique as <see cref="TryLogClientFarmReal"/>: PrefabRef+Applied, no
+        /// CreationDefinition, within 2 m of the submitted position), then waits a short extra settle so
+        /// its SubArea buffer/CS2M_SyncId (from PlacementDetectorSystem) finish wiring before the move
+        /// acts on it.</summary>
+        private void Test6_MovePollFallback()
+        {
+            if (_t6MoveFallbackSettle < 0)
+            {
+                if (_cfPendingPrefab == Entity.Null) { return; } // ClientFarm_Plant SKIP'd — nothing to poll for
+
+                Entity found = Entity.Null;
+                EntityQuery q = GetEntityQuery(new EntityQueryDesc
+                {
+                    All = new[]
+                    {
+                        ComponentType.ReadOnly<PrefabRef>(), ComponentType.ReadOnly<Game.Objects.Transform>(),
+                        ComponentType.ReadOnly<Applied>(),
+                    },
+                    None = new[] { ComponentType.ReadOnly<Game.Tools.CreationDefinition>() },
+                });
+                NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+                try
+                {
+                    foreach (Entity e in ents)
+                    {
+                        if (EntityManager.GetComponentData<PrefabRef>(e).m_Prefab != _cfPendingPrefab) { continue; }
+                        float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(e).m_Position;
+                        float dx = p.x - _cfPendingPos.x, dz = p.z - _cfPendingPos.z;
+                        if (dx * dx + dz * dz > 4f) { continue; }
+                        found = e;
+                        break;
+                    }
+                }
+                finally { ents.Dispose(); }
+
+                if (found == Entity.Null) { return; } // keep polling
+
+                _t6MoveBuilding = found;
+                _t6MoveFallbackSettle = 60;
+                L($"[Auto] TEST6 MOVE fallback extractor materialized entity={found.Index}");
+                return;
+            }
+
+            if (_t6MoveFallbackSettle > 0) { _t6MoveFallbackSettle--; return; }
+
+            L($"[Auto] TEST6 MOVE fallback building ready entity={_t6MoveBuilding.Index} " +
+              $"hasSubNet={EntityManager.HasBuffer<Game.Net.SubNet>(_t6MoveBuilding)} " +
+              $"hasSubArea={EntityManager.HasBuffer<Game.Areas.SubArea>(_t6MoveBuilding)}");
+            _t6MoveStep = 2;
+        }
+
+        private void Test6_MoveAct()
+        {
+            if (_t6MoveBuilding == Entity.Null || !EntityManager.Exists(_t6MoveBuilding)
+                || !EntityManager.HasComponent<Game.Objects.Transform>(_t6MoveBuilding))
+            {
+                L("[Auto] TEST6 MOVE SKIP building vanished before act");
+                return;
+            }
+
+            Game.Objects.Transform oldTf = EntityManager.GetComponentData<Game.Objects.Transform>(_t6MoveBuilding);
+            quaternion deltaRot = quaternion.RotateY(math.radians(40f));
+            quaternion newRot = math.mul(deltaRot, oldTf.m_Rotation);
+            var newPos = new float3(oldTf.m_Position.x + 20f, oldTf.m_Position.y, oldTf.m_Position.z + 20f);
+
+            bool hasSubNet = EntityManager.HasBuffer<Game.Net.SubNet>(_t6MoveBuilding);
+            bool hasSubArea = EntityManager.HasBuffer<Game.Areas.SubArea>(_t6MoveBuilding);
+
+            string prefabType = null, prefabName = null;
+            if (EntityManager.HasComponent<PrefabRef>(_t6MoveBuilding)
+                && _prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(_t6MoveBuilding).m_Prefab, out PrefabBase pb)
+                && pb != null)
+            {
+                prefabType = pb.GetType().Name;
+                prefabName = pb.name;
+            }
+
+            ulong syncId = EntityManager.HasComponent<CS2M_SyncId>(_t6MoveBuilding)
+                ? EntityManager.GetComponentData<CS2M_SyncId>(_t6MoveBuilding).m_Id : 0;
+
+            var cmd = new MoveCommand
+            {
+                SyncId = syncId,
+                PrefabType = prefabType, PrefabName = prefabName,
+                PosX = newPos.x, PosY = newPos.y, PosZ = newPos.z,
+                RotX = newRot.value.x, RotY = newRot.value.y, RotZ = newRot.value.z, RotW = newRot.value.w,
+                HasOldTransform = true,
+                OldX = oldTf.m_Position.x, OldY = oldTf.m_Position.y, OldZ = oldTf.m_Position.z,
+                OldRotX = oldTf.m_Rotation.value.x, OldRotY = oldTf.m_Rotation.value.y,
+                OldRotZ = oldTf.m_Rotation.value.z, OldRotW = oldTf.m_Rotation.value.w,
+            };
+
+            L($"[Auto] TEST6 MOVE building={_t6MoveBuilding.Index} old=({oldTf.m_Position.x:F0},{oldTf.m_Position.z:F0}) " +
+              $"new=({newPos.x:F0},{newPos.z:F0}) hasSubNet={hasSubNet} hasSubArea={hasSubArea}");
+
+            RemoteEditQueue.EnqueueMove(cmd);   // host moves (+ child transform delta if MOVEFIX on)
+            Command.SendToAll?.Invoke(cmd);     // client moves the same building -> exercises MOVEFIX's deltaRot path
+        }
+
+        /// <summary>ROUTE-REROUTE sub-scenario (CS2M_ROUTEFIX): reroutes a SAVE-loaded transport line (no
+        /// CS2M_SyncId) by moving one of its waypoints directly — the exact case
+        /// RouteDetectorSystem.DetectSaveRouteReroutes exists for (a save-line's reroute is otherwise
+        /// silently dropped; see RouteFix's class doc). Only meaningful if the loaded city actually HAS a
+        /// pre-existing line: an in-session-created line always gets a CS2M_SyncId immediately
+        /// (RouteDetectorSystem.DetectCreated sees its Created tag the same frame), so its later reroute
+        /// would take the ALREADY-proven id-based DetectRerouted path instead of the gated one —
+        /// fabricating a line here as a "setup" step would look like it exercises ROUTEFIX but actually
+        /// wouldn't, so this sub-scenario SKIPs cleanly (reported, not papered over) when the save has no
+        /// such line, rather than inventing a fallback that can't reach the gate.
+        ///
+        /// v56: the first live run moved the waypoint and marked Updated but the host log never showed
+        /// "[Route] DETECT+SEND" — a live check of DetectSaveRouteReroutes' query
+        /// (Route+TransportLine+RouteWaypoint+PrefabRef+Updated, no Temp/Deleted/Created/RemotePlaced/
+        /// CS2M_SyncId) confirms this scene's edit DOES satisfy it (same exclusions this scene's own
+        /// find-query already checks before ever acting), and RouteFix.Enabled is read fresh on every
+        /// scan (no caching bug either) — so a gate-off run (CS2M_ROUTEFIX not exported to the process)
+        /// reproduces the exact silent symptom observed. This scene can't set that env var for itself
+        /// (it's read once per process before the mod even loads), so instead it: (a) logs the gate's
+        /// live value right at the point of the edit, so a runner instantly knows whether "no DETECT+SEND"
+        /// means "gate off" or "still a real gap"; (b) splits into find-then-settle-then-act (baseline the
+        /// line's identity for a full 1.5s BEFORE touching it, the same "measure after propagation, never
+        /// before" lesson TEST5 already taught this codebase); and (c) marks Updated on BOTH the route
+        /// (what the detector's own query requires) AND the moved waypoint (what the game's real
+        /// WaypointConnectionSystem watches — decomp Game/Routes/WaypointConnectionSystem.cs ~L1402 stamps
+        /// Updated back onto the owning route once an Updated waypoint's connections are recomputed), so
+        /// detection does not depend on guessing which of the two paths actually feeds it.</summary>
+        private void RunTest6Route()
+        {
+            if (_t6RouteTimer > 0) { _t6RouteTimer--; return; }
+
+            if (_t6RouteStep == 0)
+            {
+                Test6_RouteFindAndBaseline();
+                return;
+            }
+
+            if (_t6RouteStep == 1)
+            {
+                Test6_RouteAct();
+            }
+        }
+
+        private void Test6_RouteFindAndBaseline()
+        {
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Routes.Route>(),
+                    ComponentType.ReadOnly<Game.Routes.TransportLine>(),
+                    ComponentType.ReadOnly<Game.Routes.RouteWaypoint>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<CS2M_RemotePlaced>(), ComponentType.ReadOnly<CS2M_SyncId>(),
+                },
+            });
+
+            if (q.IsEmptyIgnoreFilter)
+            {
+                L("[Auto] TEST6 ROUTE-REROUTE SKIP no save-loaded transit line in this city (needs a save " +
+                  "with at least one pre-existing bus/tram/etc. line — an in-session-created line gets a " +
+                  "SyncId immediately and would exercise the already-proven id-based reroute path instead " +
+                  "of ROUTEFIX)");
+                _t6RouteDone = true;
+                return;
+            }
+
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try { _t6RouteEntity = ents[0]; } finally { ents.Dispose(); }
+
+            _prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(_t6RouteEntity).m_Prefab, out PrefabBase pb);
+            _t6RoutePrefabName = pb?.name;
+            _t6RouteNumber = EntityManager.HasComponent<Game.Routes.RouteNumber>(_t6RouteEntity)
+                ? EntityManager.GetComponentData<Game.Routes.RouteNumber>(_t6RouteEntity).m_Number : 0;
+
+            L($"[Auto] TEST6 ROUTE-REROUTE line={_t6RoutePrefabName}#{_t6RouteNumber} entity={_t6RouteEntity.Index} " +
+              $"gate CS2M_ROUTEFIX={RouteFix.Enabled} — baselined, settling ~1.5s before the real move so " +
+              "the line has been seen untouched first (never measure/mutate before a baseline exists)");
+
+            _t6RouteStep = 1;
+            _t6RouteTimer = 90; // ~1.5s baseline settle before touching anything
+        }
+
+        private void Test6_RouteAct()
+        {
+            if (_t6RouteEntity == Entity.Null || !EntityManager.Exists(_t6RouteEntity)
+                || !EntityManager.HasBuffer<Game.Routes.RouteWaypoint>(_t6RouteEntity))
+            {
+                L("[Auto] TEST6 ROUTE-REROUTE SKIP line vanished before act");
+                _t6RouteDone = true;
+                return;
+            }
+
+            DynamicBuffer<Game.Routes.RouteWaypoint> wps = EntityManager.GetBuffer<Game.Routes.RouteWaypoint>(_t6RouteEntity, true);
+            Entity movedWp = Entity.Null;
+            for (int i = 0; i < wps.Length; i++)
+            {
+                Entity wp = wps[i].m_Waypoint;
+                if (wp == Entity.Null || !EntityManager.HasComponent<Game.Routes.Position>(wp)) { continue; }
+
+                float3 p = EntityManager.GetComponentData<Game.Routes.Position>(wp).m_Position;
+                EntityManager.SetComponentData(wp, new Game.Routes.Position(new float3(p.x + 30f, p.y, p.z + 30f)));
+                movedWp = wp;
+                break;
+            }
+
+            if (movedWp == Entity.Null)
+            {
+                L("[Auto] TEST6 ROUTE-REROUTE SKIP no waypoint with a resolvable Position found");
+                _t6RouteDone = true;
+                return;
+            }
+
+            // Mark BOTH: the route (what DetectSaveRouteReroutes' query requires) and the waypoint that
+            // actually moved (what a real drag stamps — see class doc).
+            // v59 PHASE-TRAP FIX (2 runs medidos: gate=True, waypoint movido, e ZERO [Route] DETECT+SEND):
+            // Updated é tag de 1 frame — estampada AQUI (fase do Autopilot), o RouteDetectorSystem que
+            // roda numa fase ANTERIOR só a veria no frame seguinte, mas o CleanUpSystem a remove no fim
+            // DESTE frame. DeferredUpdated (DeferredUpdateMarker.cs) estampa no INÍCIO do frame seguinte,
+            // antes de Mod1 — todos os detectores daquele frame enxergam. Mesmo remédio que
+            // ZoneBlockAuthorityApplySystem.Heal e ZoneOrderTiebreak já usam.
+            DeferredUpdated.Enqueue(movedWp);
+            DeferredUpdated.Enqueue(_t6RouteEntity);
+
+            L($"[Auto] TEST6 ROUTE-REROUTE moved a waypoint on line={_t6RoutePrefabName}#{_t6RouteNumber} " +
+              $"gate CS2M_ROUTEFIX={RouteFix.Enabled} — the always-on RouteDetectorSystem." +
+              "DetectSaveRouteReroutes should ship it on its own next scan (watch for [Route] DETECT+SEND " +
+              "reroute in the host log; gate=false here means it never will, regardless of this scene)");
+            _t6RouteDone = true;
+        }
+
+        /// <summary>Client side of the FOUR-GAP scene: nothing to script. All four sub-scenarios are
+        /// host-authored and dual-applied (see the class-level TEST6 doc comment), so the client's own
+        /// always-on apply systems consume every shipped command with no scripted action needed here —
+        /// this just logs once so the log makes that explicit instead of looking silently idle.</summary>
+        private void RunTest6ClientStep()
+        {
+            if (_t6ClientIdleLogged) { return; }
+            _t6ClientIdleLogged = true;
+            L("[Auto] TEST6 client idle (test=6 is fully host-authored/dual-applied — the client's own " +
+              "always-on apply systems consume the shipped commands with no scripted action needed here)");
+        }
+
         private void UpdateClient()
         {
             PlayerStatus status = NetworkInterface.Instance.LocalPlayer.PlayerStatus;
@@ -4789,6 +6161,10 @@ namespace CS2M.Sync
             ReAnnounceJoinOnce();
 
             if (_concurrent) { RunConcurrentStep(false); }
+            else if (_clientFarm) { RunClientFarmStep(); }
+            else if (_test5) { RunTest5ClientStep(); }
+            else if (_test6) { RunTest6ClientStep(); }
+
             LogCounts(status.ToString());
         }
 

@@ -3,7 +3,7 @@ using CS2M.API.Commands;
 namespace CS2M.Commands.Data.Game
 {
     /// <summary>
-    ///     ZoneBlockAuthority (CS2M_ZONEAUTH=1): the host mirrors its own zone Block geometry+cells so a
+    ///     ZoneBlockAuthority (CS2M_ZONEAUTH, ON by default since 2026-07-07): the host mirrors its own zone Block geometry+cells so a
     ///     client's locally-derived block (same road, but overlap desync tiebreak by BuildOrder/Entity.Index
     ///     picks a different width — see docs/zoneauth-spec.md) converges to the host's authoritative shape.
     ///     Blocks are addressed by (owning edge identity, side, ordinal) rather than raw position, because

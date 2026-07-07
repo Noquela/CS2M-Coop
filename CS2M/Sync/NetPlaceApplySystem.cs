@@ -14,6 +14,57 @@ using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
+    /// <summary>Global toggle for node-position healing on the LEGACY (default) net path. OFF by default
+    /// (env <c>CS2M_NODEHEAL=1</c>) until validated on a 2-sim — see <see cref="NetPlaceApplySystem"/>.
+    /// HealNodePosition for the mechanism this unblocks.</summary>
+    public static class NodeHeal
+    {
+        private static int _state = -1;
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (_state < 0)
+                {
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_NODEHEAL") == "1" ? 1 : 0;
+                }
+
+                return _state == 1;
+            }
+        }
+    }
+
+    /// <summary>Global toggle for the cross-session-overdraw silent-drop guard (see <c>ApplyOne</c>'s
+    /// HasNodes branch, <c>AnyLiveConnectionExists</c>). ON by default since 2026-07-07 — validated live:
+    /// TRIREPRO PHASE8 XSESSION-OVERDRAW (2-sim, ~50% of TRIREPRO runs) applies an edge (logged
+    /// <c>[Net] APPLIED-DEF</c>) that then vanishes from the client's world with its two dead-end nodes
+    /// and ZERO <c>[Net] DELETE/SKIP</c> ever logged, because
+    /// <c>Game.Tools.GenerateEdgesSystem.GenerateEdge</c> (decomp line ~1280) silently drops ANY Permanent
+    /// course whose two resolved node endpoints already share a live edge of ANY prefab
+    /// (<c>ConnectionExists</c>, decomp line ~1744, prefab-agnostic) — one frame AFTER our own
+    /// <c>EmitCourse</c> already logged success. Our own pre-check (<c>EdgeExists</c>) only guards the
+    /// SAME prefab, so it does not see this coming. Also re-confirmed clean in the 88 PASS/0 FAIL
+    /// selftest run with every gated fix enabled together (no regression/echo/crash). Set env
+    /// <c>CS2M_OVERDRAWFIX=0</c> to disable.</summary>
+    public static class OverdrawFix
+    {
+        private static int _state = -1;
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (_state < 0)
+                {
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_OVERDRAWFIX") == "0" ? 0 : 1;
+                }
+
+                return _state == 1;
+            }
+        }
+    }
+
     /// <summary>
     ///     Materializes nets placed by remote players.
     ///
@@ -164,6 +215,27 @@ namespace CS2M.Sync
                     CS2M.Log.Info($"[Net] SKIP duplicate (auth) name={cmd.PrefabName} " +
                                   $"start=({bezier.a.x:F1},{bezier.a.z:F1}) end=({bezier.d.x:F1},{bezier.d.z:F1})");
                     return;
+                }
+
+                // OVERDRAW-GUARD (gated, CS2M_OVERDRAWFIX, default ON since 2026-07-07 — CS2M_OVERDRAWFIX=0
+                // disables): EdgeExists above only checks
+                // the SAME prefab. The vanilla generator's own dedup (GenerateEdgesSystem.GenerateEdge,
+                // decomp ~line 1280: ConnectionExists) is prefab-AGNOSTIC — if aStart/aEnd (resolved above
+                // by identity or, on a miss, by FindJunctionNode's pure position+degree proximity search)
+                // already share a live edge of ANY OTHER prefab, the game will silently discard this
+                // Permanent course next frame: no edge, no exception, no CS2M log, because it happens
+                // entirely inside undecorated vanilla/Burst code. EmitCourse below would still log
+                // "APPLIED-DEF" — a false success. Free the end node's identity so GenerateNodesSystem
+                // mints a fresh one instead: the course still materializes (as a duplicate/overlap
+                // matching whatever the SENDER's own world already has — the same trade-off the host
+                // itself lives with after a cross-session overdraw) instead of vanishing outright.
+                if (OverdrawFix.Enabled && aStart != Entity.Null && aEnd != Entity.Null
+                    && AnyLiveConnectionExists(aStart, aEnd))
+                {
+                    CS2M.Log.Info($"[Net] OVERDRAW-GUARD name={cmd.PrefabName} start={aStart.Index} " +
+                                  $"end={aEnd.Index} already connected by a different-prefab edge — vanilla " +
+                                  "GenerateEdge would silently drop this course; freeing endNode identity");
+                    aEnd = Entity.Null;
                 }
 
                 // Delete the un-split ORIGINAL this piece replaces (an edge that spans it). The sender
@@ -585,6 +657,18 @@ namespace CS2M.Sync
 
             if (CS2M_NodeSyncIds.TryResolve(EntityManager, id, out Entity byId))
             {
+                // NODEHEAL (gated): a split/derived node's identity can be handed off to a DIFFERENT
+                // physical node on the SENDER between two pieces of the same multi-edge placement (the
+                // real net editor re-uses one endpoint's identity for the new split point and mints a
+                // fresh one for the vacated end — the exact mechanism NetBatchApplySystem's BOUND-MERGE/
+                // BOUND-SNAP were built for, proven live with a node id 100 m off). This legacy path had no
+                // equivalent reconciliation: once TryResolve hit, the freshly-declared pos was silently
+                // discarded, so the client kept using the STALE node forever. See HealNodePosition.
+                if (NodeHeal.Enabled)
+                {
+                    HealNodePosition(byId, id, pos);
+                }
+
                 return byId;
             }
 
@@ -605,6 +689,92 @@ namespace CS2M.Sync
             }
 
             return Entity.Null;
+        }
+
+        // ---- NODEHEAL (CS2M_NODEHEAL=1): position reconciliation for an id-resolved node on the legacy
+        // path. Exact port of NetBatchApplySystem's SnapBoundaryNode/BOUND-MERGE (same constants, same
+        // two-branch logic), duplicated here rather than shared so the proven AtomicBatch path stays
+        // byte-for-byte untouched. See that type's doc comment for the full "why" (live-observed node
+        // slid ~70 m from a mid-draw split/merge on the sender). ----------------------------------------
+
+        // Below this: noise (sub-metre float round-trip / normal junction settle NodePinSystem already
+        // tolerates). At/above 200 m: the declared pos is implausible for a "same node" correction — most
+        // likely stale/bad data — skip rather than teleport across the map.
+        private const float NodeHealMinDistSq = 0.0625f; // 0.25 m
+        private const float NodeHealMaxDistSq = 40000f;  // 200 m
+
+        // Above this, a "snap" is no longer plausibly the same junction settling as arms attach — treat it
+        // as the sender having folded this id's node into a DIFFERENT one (edge split/node reuse) and look
+        // for the survivor instead of moving this node.
+        private const float NodeHealMergeDist = 10f;
+        private const float NodeHealMergeSearchRadius = 2f;
+
+        /// <summary>Align an id-resolved node to the sender's freshly-declared position when the two have
+        /// drifted apart. A large drift is treated as a MERGE (the id now names a different physical node
+        /// on the sender) and re-points the id via <see cref="CS2M_NodeSyncIds.Remap"/> instead of moving
+        /// this node — moving would drag this node's OTHER (unrelated) edges across the map.</summary>
+        private void HealNodePosition(Entity node, ulong id, float3 wantPos)
+        {
+            if (!EntityManager.Exists(node) || !EntityManager.HasComponent<Node>(node))
+            {
+                return;
+            }
+
+            Node cur = EntityManager.GetComponentData<Node>(node);
+            float distSq = math.distancesq(cur.m_Position, wantPos);
+            if (distSq <= NodeHealMinDistSq || distSq >= NodeHealMaxDistSq)
+            {
+                return;
+            }
+
+            if (distSq > NodeHealMergeDist * NodeHealMergeDist
+                && CS2M_NodeSyncIds.TryFindNearbyRegistered(EntityManager, wantPos, NodeHealMergeSearchRadius, node, out Entity survivor))
+            {
+                CS2M_NodeSyncIds.Remap(id, survivor);
+                CS2M.Log.Info($"[Net] HEAL-MERGE id={id} node={node.Index}->{survivor.Index} " +
+                              $"dist={math.sqrt(distSq):F1}m wantPos=({wantPos.x:F1},{wantPos.z:F1}) " +
+                              "(re-pointed id to the survivor instead of moving the stale node)");
+                return;
+            }
+
+            float3 oldPos = cur.m_Position;
+
+            if (distSq > NodeHealMergeDist * NodeHealMergeDist)
+            {
+                CS2M.Log.Warn($"[Net] HEAL-LARGE id={id} moved={math.sqrt(distSq):F1}m " +
+                              $"({oldPos.x:F1},{oldPos.z:F1})->({wantPos.x:F1},{wantPos.z:F1}) " +
+                              "no nearby registered node to merge onto — moving the node itself");
+            }
+
+            EntityManager.SetComponentData(node, new Node { m_Position = wantPos, m_Rotation = cur.m_Rotation });
+            MarkUpdated(node);
+
+            if (EntityManager.HasBuffer<ConnectedEdge>(node))
+            {
+                DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(node, true);
+                var edges = new Entity[ce.Length];
+                for (int i = 0; i < ce.Length; i++)
+                {
+                    edges[i] = ce[i].m_Edge;
+                }
+
+                foreach (Entity edge in edges)
+                {
+                    if (EntityManager.Exists(edge) && !EntityManager.HasComponent<Deleted>(edge))
+                    {
+                        MarkUpdated(edge);
+                    }
+                }
+            }
+
+            CS2M.Log.Info($"[Net] HEAL-SNAP id={id} moved={math.sqrt(distSq):F1}m " +
+                          $"({oldPos.x:F1},{oldPos.z:F1})->({wantPos.x:F1},{wantPos.z:F1})");
+        }
+
+        private void MarkUpdated(Entity e)
+        {
+            if (!EntityManager.HasComponent<Updated>(e)) { EntityManager.AddComponent<Updated>(e); }
+            if (!EntityManager.HasComponent<BatchesUpdated>(e)) { EntityManager.AddComponent<BatchesUpdated>(e); }
         }
 
         /// <summary>Stamp the id onto each node GenerateNodes built from last frame's Null-ended courses.
@@ -949,6 +1119,39 @@ namespace CS2M.Sync
             }
 
             return best;
+        }
+
+        /// <summary>Mirrors <c>Game.Tools.GenerateEdgesSystem.ConnectionExists</c> (decomp
+        /// GenerateEdgesSystem.cs ~line 1744): true when a LIVE (non-Deleted) edge of ANY prefab already
+        /// links these two nodes. Prefab-AGNOSTIC — unlike <see cref="EdgeExists"/> — because that is
+        /// exactly the check the vanilla generator applies, with no prefab filter, right before
+        /// materializing a Permanent course; see <see cref="OverdrawFix"/> for why we need to see this
+        /// coming instead of finding out via a silently-vanished edge.</summary>
+        private bool AnyLiveConnectionExists(Entity node1, Entity node2)
+        {
+            if (!EntityManager.HasBuffer<ConnectedEdge>(node1))
+            {
+                return false;
+            }
+
+            DynamicBuffer<ConnectedEdge> connected = EntityManager.GetBuffer<ConnectedEdge>(node1);
+            for (int i = 0; i < connected.Length; i++)
+            {
+                Entity e = connected[i].m_Edge;
+                if (!EntityManager.Exists(e) || EntityManager.HasComponent<Deleted>(e)
+                    || !EntityManager.HasComponent<Edge>(e))
+                {
+                    continue;
+                }
+
+                Edge edge = EntityManager.GetComponentData<Edge>(e);
+                if ((edge.m_Start == node2 && edge.m_End == node1) || (edge.m_End == node2 && edge.m_Start == node1))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool EdgeExists(Entity startNode, Entity endNode, Entity netPrefab)

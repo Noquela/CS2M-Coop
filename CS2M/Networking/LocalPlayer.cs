@@ -444,6 +444,7 @@ namespace CS2M.Networking
 
             // Fork features: drop their queues + shared snapshots so a reconnect starts clean.
             Sync.RemoteTaxQueue.Clear();
+            Sync.RemoteTaxDeltaQueue.Clear();
             Sync.TaxSync.Clear();
             Sync.RemoteBudgetQueue.Clear();
             Sync.BudgetSync.Clear();

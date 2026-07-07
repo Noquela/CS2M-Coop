@@ -15,9 +15,12 @@ using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
-    /// <summary>Global toggle for the ZoneBlockAuthority path. OFF by default (env <c>CS2M_ZONEAUTH=1</c>) so
-    /// the DLL behaves exactly as before for anyone who doesn't opt in. Copy of the <see cref="AtomicBatch"/>
-    /// gate pattern (NetBatchCaptureSystem.cs:22-38).</summary>
+    /// <summary>Global toggle for the ZoneBlockAuthority path. ON by default since 2026-07-07 —
+    /// validated live in 2-sim + selftest 88 PASS/0 FAIL with every gated fix enabled together (no
+    /// regression/echo/crash). Every consumer (<see cref="ZoneBlockAuthoritySystem"/>,
+    /// <see cref="ZoneBlockAuthorityApplySystem"/>, <see cref="ZoneOrderTiebreakSystem"/>) additionally
+    /// checks <c>PlayerStatus.PLAYING</c> before acting, so single-player is unaffected regardless of
+    /// this gate. Set env <c>CS2M_ZONEAUTH=0</c> to disable.</summary>
     public static class ZoneAuthority
     {
         private static int _state = -1;
@@ -28,7 +31,7 @@ namespace CS2M.Sync
             {
                 if (_state < 0)
                 {
-                    _state = System.Environment.GetEnvironmentVariable("CS2M_ZONEAUTH") == "1" ? 1 : 0;
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_ZONEAUTH") == "0" ? 0 : 1;
                 }
 
                 return _state == 1;
@@ -82,7 +85,7 @@ namespace CS2M.Sync
     }
 
     /// <summary>
-    ///     ZoneBlockAuthority DETECTOR (host-only, gated CS2M_ZONEAUTH=1). Periodically sweeps every
+    ///     ZoneBlockAuthority DETECTOR (host-only, gated CS2M_ZONEAUTH, ON by default since 2026-07-07). Periodically sweeps every
     ///     road-owned zone Block and, for the ones whose geometry/cells changed since the last send, ships
     ///     the host's authoritative Block position/direction/size + cell zones so the client can heal its
     ///     own (possibly differently-derived) block to match. Root cause + rationale: docs/zoneauth-spec.md.
@@ -373,7 +376,7 @@ namespace CS2M.Sync
     }
 
     /// <summary>
-    ///     ZoneBlockAuthority APPLIER (client-only, gated CS2M_ZONEAUTH=1). Resolves the owning edge by
+    ///     ZoneBlockAuthority APPLIER (client-only, gated CS2M_ZONEAUTH, ON by default since 2026-07-07). Resolves the owning edge by
     ///     identity, finds the matching local block by (side, ordinal) — falling back to nearest-t on the
     ///     same side when the local block count itself diverged — and overwrites its Block+Cell data with
     ///     the host's authoritative values so both machines converge on the same block shape.

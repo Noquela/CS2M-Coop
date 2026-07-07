@@ -202,6 +202,17 @@ namespace CS2M.Sync
                         {
                             syncId = EntityManager.GetComponentData<CS2M_SyncId>(m.m_Entity).m_Id;
                         }
+
+                        // CS2M_POLICYFIX: also carry the building's prefab name (unused by a gate-off
+                        // apply, same as kinds 3/4 below already do) so a SyncId-less resolve can
+                        // filter candidates by prefab instead of proximity alone.
+                        if (PolicyFix.Enabled && EntityManager.HasComponent<PrefabRef>(m.m_Entity)
+                            && _prefabSystem.TryGetPrefab(
+                                EntityManager.GetComponentData<PrefabRef>(m.m_Entity).m_Prefab,
+                                out PrefabBase bldPb) && bldPb != null)
+                        {
+                            targetName = bldPb.name;
+                        }
                     }
                     else if (EntityManager.HasComponent<Game.Buildings.Extension>(m.m_Entity)
                              && EntityManager.HasComponent<Game.Objects.Transform>(m.m_Entity)

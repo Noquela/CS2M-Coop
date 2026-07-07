@@ -18,7 +18,17 @@ namespace CS2M.Sync
     ///     Detects newly-placed water sources by tracking which <c>WaterSourceData</c> entities it has
     ///     seen: the first pass caches the baseline (existing sources in the save aren't re-sent), then
     ///     any new source is broadcast (position + parameters). Remote-created sources carry
-    ///     <c>CS2M_RemotePlaced</c>, which the query excludes (echo guard).
+    ///     <c>CS2M_RemotePlaced</c>, which the CREATE path excludes (echo guard).
+    ///
+    ///     GAP FIX (audit 07/07, gated <c>CS2M_DELFIX=1</c>): <c>CS2M_RemotePlaced</c> is never removed,
+    ///     so excluding it from THIS query (the one that also feeds the <see cref="_seen"/> baseline used
+    ///     to detect a vanished/deleted source) meant a remotely-created source NEVER entered <c>_seen</c>
+    ///     — a LOCAL delete of it was therefore never observed and never propagated. When the gate is on,
+    ///     the query drops the RemotePlaced exclusion (remote-placed sources are tracked too, so their
+    ///     local deletion is caught by the existing gone-detection below); the per-entity check in
+    ///     <c>OnUpdate</c> still skips them for the CREATE broadcast so they are never re-announced as
+    ///     new. The existing <see cref="WaterSync"/> entity-keyed echo guard (not a component tag) already
+    ///     covers the reverse direction — a source deleted BY a remote command — so no new echo risk.
     /// </summary>
     public partial class WaterDetectorSystem : GameSystemBase
     {
@@ -33,7 +43,9 @@ namespace CS2M.Sync
             _sources = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<WaterSourceData>(), ComponentType.ReadOnly<Transform>() },
-                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<CS2M_RemotePlaced>() },
+                None = DelFix.Enabled
+                    ? new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() }
+                    : new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<CS2M_RemotePlaced>() },
             });
             CS2M.Log.Info("[Water] WaterDetectorSystem created");
         }
@@ -91,6 +103,15 @@ namespace CS2M.Sync
                             _seen[e] = pos; // remotes now have it here
                         }
 
+                        continue;
+                    }
+
+                    // DELFIX: a remote-placed source can now reach here (query no longer excludes it) —
+                    // track it silently so its later local deletion is observed, but never announce it as
+                    // a fresh LOCAL creation (it already exists on every other PC).
+                    if (EntityManager.HasComponent<CS2M_RemotePlaced>(e))
+                    {
+                        _seen[e] = pos;
                         continue;
                     }
 

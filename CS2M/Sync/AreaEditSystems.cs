@@ -144,6 +144,17 @@ namespace CS2M.Sync
             });
 
             // v46: bulldozed areas (surfaces, work areas AND districts) sync by prefab + center.
+            //
+            // GAP FIX (audit 07/07, gated CS2M_DELFIX=1): CS2M_RemotePlaced is stamped once at creation
+            // (DistrictApplySystem.cs, AreaEditApplySystem's rewrite/standalone paths) and NEVER removed,
+            // so excluding it here meant a district/area/field the LOCAL player bulldozed, but that had
+            // been CREATED by a remote command, could never match this query — the delete never shipped
+            // and the other PC's copy lived forever. DeleteDetectorSystem hit the identical bug for
+            // objects/buildings in v56 and fixed it the same way: key the delete-echo guard off
+            // CS2M_RemoteDeleted (stamped ONLY in the same frame ApplyDelete below applies a REMOTE
+            // delete, see CascadeDeleteUtil.cs) instead of CS2M_RemotePlaced. AreaEditApplySystem runs at
+            // Modification1 and this detector at ModificationEnd (Mod.cs), so the tag is always visible
+            // here before Game.Common.CleanUpSystem destroys the entity at Cleanup, same frame.
             _deletedAreas = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -153,12 +164,19 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<PrefabRef>(),
                     ComponentType.ReadOnly<Deleted>(),
                 },
-                None = new[]
-                {
-                    ComponentType.ReadOnly<Temp>(),
-                    ComponentType.ReadOnly<Game.Areas.MapTile>(),
-                    ComponentType.ReadOnly<CS2M_RemotePlaced>(),
-                },
+                None = DelFix.Enabled
+                    ? new[]
+                    {
+                        ComponentType.ReadOnly<Temp>(),
+                        ComponentType.ReadOnly<Game.Areas.MapTile>(),
+                        ComponentType.ReadOnly<CS2M_RemoteDeleted>(),
+                    }
+                    : new[]
+                    {
+                        ComponentType.ReadOnly<Temp>(),
+                        ComponentType.ReadOnly<Game.Areas.MapTile>(),
+                        ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                    },
             });
 
             // v57 AREA-FIX: nearest-Building spatial search used by FindAnchor when the owner-chain walk
@@ -197,6 +215,8 @@ namespace CS2M.Sync
                 _recentlySent.Clear();
             }
 
+            bool isServer = NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER;
+
             NativeArray<Entity> areas = _appliedAreas.ToEntityArray(Allocator.Temp);
             try
             {
@@ -233,6 +253,8 @@ namespace CS2M.Sync
                     }
 
                     var ownerTf = EntityManager.GetComponentData<Game.Objects.Transform>(owner);
+                    TryResolveAnchor(area, isServer, out _, out ulong anchorId, out string anchorPrefabName,
+                        out ulong anchorBuildingSyncId, out _, out int subAreaIndex);
                     Command.SendToAll?.Invoke(new AreaEditCommand
                     {
                         OwnerSyncId = EntityManager.HasComponent<CS2M_SyncId>(owner)
@@ -245,8 +267,12 @@ namespace CS2M.Sync
                         PrefabType = prefab.GetType().Name,
                         PrefabName = prefab.name,
                         Xs = xs, Ys = ys, Zs = zs, Els = els,
+                        OwnerAnchorId = anchorId,
+                        OwnerAnchorPrefabName = anchorPrefabName,
+                        BuildingSyncId = anchorBuildingSyncId,
+                        SubAreaIndex = subAreaIndex,
                     });
-                    CS2M.Log.Info($"[Area] DETECT+SEND name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length}");
+                    CS2M.Log.Info($"[Area] DETECT+SEND name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length} anchorId={anchorId}");
                 }
             }
             finally
@@ -260,7 +286,7 @@ namespace CS2M.Sync
             if (++_scanCounter >= 60)
             {
                 _scanCounter = 0;
-                ScanWorkAreaEdits();
+                ScanWorkAreaEdits(isServer);
             }
         }
 
@@ -268,10 +294,9 @@ namespace CS2M.Sync
         /// player RESHAPING a work area (vanilla marks the entity Updated, never Applied). First
         /// sight is a silent baseline; the apply system updates the shared hash so a remotely
         /// applied rewrite is never bounced back.</summary>
-        private void ScanWorkAreaEdits()
+        private void ScanWorkAreaEdits(bool isServer)
         {
             _scanPasses++;
-            bool isServer = NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER;
             NativeArray<Entity> areas = _workAreas.ToEntityArray(Allocator.Temp);
             try
             {
@@ -373,6 +398,8 @@ namespace CS2M.Sync
                     }
 
                     var ownerTf = EntityManager.GetComponentData<Game.Objects.Transform>(owner);
+                    TryResolveAnchor(area, isServer, out _, out ulong anchorId, out string anchorPrefabName,
+                        out ulong anchorBuildingSyncId, out _, out int subAreaIndex);
                     Command.SendToAll?.Invoke(new AreaEditCommand
                     {
                         OwnerSyncId = EntityManager.HasComponent<CS2M_SyncId>(owner)
@@ -385,8 +412,12 @@ namespace CS2M.Sync
                         PrefabType = prefab.GetType().Name,
                         PrefabName = prefab.name,
                         Xs = xs, Ys = ys, Zs = zs, Els = els,
+                        OwnerAnchorId = anchorId,
+                        OwnerAnchorPrefabName = anchorPrefabName,
+                        BuildingSyncId = anchorBuildingSyncId,
+                        SubAreaIndex = subAreaIndex,
                     });
-                    CS2M.Log.Info($"[Area] DETECT+SEND edit name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length} (polygon diff)");
+                    CS2M.Log.Info($"[Area] DETECT+SEND edit name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length} anchorId={anchorId} (polygon diff)");
                 }
             }
             finally
@@ -509,6 +540,105 @@ namespace CS2M.Sync
             }
 
             return best;
+        }
+
+        /// <summary>
+        ///     v59 IDENTITY FIX: resolves the work-area's DIRECT owner (<c>Owner.m_Owner</c> — exact,
+        ///     one hop; for a farm field that is its "Agriculture Area Placeholder", never the
+        ///     building — see FindAnchor's doc comment for why walking further is unreliable) and
+        ///     makes sure it carries a stable <see cref="CS2M_SyncId"/>, minting one via
+        ///     <see cref="CS2M_SyncIdSystem.Allocate"/> the first time it is seen. HOST ONLY: mirrors
+        ///     the existing host-authoritative model for area shape — the client must never invent an
+        ///     id for the same field, or the two sides would disagree forever. Also best-effort
+        ///     resolves a BUILDING for the anchor (reusing FindAnchor's own building-search) purely as
+        ///     a position HINT the receiver can use for its own one-time local search; never required
+        ///     for correctness (the receiver's search is unbounded and type-filtered instead — see
+        ///     AreaEditApplySystem.ResolveOwnerByAnchor).
+        /// </summary>
+        private bool TryResolveAnchor(Entity area, bool isServer, out Entity directOwner, out ulong anchorId,
+            out string anchorPrefabName, out ulong buildingSyncId, out float3 buildingPos, out int subAreaIndex)
+        {
+            directOwner = Entity.Null;
+            anchorId = 0;
+            anchorPrefabName = null;
+            buildingSyncId = 0;
+            buildingPos = default;
+            subAreaIndex = 0;
+
+            if (!EntityManager.HasComponent<Owner>(area))
+            {
+                return false;
+            }
+
+            directOwner = EntityManager.GetComponentData<Owner>(area).m_Owner;
+            if (directOwner == Entity.Null || !EntityManager.Exists(directOwner)
+                || !EntityManager.HasComponent<Game.Objects.Transform>(directOwner)
+                || !EntityManager.HasComponent<PrefabRef>(directOwner))
+            {
+                directOwner = Entity.Null;
+                return false;
+            }
+
+            if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(directOwner).m_Prefab,
+                    out PrefabBase ownerPrefab) || ownerPrefab == null)
+            {
+                return false;
+            }
+
+            anchorPrefabName = ownerPrefab.name;
+
+            if (EntityManager.HasComponent<CS2M_SyncId>(directOwner))
+            {
+                anchorId = EntityManager.GetComponentData<CS2M_SyncId>(directOwner).m_Id;
+            }
+            else if (isServer)
+            {
+                // First sighting of this owner anywhere — mint its identity.
+                anchorId = CS2M_SyncIdSystem.Allocate();
+                CS2M_SyncIdSystem.Register(EntityManager, directOwner, anchorId);
+            }
+            else
+            {
+                return false; // client with an unregistered anchor: nothing stable to ship yet
+            }
+
+            Entity building = FindAnchor(directOwner);
+            if (building != Entity.Null && building != directOwner
+                && EntityManager.HasComponent<Game.Buildings.Building>(building)
+                && EntityManager.HasComponent<CS2M_SyncId>(building))
+            {
+                buildingSyncId = EntityManager.GetComponentData<CS2M_SyncId>(building).m_Id;
+                buildingPos = EntityManager.GetComponentData<Game.Objects.Transform>(building).m_Position;
+            }
+
+            // Discriminator: ordinal among Extractor-tagged entries of directOwner's own SubArea
+            // buffer (Game.Areas.SubArea — engine-maintained reverse index, Game/Serialization/
+            // SubAreaSystem.cs:27-40) — lets the receiver pick the right field when an owner has more
+            // than one.
+            if (EntityManager.HasBuffer<Game.Areas.SubArea>(directOwner))
+            {
+                DynamicBuffer<Game.Areas.SubArea> subAreas =
+                    EntityManager.GetBuffer<Game.Areas.SubArea>(directOwner, true);
+                int ordinal = 0;
+                for (int i = 0; i < subAreas.Length; i++)
+                {
+                    Entity candidate = subAreas[i].m_Area;
+                    if (!EntityManager.HasComponent<Game.Areas.Extractor>(candidate))
+                    {
+                        continue;
+                    }
+
+                    if (candidate == area)
+                    {
+                        subAreaIndex = ordinal;
+                        break;
+                    }
+
+                    ordinal++;
+                }
+            }
+
+            return true;
         }
 
         private void DetectStandalone()
@@ -825,7 +955,16 @@ namespace CS2M.Sync
                 return true;
             }
 
-            Entity owner = ResolveOwner(cmd);
+            // v59 IDENTITY FIX: try the stable anchor id first (exact — see ResolveOwnerByAnchor's doc
+            // comment); only a NEVER-before-seen anchor falls back to the legacy proximity/building-
+            // syncid resolution (kept unchanged for save-era fields the sender could not identify).
+            Entity owner = ResolveOwnerByAnchor(cmd, out bool ownerIsDirect);
+            if (owner == Entity.Null)
+            {
+                owner = ResolveOwner(cmd);
+                ownerIsDirect = false;
+            }
+
             if (owner == Entity.Null)
             {
                 // The owner building may not be placed on this PC yet — retry unless the window is spent.
@@ -839,31 +978,41 @@ namespace CS2M.Sync
             }
 
             // Existing owned area of the same prefab → rewrite its polygon in place.
-            Entity target = Entity.Null;
-            NativeArray<Entity> areas = _ownedAreas.ToEntityArray(Allocator.Temp);
-            try
-            {
-                foreach (Entity area in areas)
-                {
-                    // Match by ANCHOR, not direct owner: a farm FIELD is owned by a placeholder whose owner
-                    // is the building, and ResolveOwner may have resolved either — walking both sides to the
-                    // same anchor makes them meet regardless of which level carried the Transform.
-                    if (FindAnchorApply(EntityManager.GetComponentData<Owner>(area).m_Owner) != owner)
-                    {
-                        continue;
-                    }
+            // Fast path: owner is the field's DIRECT parent (Owner.m_Owner) — read its own
+            // Game.Areas.SubArea buffer (the engine-maintained reverse index, Game/Serialization/
+            // SubAreaSystem.cs:27-40) instead of scanning+climbing every owned area in the world.
+            Entity target = ownerIsDirect ? FindExtractorSubArea(owner, cmd.SubAreaIndex) : Entity.Null;
 
-                    if (_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
-                            out PrefabBase p) && p != null && p.name == cmd.PrefabName)
+            if (target == Entity.Null)
+            {
+                // Legacy scan (unchanged): covers owner resolved via the old climb-to-building path,
+                // and the rare case a freshly-registered anchor's SubArea buffer hasn't been
+                // populated by SubAreaSystem yet.
+                NativeArray<Entity> areas = _ownedAreas.ToEntityArray(Allocator.Temp);
+                try
+                {
+                    foreach (Entity area in areas)
                     {
-                        target = area;
-                        break;
+                        // Match by ANCHOR, not direct owner: a farm FIELD is owned by a placeholder whose owner
+                        // is the building, and ResolveOwner may have resolved either — walking both sides to the
+                        // same anchor makes them meet regardless of which level carried the Transform.
+                        if (FindAnchorApply(EntityManager.GetComponentData<Owner>(area).m_Owner) != owner)
+                        {
+                            continue;
+                        }
+
+                        if (_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
+                                out PrefabBase p) && p != null && p.name == cmd.PrefabName)
+                        {
+                            target = area;
+                            break;
+                        }
                     }
                 }
-            }
-            finally
-            {
-                areas.Dispose();
+                finally
+                {
+                    areas.Dispose();
+                }
             }
 
             if (target != Entity.Null)
@@ -1011,9 +1160,19 @@ namespace CS2M.Sync
                 return;
             }
 
-            if (!EntityManager.HasComponent<CS2M_RemotePlaced>(target))
+            // GAP FIX (CS2M_DELFIX=1): stamp CS2M_RemoteDeleted, NOT CS2M_RemotePlaced — this target is
+            // dying, and CS2M_RemotePlaced is the CREATION tag (paired with _deletedAreas' None list
+            // above). Legacy (gate off) keeps stamping CS2M_RemotePlaced, matching the query unchanged.
+            if (DelFix.Enabled)
             {
-                EntityManager.AddComponent<CS2M_RemotePlaced>(target); // echo guard
+                if (!EntityManager.HasComponent<CS2M_RemoteDeleted>(target))
+                {
+                    EntityManager.AddComponent<CS2M_RemoteDeleted>(target); // echo guard (delete)
+                }
+            }
+            else if (!EntityManager.HasComponent<CS2M_RemotePlaced>(target))
+            {
+                EntityManager.AddComponent<CS2M_RemotePlaced>(target); // legacy echo guard
             }
 
             EntityManager.AddComponent<Deleted>(target);
@@ -1157,6 +1316,182 @@ namespace CS2M.Sync
             }
 
             return best;
+        }
+
+        /// <summary>
+        ///     v59 IDENTITY FIX: resolves the field's DIRECT owner by exact id first — works for every
+        ///     message after the first one shipped for a given field (see AreaEditDetectorSystem.
+        ///     TryResolveAnchor). Only when this exact id has never been seen locally does it fall back
+        ///     to a ONE-TIME search: filtered by prefab name AND "owns at least one Extractor-tagged
+        ///     area" (a TYPE filter the old ~3–5 m proximity guess in <see cref="ResolveOwner"/> never
+        ///     had), preferring the candidate nearest the anchoring BUILDING's own LIVE position
+        ///     (resolved via <see cref="AreaEditCommand.BuildingSyncId"/>, never a shipped snapshot —
+        ///     the shipped OwnerX/Y/Z is the owner's OWN position, which drifts with the field's
+        ///     centroid once resized). The match, once found, is registered under OwnerAnchorId
+        ///     (<see cref="CS2M_SyncIdSystem.Register"/>) so every LATER edit of this SAME field
+        ///     resolves by id alone — no more repeated guessing, ever, for this field.
+        /// </summary>
+        private Entity ResolveOwnerByAnchor(AreaEditCommand cmd, out bool resolvedIsDirectOwner)
+        {
+            resolvedIsDirectOwner = false;
+            if (cmd.OwnerAnchorId == 0)
+            {
+                return Entity.Null;
+            }
+
+            if (CS2M_SyncIdSystem.Map.TryGetValue(cmd.OwnerAnchorId, out Entity known)
+                && EntityManager.Exists(known) && !EntityManager.HasComponent<Deleted>(known))
+            {
+                resolvedIsDirectOwner = true;
+                return known;
+            }
+
+            if (string.IsNullOrEmpty(cmd.OwnerAnchorPrefabName))
+            {
+                return Entity.Null;
+            }
+
+            Entity building = Entity.Null;
+            bool haveBuildingHint = cmd.BuildingSyncId != 0
+                && CS2M_SyncIdSystem.Map.TryGetValue(cmd.BuildingSyncId, out building)
+                && EntityManager.Exists(building) && !EntityManager.HasComponent<Deleted>(building)
+                && EntityManager.HasComponent<Game.Objects.Transform>(building);
+            float3 hintPos = haveBuildingHint
+                ? EntityManager.GetComponentData<Game.Objects.Transform>(building).m_Position
+                : new float3(cmd.OwnerX, cmd.OwnerY, cmd.OwnerZ);
+
+            EntityQuery anchorCandidates = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+
+            Entity best = Entity.Null;
+            float bestDSq = float.MaxValue;
+            NativeArray<Entity> ents = anchorCandidates.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity cand in ents)
+                {
+                    if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(cand).m_Prefab,
+                            out PrefabBase p) || p == null || p.name != cmd.OwnerAnchorPrefabName)
+                    {
+                        continue;
+                    }
+
+                    // Type filter: must actually own an Extractor-tagged area. This is what makes an
+                    // UNBOUNDED search safe — a field can end up arbitrarily far from its building
+                    // once resized (its owner sits at the field's own centroid, see the field-owning
+                    // placeholder's discussion in AreaEditDetectorSystem.FindAnchor), so no fixed
+                    // radius is reliable, but "same prefab name AND owns an Extractor field" is.
+                    if (!OwnsExtractorArea(cand))
+                    {
+                        continue;
+                    }
+
+                    float3 candPos = EntityManager.GetComponentData<Game.Objects.Transform>(cand).m_Position;
+                    float dx = candPos.x - hintPos.x;
+                    float dz = candPos.z - hintPos.z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestDSq)
+                    {
+                        bestDSq = d;
+                        best = cand;
+                    }
+                }
+            }
+            finally
+            {
+                ents.Dispose();
+            }
+
+            if (best != Entity.Null)
+            {
+                CS2M_SyncIdSystem.Register(EntityManager, best, cmd.OwnerAnchorId);
+                resolvedIsDirectOwner = true;
+                CS2M.Log.Info($"[Area] ANCHOR-RESOLVE id={cmd.OwnerAnchorId} name={cmd.OwnerAnchorPrefabName} "
+                    + $"entity={best.Index} (one-time, now cached)");
+            }
+
+            return best;
+        }
+
+        /// <summary>True if <paramref name="candidate"/> owns at least one Extractor-tagged Area,
+        /// preferring its own (engine-maintained) SubArea buffer and falling back to a direct scan of
+        /// <see cref="_ownedAreas"/> if that buffer was never allocated for this entity's archetype.</summary>
+        private bool OwnsExtractorArea(Entity candidate)
+        {
+            if (EntityManager.HasBuffer<Game.Areas.SubArea>(candidate))
+            {
+                DynamicBuffer<Game.Areas.SubArea> subAreas =
+                    EntityManager.GetBuffer<Game.Areas.SubArea>(candidate, true);
+                for (int i = 0; i < subAreas.Length; i++)
+                {
+                    if (EntityManager.HasComponent<Game.Areas.Extractor>(subAreas[i].m_Area))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            NativeArray<Entity> areas = _ownedAreas.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity area in areas)
+                {
+                    if (EntityManager.HasComponent<Game.Areas.Extractor>(area)
+                        && EntityManager.HasComponent<Owner>(area)
+                        && EntityManager.GetComponentData<Owner>(area).m_Owner == candidate)
+                    {
+                        return true;
+                    }
+                }
+            }
+            finally
+            {
+                areas.Dispose();
+            }
+
+            return false;
+        }
+
+        /// <summary>Reads <paramref name="owner"/>'s own Game.Areas.SubArea buffer (the engine-
+        /// maintained reverse index of areas it owns) and returns the <paramref name="subAreaIndex"/>-th
+        /// Extractor-tagged entry — the discriminator for when one owner has more than one field.
+        /// Entity.Null if the buffer doesn't exist yet (owner freshly registered, SubAreaSystem hasn't
+        /// caught up) or has no such entry — callers fall back to the legacy scan in that case.</summary>
+        private Entity FindExtractorSubArea(Entity owner, int subAreaIndex)
+        {
+            if (!EntityManager.HasBuffer<Game.Areas.SubArea>(owner))
+            {
+                return Entity.Null;
+            }
+
+            DynamicBuffer<Game.Areas.SubArea> subAreas = EntityManager.GetBuffer<Game.Areas.SubArea>(owner, true);
+            int ordinal = 0;
+            for (int i = 0; i < subAreas.Length; i++)
+            {
+                Entity candidate = subAreas[i].m_Area;
+                if (!EntityManager.HasComponent<Game.Areas.Extractor>(candidate))
+                {
+                    continue;
+                }
+
+                if (ordinal == subAreaIndex)
+                {
+                    return candidate;
+                }
+
+                ordinal++;
+            }
+
+            return Entity.Null;
         }
 
         private Entity ResolveOwner(AreaEditCommand cmd)

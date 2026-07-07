@@ -18,7 +18,8 @@ param(
     [int]$ClientTimeout   = 320,
     [switch]$Kill,                   # matar as duas instancias no fim
     [switch]$Shots,                  # screenshots das 2 janelas no fim
-    [switch]$Concurrent              # CS2M_AP_CONCURRENT=1: os DOIS lados estampam a mesma rua
+    [switch]$Concurrent,             # CS2M_AP_CONCURRENT=1: os DOIS lados estampam a mesma rua
+    [string]$StartGame = ""          # guid (.cok.cid) de um save especifico p/ -startGame= (bypass do last-save)
 )
 $conc = if ($Concurrent) { "1" } else { "" }
 
@@ -44,11 +45,16 @@ Get-Process -Name "Cities2" -ErrorAction SilentlyContinue | Stop-Process -Force 
 Start-Sleep -Seconds 3
 
 # --- 1) HOST normal --------------------------------------------------------
-Say "subindo HOST normal (-continuelastsave, autopilot=host, test=$Test)"
+# v58: -StartGame <guid> carrega um save ESPECÍFICO via GameManager AutoLoad (decomp GameManager.cs:397
+# "startGame=" -> Hash128.Parse; :612 AutoLoad(configuration.startGame)). O guid é o conteúdo do .cok.cid.
+# Contorna o ponteiro de "último save" (UserState) quando ele aponta pra save corrompido/apagado —
+# -continuelastsave nesse caso cai no MainMenu pra sempre e o autopilot nunca vê a cidade carregar.
+$hostArg = if ($StartGame) { "-startGame=$StartGame" } else { '-continuelastsave' }
+Say "subindo HOST normal ($hostArg, autopilot=host, test=$Test)"
 $env:CS2M_AUTOPILOT="host"; $env:CS2M_AP_PORT="1111"; $env:CS2M_AP_TEST=$Test; $env:CS2M_AP_IP=""; $env:CS2M_AP_CONCURRENT=$conc
 $env:CS2M_AP_LOG=$HostLog
 try { Clear-Content $HostLog -ErrorAction Stop } catch {}
-$hostProc = Start-Process -FilePath $Exe -WorkingDirectory $GameDir -ArgumentList '-continuelastsave' -PassThru
+$hostProc = Start-Process -FilePath $Exe -WorkingDirectory $GameDir -ArgumentList $hostArg -PassThru
 Say "HOST pid=$($hostProc.Id). Esperando publicar servidor..."
 
 $deadline=(Get-Date).AddSeconds($HostTimeout); $ok=$false

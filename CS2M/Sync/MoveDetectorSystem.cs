@@ -35,6 +35,11 @@ namespace CS2M.Sync
         private EntityQuery _movedOwnedUpgrades; // v55: installed service upgrades (Owner-bearing) being relocated
         private readonly Dictionary<Entity, float3> _lastPos = new Dictionary<Entity, float3>();
 
+        // v56: paired with _lastPos so CS2M_MOVEFIX (RemoteEditApplySystem) receives the OLD rotation too —
+        // needed to derive the full rigid delta for SubNet/SubArea children. Cleared in lockstep with
+        // _lastPos.
+        private readonly Dictionary<Entity, quaternion> _lastRot = new Dictionary<Entity, quaternion>();
+
         // v48: while the move tool drags, the Temp copy points at the original via Temp.m_Original —
         // and the ORIGINAL still holds its pre-move transform. Caching it solves the "old position"
         // problem for natives (only entities in this cache are considered player-relocated).
@@ -135,6 +140,7 @@ namespace CS2M.Sync
             {
                 _clearCounter = 0;
                 _lastPos.Clear();
+                _lastRot.Clear();
                 _preMove.Clear();
             }
 
@@ -155,6 +161,7 @@ namespace CS2M.Sync
                     if (!_lastPos.TryGetValue(e, out float3 prev))
                     {
                         _lastPos[e] = tf.m_Position; // first sight: cache baseline, don't send
+                        _lastRot[e] = tf.m_Rotation;
                         continue;
                     }
 
@@ -163,7 +170,17 @@ namespace CS2M.Sync
                         continue;
                     }
 
+                    // v56: baseline for CS2M_MOVEFIX's rigid delta (SubNet/SubArea children). Missing
+                    // from _lastRot only if this entity got into _lastPos before v56 shipped (same-session
+                    // upgrade) — falls back to the just-cached current rotation (delta ~= identity, i.e.
+                    // MOVEFIX quietly no-ops for this one move, then self-heals on the next).
+                    if (!_lastRot.TryGetValue(e, out quaternion prevRot))
+                    {
+                        prevRot = tf.m_Rotation;
+                    }
+
                     _lastPos[e] = tf.m_Position;
+                    _lastRot[e] = tf.m_Rotation;
                     Command.SendToAll?.Invoke(new MoveCommand
                     {
                         SyncId = id,
@@ -174,6 +191,10 @@ namespace CS2M.Sync
                         RotY = tf.m_Rotation.value.y,
                         RotZ = tf.m_Rotation.value.z,
                         RotW = tf.m_Rotation.value.w,
+                        HasOldTransform = true,
+                        OldX = prev.x, OldY = prev.y, OldZ = prev.z,
+                        OldRotX = prevRot.value.x, OldRotY = prevRot.value.y,
+                        OldRotZ = prevRot.value.z, OldRotW = prevRot.value.w,
                     });
                     CS2M.Log.Info($"[Move] DETECT+SEND id={id} pos=({tf.m_Position.x:F1},{tf.m_Position.y:F1},{tf.m_Position.z:F1})");
                 }
@@ -338,7 +359,10 @@ namespace CS2M.Sync
                         RotZ = tf.m_Rotation.value.z, RotW = tf.m_Rotation.value.w,
                         PrefabType = prefab.GetType().Name,
                         PrefabName = prefab.name,
+                        HasOldTransform = true,
                         OldX = oldTf.m_Position.x, OldY = oldTf.m_Position.y, OldZ = oldTf.m_Position.z,
+                        OldRotX = oldTf.m_Rotation.value.x, OldRotY = oldTf.m_Rotation.value.y,
+                        OldRotZ = oldTf.m_Rotation.value.z, OldRotW = oldTf.m_Rotation.value.w,
                     });
                     CS2M.Log.Info($"[Move] DETECT+SEND native name={prefab.name} " +
                                   $"old=({oldTf.m_Position.x:F1},{oldTf.m_Position.z:F1}) new=({tf.m_Position.x:F1},{tf.m_Position.z:F1}) id={id}");

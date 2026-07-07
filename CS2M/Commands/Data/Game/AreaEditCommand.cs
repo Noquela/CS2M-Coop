@@ -30,5 +30,38 @@ namespace CS2M.Commands.Data.Game
         /// they match by prefab + polygon center on the receiver.</summary>
         public float CenterX { get; set; }
         public float CenterZ { get; set; }
+
+        /// <summary>
+        ///     v59 IDENTITY FIX: stable id for the field's DIRECT owner (<c>Owner.m_Owner</c> — a
+        ///     farm's "Agriculture Area Placeholder", or the building itself when it owns the field
+        ///     directly). Minted once by the host (<see cref="CS2M.Sync.CS2M_SyncIdSystem.Allocate"/>)
+        ///     the first time this owner is seen and stamped on it, then shipped on every later edit
+        ///     of the SAME field so the receiver resolves it by EXACT id — never by position — after
+        ///     the first message. 0 when the sender could not resolve/mint one (older build, or a
+        ///     client-initiated edit — see AreaEditDetectorSystem.TryResolveAnchor).
+        /// </summary>
+        public ulong OwnerAnchorId { get; set; }
+
+        /// <summary>v59: prefab name of the OwnerAnchorId entity. Used ONLY the first time the
+        /// receiver sees this OwnerAnchorId (nothing registered locally yet) to find its own
+        /// matching local entity: among its own objects with this prefab name that own at least one
+        /// Extractor-tagged Area (a type filter, not just a name+radius guess), pick the one nearest
+        /// BuildingX/Y/Z (if resolved) or OwnerX/Y/Z otherwise, then register it under OwnerAnchorId
+        /// so every later edit resolves by id alone. See AreaEditApplySystem.ResolveOwnerByAnchor.</summary>
+        public string OwnerAnchorPrefabName { get; set; }
+
+        /// <summary>v59: stable SyncId of the BUILDING the sender's own structural+spatial walk
+        /// (FindAnchor) found for OwnerAnchorId's entity, 0 if none. Used only as a HINT for the
+        /// receiver's one-time resolve: the receiver reads the BUILDING's own LIVE Transform via this
+        /// id instead of trusting a shipped snapshot, since OwnerX/Y/Z is the owner's OWN position,
+        /// which can be arbitrarily far from the building once the field has been resized (the root
+        /// cause of the 110 m divergence this fix addresses).</summary>
+        public ulong BuildingSyncId { get; set; }
+
+        /// <summary>v59: ordinal among Extractor-tagged entries of the OwnerAnchorId entity's own
+        /// <c>Game.Areas.SubArea</c> buffer (the engine-maintained reverse index of areas it owns —
+        /// see <c>Game.Serialization.SubAreaSystem</c>). Discriminates when one owner has more than
+        /// one Extractor-tagged sub-area; 0 in the overwhelmingly common single-field case.</summary>
+        public int SubAreaIndex { get; set; }
     }
 }

@@ -9,6 +9,50 @@ using Unity.Entities;
 
 namespace CS2M.Sync
 {
+    /// <summary>Global toggle for allowing a temporary negative DevTreePoints balance. OFF by default
+    /// (env <c>CS2M_DEVTREEFIX=1</c>) until validated on a 2-sim.
+    ///     Gap: <see cref="DevTreeApplySystem.ApplyOne"/> floors the local balance at
+    ///     <c>Max(0, points - cost)</c> after mirroring a remote purchase. <c>DevTreePoints</c> is
+    ///     itself derived deterministically from milestones reached (decomp
+    ///     <c>Game.City.DevTreeSystem.AppendPointsJob</c>: <c>points += milestone.m_DevTreePoints</c>),
+    ///     and the city XP that drives milestones only reaches a client via
+    ///     <see cref="ProgressionSenderSystem"/> on a ~1.5 s cadence. If the remote purchase's mirrored
+    ///     cost lands here BEFORE the local mirrored XP has crossed the milestone that grants the points
+    ///     the sender already had, flooring at 0 doesn't just delay the deduction — it permanently
+    ///     erases the difference, because nothing ever resyncs <c>DevTreePoints</c> on its own (unlike
+    ///     money, which <c>MoneySyncSenderSystem</c> resyncs host-&gt;client every ~1 s).
+    ///     Two ways to close this were weighed:
+    ///     (a) let the balance go temporarily negative (implemented here): once the mirrored XP crosses
+    ///         the milestone, the game's own <c>AppendPointsJob</c> unconditionally adds the milestone's
+    ///         points to whatever value is already there (no clamp on its side either), so a negative
+    ///         balance self-corrects the moment the milestone fires locally — no new command, no new
+    ///         host-authoritative channel, minimal surface.
+    ///     (b) add a periodic host-&gt;client <c>DevTreePoints</c> resync (money's pattern). Safer against
+    ///         a permanently-wrong DISPLAYED number sooner, but it is a second, independent source of
+    ///         truth for the same value the milestone job already computes deterministically on both
+    ///         sides, and doing a delta-Add (like money) or a raw overwrite (like the old tax full-array
+    ///         apply, GAP A above) opens a new race with the local AppendPointsJob write which itself
+    ///         isn't gated.
+    ///     (a) was implemented as the safer, smaller change; (b) is reported, not built, given the ask
+    ///         to avoid needless extra machinery when the simpler fix is deterministic.</summary>
+    public static class DevTreeFix
+    {
+        private static int _state = -1;
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (_state < 0)
+                {
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_DEVTREEFIX") == "1" ? 1 : 0;
+                }
+
+                return _state == 1;
+            }
+        }
+    }
+
     /// <summary>
     ///     Mirrors a remote dev-tree purchase: raises the same <c>Unlock</c>+<c>Event</c> entity the
     ///     game's <c>DevTreeSystem.Purchase</c> raises (the UnlockSystem then disables the node's
@@ -75,7 +119,14 @@ namespace CS2M.Sync
             if (cost > 0 && !_pointsQuery.IsEmptyIgnoreFilter)
             {
                 DevTreePoints points = _pointsQuery.GetSingleton<DevTreePoints>();
-                points.m_Points = System.Math.Max(0, points.m_Points - cost);
+                // CS2M_DEVTREEFIX: let the balance go negative instead of flooring at 0 when our
+                // mirrored XP hasn't yet crossed the milestone the sender already had — the game's own
+                // AppendPointsJob adds new milestone points unconditionally, so a negative balance
+                // self-corrects the instant that milestone fires locally. Flooring here (legacy)
+                // erases the difference for good instead of just delaying it.
+                points.m_Points = DevTreeFix.Enabled
+                    ? points.m_Points - cost
+                    : System.Math.Max(0, points.m_Points - cost);
                 _pointsQuery.SetSingleton(points);
             }
 

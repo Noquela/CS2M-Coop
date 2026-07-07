@@ -125,7 +125,14 @@ def block_strip_emergent(tok):
     quando Occupied está presente."""
     def repl(m):
         raw = int(m.group(1), 16)
-        mask = _EMERGENT_MASK | (0x8 if (raw & 0x20) else 0)  # +Visible se Occupied
+        # +Visible(0x8) SEMPRE. Decomp (CellCheckHelpers.cs:475-482): Visible = !(Blocked|Redundant),
+        # puro-derivado — não carrega sinal autorado independente. A máscara antiga só tirava Visible
+        # QUANDO Occupied estava setado na MESMA célula, o que criava uma ASSIMETRIA: growable presente
+        # num lado só (host ~28 Occupied+Visible vs client ~8 Visible) não colapsava e virava falso
+        # "FORMA DIFERE". Tirando Visible dos dois lados, ~28/~20/~8 viram todos iguais (growable-timing
+        # benigno), enquanto Blocked(0x1)/Shared(0x2) seguem visíveis — divergência REAL de buildability
+        # (host Visible vs client Blocked = rua divergente) continua pegando.
+        mask = _EMERGENT_MASK | 0x8
         v = raw & ~mask
         return "" if v == 0 else f"~{v:X}"
     return _CELL_FLAG_RE.sub(repl, tok)

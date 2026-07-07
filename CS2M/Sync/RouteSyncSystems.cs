@@ -14,6 +14,29 @@ using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
+    /// <summary>Global toggle for save-loaded-line reroute sync (see <see cref="RouteDetectorSystem.DetectSaveRouteReroutes"/>).
+    /// ON by default since 2026-07-07 — validated live in 2-sim (two save-loaded lines, reroute/move-stop
+    /// each) + selftest 88 PASS/0 FAIL with every gated fix enabled together (no regression/echo/crash).
+    /// Sends a Replace command addressed by prefab+RouteNumber (no SyncId) the moment ANY save-loaded
+    /// line's <c>Updated</c> tag is observed. Set env <c>CS2M_ROUTEFIX=0</c> to disable.</summary>
+    public static class RouteFix
+    {
+        private static int _state = -1;
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (_state < 0)
+                {
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_ROUTEFIX") == "0" ? 0 : 1;
+                }
+
+                return _state == 1;
+            }
+        }
+    }
+
     /// <summary>
     ///     Mailboxes + waypoint-hash snapshot for transport-line sync. The snapshot (SyncId → hash of
     ///     the waypoint list) is the echo guard for re-route detection: the apply stores the hash it
@@ -368,9 +391,15 @@ namespace CS2M.Sync
         /// prefab+number). Mirror that: send the reroute addressed by prefab+number (SyncId=0, Replace=true)
         /// and let the receiver resolve by RouteNumber. A per-(prefab#number) content-hash guard stops the
         /// received-then-Updated line from pinging the command back. No SyncId allocation → no identity race
-        /// between two sims touching the same untouched line in the same frame.</summary>
+        /// between two sims touching the same untouched line in the same frame. Gated by
+        /// <see cref="RouteFix.Enabled"/> (CS2M_ROUTEFIX, ON by default since 2026-07-07).</summary>
         private void DetectSaveRouteReroutes()
         {
+            if (!RouteFix.Enabled)
+            {
+                return; // CS2M_ROUTEFIX=0 disables — see RouteFix doc comment
+            }
+
             if (_updatedSaveRoutes.IsEmptyIgnoreFilter)
             {
                 return;

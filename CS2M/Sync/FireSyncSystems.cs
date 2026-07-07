@@ -522,6 +522,13 @@ namespace CS2M.Sync
         private Game.Simulation.WeatherDamageSystem _weatherDamage;
         private Game.Simulation.WeatherHazardSystem _weatherHazard;
         private Game.Simulation.CondemnedBuildingSystem _condemned;
+        // v60: flood damage/destruction (WaterDamageSystem.Execute, decomp) computes its own m_Depth via
+        // WaterUtils.SampleDepth against THIS PC's local water simulation surface — the same
+        // best-effort, not-lockstep water sim CS2M already patches over with explicit source sync — then
+        // deterministically damages/destroys the building from that depth. Same structural-drift risk as
+        // WeatherDamageSystem right above it (independent per-PC damage/demolition of a shared building),
+        // so it belongs in the same host-authoritative suppression.
+        private Game.Simulation.WaterDamageSystem _waterDamage;
         private bool _suppressed;
 
         protected override void OnCreate()
@@ -533,6 +540,7 @@ namespace CS2M.Sync
             _weatherDamage = World.GetOrCreateSystemManaged<Game.Simulation.WeatherDamageSystem>();
             _weatherHazard = World.GetOrCreateSystemManaged<Game.Simulation.WeatherHazardSystem>();
             _condemned = World.GetOrCreateSystemManaged<Game.Simulation.CondemnedBuildingSystem>();
+            _waterDamage = World.GetOrCreateSystemManaged<Game.Simulation.WaterDamageSystem>();
         }
 
         protected override void OnUpdate()
@@ -558,7 +566,8 @@ namespace CS2M.Sync
             _weatherDamage.Enabled = !wantSuppress;
             _weatherHazard.Enabled = !wantSuppress;
             _condemned.Enabled = !wantSuppress;
-            CS2M.Log.Info($"[Fire] local fire/weather-damage/condemned sim {(wantSuppress ? "SUPPRESSED (host owns them)" : "restored")}");
+            _waterDamage.Enabled = !wantSuppress;
+            CS2M.Log.Info($"[Fire] local fire/weather-damage/condemned/water-damage sim {(wantSuppress ? "SUPPRESSED (host owns them)" : "restored")}");
         }
     }
 }
