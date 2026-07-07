@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Collections.Generic;
+using System.Linq;
 using CS2M.API.Commands;
 using CS2M.API.Networking;
 using CS2M.Commands.Data.Internal;
@@ -46,7 +47,36 @@ namespace CS2M.Commands.Handler.Internal
 
             if (result.Errors == PreconditionsUtil.Errors.NONE)
             {
-                NetworkInterface.Instance.LocalPlayer.SendToClient(peer, new PreconditionsSuccessCommand());
+                // Issue #14: guarantee SyncId-namespace uniqueness. The client's nonce is a random
+                // 24-bit draw seeded from tick count — two processes CAN draw the same one. The host
+                // knows every nonce in the session, so a collision (or a missing nonce from an old
+                // sender) gets a fresh host-assigned replacement shipped back with the success.
+                HashSet<ulong> nonces = NetworkInterface.Instance.SessionNonces;
+                if (nonces.Count == 0)
+                {
+                    nonces.Add(Sync.CS2M_SyncIdSystem.Nonce); // host's own namespace
+                }
+
+                ulong assigned = 0;
+                ulong clientNonce = command.SessionNonce & 0xFFFFFF;
+                if (clientNonce == 0 || nonces.Contains(clientNonce))
+                {
+                    var rng = new System.Random();
+                    do
+                    {
+                        assigned = (ulong)(rng.Next() & 0xFFFFFF);
+                    } while (assigned == 0 || nonces.Contains(assigned));
+
+                    nonces.Add(assigned);
+                    Log.Info($"[Id] NONCE collision for '{command.Username}' ({clientNonce}) — assigned {assigned}");
+                }
+                else
+                {
+                    nonces.Add(clientNonce);
+                }
+
+                NetworkInterface.Instance.LocalPlayer.SendToClient(peer,
+                    new PreconditionsSuccessCommand { AssignedNonce = assigned });
 
                 // Add the new player as a connected player
                 NetworkInterface.Instance.PlayerConnected(new RemotePlayer(peer, command.Username, PlayerType.CLIENT));

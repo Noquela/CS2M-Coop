@@ -52,6 +52,9 @@ namespace CS2M.Sync
         public long BudgetHash;
         public long LoanHash;
         public long TerrainHash;
+        public long SvcDistrictHash;
+        public long VehicleModelHash;
+        public long TileHash;
 
         public StateHashCommand ToCommand()
         {
@@ -79,6 +82,9 @@ namespace CS2M.Sync
                 BudgetHash = BudgetHash,
                 LoanHash = LoanHash,
                 TerrainHash = TerrainHash,
+                SvcDistrictHash = SvcDistrictHash,
+                VehicleModelHash = VehicleModelHash,
+                TileHash = TileHash,
             };
         }
 
@@ -108,6 +114,9 @@ namespace CS2M.Sync
                 BudgetHash = c.BudgetHash,
                 LoanHash = c.LoanHash,
                 TerrainHash = c.TerrainHash,
+                SvcDistrictHash = c.SvcDistrictHash,
+                VehicleModelHash = c.VehicleModelHash,
+                TileHash = c.TileHash,
             };
         }
     }
@@ -201,12 +210,52 @@ namespace CS2M.Sync
             None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
         };
 
+        // v62 issue #7 — the three save-persisted WorldContract domains the radar was blind to.
+        // Same enumerations their detectors poll (ServiceDistrictDetectorSystem / VehicleModelDetectorSystem
+        // / TileDetectorSystem), so radar and sync agree on what exists.
+        public static EntityQueryDesc SvcDistrictDesc() => new EntityQueryDesc
+        {
+            All = new[]
+            {
+                ComponentType.ReadOnly<Game.Areas.ServiceDistrict>(),
+                ComponentType.ReadOnly<Game.Buildings.Building>(),
+                ComponentType.ReadOnly<Game.Objects.Transform>(),
+            },
+            None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+        };
+
+        public static EntityQueryDesc VehicleModelDesc() => new EntityQueryDesc
+        {
+            All = new[]
+            {
+                ComponentType.ReadOnly<Game.Routes.Route>(),
+                ComponentType.ReadOnly<Game.Routes.RouteNumber>(),
+                ComponentType.ReadOnly<Game.Routes.VehicleModel>(),
+            },
+            None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+        };
+
+        public static EntityQueryDesc OwnedTileDesc() => new EntityQueryDesc
+        {
+            All = new[]
+            {
+                ComponentType.ReadOnly<Game.Areas.MapTile>(),
+                ComponentType.ReadOnly<Game.Areas.Geometry>(),
+            },
+            None = new[]
+            {
+                ComponentType.ReadOnly<Game.Common.Native>(), // owned = Native removed (MapTilePurchaseSystem.UnlockTile)
+                ComponentType.ReadOnly<Deleted>(),
+            },
+        };
+
         public static HashBundle Compute(EntityManager em, EntityQuery edges, EntityQuery nodes,
             EntityQuery buildings, EntityQuery blocks, EntityQuery areas, EntityQuery districts,
             EntityQuery water, EntityQuery routes, Game.Simulation.CitySystem city,
             Game.Simulation.TaxSystem tax, Game.Prefabs.PrefabSystem prefabs,
             Game.Simulation.CityServiceBudgetSystem budget, EntityQuery services,
-            Game.Simulation.TerrainSystem terrain)
+            Game.Simulation.TerrainSystem terrain, EntityQuery svcDistricts,
+            EntityQuery vmRoutes, EntityQuery ownedTiles)
         {
             // O hash de zonas folda o NOME via ZoneSync — o registro tem que existir antes do primeiro
             // sample nos DOIS lados (senão NameHash=0 pra tudo). Idempotente, custo zero após a 1ª vez.
@@ -229,7 +278,119 @@ namespace CS2M.Sync
             b.BudgetHash = AccBudgets(em, budget, services, prefabs);
             b.LoanHash = AccLoan(em, city);
             b.TerrainHash = AccTerrain(terrain);
+            b.SvcDistrictHash = AccServiceDistricts(em, svcDistricts, prefabs);
+            b.VehicleModelHash = AccVehicleModels(em, vmRoutes, prefabs);
+            b.TileHash = AccOwnedTiles(em, ownedTiles);
             return b;
+        }
+
+        // v62 issue #7: which districts serve each service building. Folded per building position
+        // (commutative sum) with each district's prefab name (StableHash — never string.GetHashCode,
+        // which is per-process) + centroid, XOR'd (a SET, order-free) — the same identity
+        // ServiceDistrictCommand ships and DistrictResolver resolves.
+        private static long AccServiceDistricts(EntityManager em, EntityQuery q,
+            Game.Prefabs.PrefabSystem prefabs)
+        {
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            long acc = 0;
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!em.HasBuffer<Game.Areas.ServiceDistrict>(e))
+                    {
+                        continue;
+                    }
+
+                    var buf = em.GetBuffer<Game.Areas.ServiceDistrict>(e, true);
+                    long set = buf.Length;
+                    for (int i = 0; i < buf.Length; i++)
+                    {
+                        if (!DistrictResolver.TryDescribe(em, prefabs, buf[i].m_District,
+                                out string prefabName, out float cx, out float cz))
+                        {
+                            continue; // mid-teardown entry — both sides skip it the same way
+                        }
+
+                        long eh = StableHash(prefabName);
+                        eh = Mix(eh, (long) math.round(cx));
+                        eh = Mix(eh, (long) math.round(cz));
+                        set ^= eh; // order-free set fold
+                    }
+
+                    float3 p = em.GetComponentData<Game.Objects.Transform>(e).m_Position;
+                    acc = unchecked(acc + Mix(Pt(p), set));
+                }
+            }
+            finally { ents.Dispose(); }
+
+            return acc;
+        }
+
+        // v62 issue #7: each line's allowed-vehicle-model buffer, folded per RouteNumber with the
+        // model prefab NAMES in slot order (order matters — primary/secondary pairs per index).
+        // VehicleModelSync's own hash folds prefab Entity indices (per-boot) and is deliberately
+        // NOT reused here.
+        private static long AccVehicleModels(EntityManager em, EntityQuery q,
+            Game.Prefabs.PrefabSystem prefabs)
+        {
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            long acc = 0;
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!em.HasBuffer<Game.Routes.VehicleModel>(e))
+                    {
+                        continue;
+                    }
+
+                    var buf = em.GetBuffer<Game.Routes.VehicleModel>(e, true);
+                    long fold = buf.Length;
+                    for (int i = 0; i < buf.Length; i++)
+                    {
+                        fold = Mix(fold, NameOf(em, prefabs, buf[i].m_PrimaryPrefab));
+                        fold = Mix(fold, NameOf(em, prefabs, buf[i].m_SecondaryPrefab));
+                    }
+
+                    int number = em.GetComponentData<Game.Routes.RouteNumber>(e).m_Number;
+                    acc = unchecked(acc + Mix(number, fold));
+                }
+            }
+            finally { ents.Dispose(); }
+
+            return acc;
+
+            long NameOf(EntityManager m, Game.Prefabs.PrefabSystem ps, Entity prefabEntity)
+            {
+                if (prefabEntity == Entity.Null)
+                {
+                    return 0;
+                }
+
+                return ps.TryGetPrefab(prefabEntity, out Game.Prefabs.PrefabBase pb) && pb != null
+                    ? StableHash(pb.name)
+                    : 0;
+            }
+        }
+
+        // v62 issue #7: owned map tiles, folded by geometry center — the tile grid is fixed per map,
+        // so centers are bit-comparable across machines.
+        private static long AccOwnedTiles(EntityManager em, EntityQuery q)
+        {
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            long acc = 0;
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    float3 c = em.GetComponentData<Game.Areas.Geometry>(e).m_CenterPosition;
+                    acc = unchecked(acc + Mix((long) math.round(c.x), (long) math.round(c.z)));
+                }
+            }
+            finally { ents.Dispose(); }
+
+            return acc;
         }
 
         // Coarse heightmap fingerprint: 32×32 samples over the terrain bounds, quantized to 2 m.
@@ -957,7 +1118,7 @@ namespace CS2M.Sync
         private const int SendEveryNFrames = 600;
 
         private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water, _routes,
-            _services;
+            _services, _svcDistricts, _vmRoutes, _ownedTiles;
         private Game.Simulation.CitySystem _city;
         private Game.Simulation.TaxSystem _tax;
         private Game.Prefabs.PrefabSystem _prefabs;
@@ -977,6 +1138,9 @@ namespace CS2M.Sync
             _water = GetEntityQuery(StateHash.WaterDesc());
             _routes = GetEntityQuery(StateHash.RouteDesc());
             _services = GetEntityQuery(StateHash.ServiceDesc());
+            _svcDistricts = GetEntityQuery(StateHash.SvcDistrictDesc());
+            _vmRoutes = GetEntityQuery(StateHash.VehicleModelDesc());
+            _ownedTiles = GetEntityQuery(StateHash.OwnedTileDesc());
             _city = World.GetOrCreateSystemManaged<Game.Simulation.CitySystem>();
             _tax = World.GetOrCreateSystemManaged<Game.Simulation.TaxSystem>();
             _prefabs = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
@@ -1001,7 +1165,7 @@ namespace CS2M.Sync
 
             _frame = 0;
             HashBundle b = StateHash.Compute(EntityManager, _edges, _nodes, _buildings, _blocks,
-                _areas, _districts, _water, _routes, _city, _tax, _prefabs, _budget, _services, _terrain);
+                _areas, _districts, _water, _routes, _city, _tax, _prefabs, _budget, _services, _terrain, _svcDistricts, _vmRoutes, _ownedTiles);
             Command.SendToAll?.Invoke(b.ToCommand());
 
             if (StateHash.NodeDumpOn)
@@ -1025,7 +1189,7 @@ namespace CS2M.Sync
     public partial class StateHashApplySystem : GameSystemBase
     {
         private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water, _routes,
-            _services;
+            _services, _svcDistricts, _vmRoutes, _ownedTiles;
         private Game.Simulation.CitySystem _city;
         private Game.Simulation.TaxSystem _tax;
         private Game.Prefabs.PrefabSystem _prefabs;
@@ -1059,6 +1223,9 @@ namespace CS2M.Sync
             _water = GetEntityQuery(StateHash.WaterDesc());
             _routes = GetEntityQuery(StateHash.RouteDesc());
             _services = GetEntityQuery(StateHash.ServiceDesc());
+            _svcDistricts = GetEntityQuery(StateHash.SvcDistrictDesc());
+            _vmRoutes = GetEntityQuery(StateHash.VehicleModelDesc());
+            _ownedTiles = GetEntityQuery(StateHash.OwnedTileDesc());
             _city = World.GetOrCreateSystemManaged<Game.Simulation.CitySystem>();
             _tax = World.GetOrCreateSystemManaged<Game.Simulation.TaxSystem>();
             _prefabs = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
@@ -1082,7 +1249,7 @@ namespace CS2M.Sync
             }
 
             HashBundle local = StateHash.Compute(EntityManager, _edges, _nodes, _buildings, _blocks,
-                _areas, _districts, _water, _routes, _city, _tax, _prefabs, _budget, _services, _terrain);
+                _areas, _districts, _water, _routes, _city, _tax, _prefabs, _budget, _services, _terrain, _svcDistricts, _vmRoutes, _ownedTiles);
             HashBundle host = HashBundle.FromCommand(cmd);
 
             if (_haveLast)
@@ -1103,6 +1270,10 @@ namespace CS2M.Sync
                 Check(drifts, "synced", local.SyncedObjects, host.SyncedObjects, _lastLocal.SyncedObjects, _lastHost.SyncedObjects, local.SyncedObjects, host.SyncedObjects);
                 Check(drifts, "districts", local.Districts, host.Districts, _lastLocal.Districts, _lastHost.Districts, local.Districts, host.Districts);
                 Check(drifts, "water", local.WaterHash, host.WaterHash, _lastLocal.WaterHash, _lastHost.WaterHash, local.WaterSources, host.WaterSources);
+                // v62 issue #7: the three save-persisted WorldContract domains the radar was blind to.
+                Check(drifts, "svcdistrict", local.SvcDistrictHash, host.SvcDistrictHash, _lastLocal.SvcDistrictHash, _lastHost.SvcDistrictHash, -1, -1);
+                Check(drifts, "vehiclemodel", local.VehicleModelHash, host.VehicleModelHash, _lastLocal.VehicleModelHash, _lastHost.VehicleModelHash, -1, -1);
+                Check(drifts, "tiles", local.TileHash, host.TileHash, _lastLocal.TileHash, _lastHost.TileHash, -1, -1);
 
                 // v56: cell-FLAG divergence (overlap visibility) is deliberately invisible to the zones
                 // hash, so it never enters `drifts` — dump blocks EVERY sample under NODEDUMP (like the

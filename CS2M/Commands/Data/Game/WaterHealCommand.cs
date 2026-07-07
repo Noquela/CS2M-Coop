@@ -18,5 +18,10 @@ namespace CS2M.Commands.Data.Game
         public float[] Multiplier { get; set; }
         public float[] Polluted { get; set; }
         public int[] ConstantDepth { get; set; }
+
+        /// <summary>v62 (issue #9): per-source cross-PC identity (0 = save-loaded source). Lets the
+        /// client reconcile by ID with the SAME identity rules as WaterApplySystem (10 m fallback)
+        /// instead of the old 2 m-only proximity match that could duplicate a drifted source.</summary>
+        public ulong[] SyncIds { get; set; }
     }
 }

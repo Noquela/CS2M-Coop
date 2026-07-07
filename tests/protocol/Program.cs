@@ -110,6 +110,7 @@ namespace CS2MTests
         public float[] Multiplier { get; set; }
         public float[] Polluted { get; set; }
         public int[] ConstantDepth { get; set; }
+        public ulong[] SyncIds { get; set; } // v62 issue #9
     }
 
     public class TerrainPatchCommand : CommandBase
@@ -351,7 +352,12 @@ namespace CS2MTests
         public float Multiplier { get; set; }
         public float Polluted { get; set; }
         public int ConstantDepth { get; set; }
+        public ulong SyncId { get; set; } // v62 issue #8
         public bool Delete { get; set; }
+        public bool Move { get; set; }
+        public bool Edit { get; set; }
+        public float OldX { get; set; }
+        public float OldZ { get; set; }
     }
 
     public class TerrainCommand : CommandBase
@@ -509,7 +515,8 @@ namespace CS2MTests
             RoundTrip(opts, new PolicyCommand { PolicyType = "PolicyPrefab", PolicyName = "Taxi Starting Fee", Active = true, Adjustment = 27.5f }, c => c.PolicyName == "Taxi Starting Fee" && c.Active && Math.Abs(c.Adjustment - 27.5f) < 0.01f);
             RoundTrip(opts, new DistrictCommand { PrefabType = "DistrictPrefab", PrefabName = "District Area", OptionMask = 5u, Xs = new[] { -60f, 60f, 60f, -60f, -60f }, Ys = new[] { 477f, 477f, 477f, 477f, 477f }, Zs = new[] { -60f, -60f, 60f, 60f, -60f } }, c => c.PrefabName == "District Area" && c.OptionMask == 5u && c.Xs.Length == 5 && c.Zs[2] == 60f);
             RoundTrip(opts, new WaterCommand { PosX = -307f, PosY = 5f, PosZ = -3124f, Radius = 20f, Height = 5f, Multiplier = 1f, Polluted = 0f, ConstantDepth = 0 }, c => Math.Abs(c.PosX - (-307f)) < 0.01f && c.Radius == 20f && !c.Delete);
-            RoundTrip(opts, new WaterCommand { PosX = 10f, PosZ = 20f, Delete = true }, c => c.Delete && c.PosZ == 20f);
+            RoundTrip(opts, new WaterCommand { PosX = 10f, PosZ = 20f, Delete = true, SyncId = 0x123456789ABUL }, c => c.Delete && c.PosZ == 20f && c.SyncId == 0x123456789ABUL);
+            RoundTrip(opts, new WaterCommand { Move = true, SyncId = 42UL, OldX = 5f, OldZ = 6f, PosX = 15f, PosZ = 16f }, c => c.Move && c.SyncId == 42UL && c.OldZ == 6f);
             RoundTrip(opts, new TerrainCommand { Type = 0, PosX = -187f, PosY = 477f, PosZ = -3004f, Size = 40f, Strength = 100000f }, c => c.Type == 0 && c.Size == 40f && c.Strength == 100000f);
             RoundTrip(opts, new SpeedCommand { Speed = 3f }, c => c.Speed == 3f);
             RoundTrip(opts, new ResyncCommand(), c => true);
@@ -520,7 +527,7 @@ namespace CS2MTests
             // --- v60 auto-heal commands (ushort[] payload is the novel wire type — prove it) ---
             RoundTrip(opts, new HealRequestCommand { Domain = "terrain", TerrainHeights = new[] { 477.5f, 480f, 0f } }, c => c.Domain == "terrain" && c.TerrainHeights.Length == 3 && Math.Abs(c.TerrainHeights[0] - 477.5f) < 0.01f);
             RoundTrip(opts, new HealRequestCommand { Domain = "water" }, c => c.Domain == "water" && c.TerrainHeights == null);
-            RoundTrip(opts, new WaterHealCommand { PosX = new[] { 1f, 2f }, PosY = new[] { 5f, 6f }, PosZ = new[] { 9f, 10f }, Radius = new[] { 20f, 30f }, Height = new[] { 5f, 6f }, Multiplier = new[] { 1f, 0.5f }, Polluted = new[] { 0f, 0.1f }, ConstantDepth = new[] { 0, 1 } }, c => c.PosX.Length == 2 && c.Radius[1] == 30f && c.ConstantDepth[1] == 1);
+            RoundTrip(opts, new WaterHealCommand { PosX = new[] { 1f, 2f }, PosY = new[] { 5f, 6f }, PosZ = new[] { 9f, 10f }, Radius = new[] { 20f, 30f }, Height = new[] { 5f, 6f }, Multiplier = new[] { 1f, 0.5f }, Polluted = new[] { 0f, 0.1f }, ConstantDepth = new[] { 0, 1 }, SyncIds = new[] { 0UL, 0xFFFFFF0000000001UL } }, c => c.PosX.Length == 2 && c.Radius[1] == 30f && c.ConstantDepth[1] == 1 && c.SyncIds[1] == 0xFFFFFF0000000001UL);
             RoundTrip(opts, new TerrainPatchCommand { X = 2048, Y = 1024, W = 3, H = 2, Data = new ushort[] { 0, 1, 32767, 65535, 42, 7 } }, c => c.X == 2048 && c.W == 3 && c.Data.Length == 6 && c.Data[2] == 32767 && c.Data[3] == 65535);
 
             // --- v50 commands ---

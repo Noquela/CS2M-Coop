@@ -67,5 +67,18 @@ namespace CS2M.Commands.Data.Game
         // best-effort by design, so the quantum is deliberately coarse: sub-2 m residue stays quiet,
         // a mountain that never crossed over lights the /resync alert.
         public long TerrainHash { get; set; }
+
+        // v62 (issue #7): which districts serve each service building — folded per building position
+        // with district prefab name + centroid (the same identity ServiceDistrictCommand ships).
+        public long SvcDistrictHash { get; set; }
+
+        // v62 (issue #7): each line's allowed-vehicle-model buffer — folded per RouteNumber with the
+        // model prefab NAMES (never the prefab Entity — per-boot). Persisted in the save, so a missed
+        // VehicleModelCommand used to diverge across reloads with the radar green.
+        public long VehicleModelHash { get; set; }
+
+        // v62 (issue #7): owned map tiles — folded by tile center (fixed per-map grid). A missed
+        // TilePurchaseCommand let one PC build where the other still had a locked tile.
+        public long TileHash { get; set; }
     }
 }

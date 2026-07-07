@@ -194,6 +194,7 @@ namespace CS2M.Networking
                 GameVersion = VersionUtil.GetGameVersion(),
                 Mods = ModSupport.Instance.RequiredModsForSync,
                 DlcIds = DlcCompat.RequiredDLCsForSync,
+                SessionNonce = Sync.CS2M_SyncIdSystem.Nonce, // issue #14: host de-collides id namespaces
             });
 
             PlayerStatus = PlayerStatus.CONNECTION_ESTABLISHED;
@@ -407,6 +408,11 @@ namespace CS2M.Networking
             // Issue #3: the NetworkInterface singleton (and its player lists) outlives the session —
             // drop every remote entry so a future session doesn't inherit ghost players.
             NetworkInterface.Instance.ResetPlayerLists();
+
+            // Issue #15: abort any world transfer still streaming slices, and drop a half-received
+            // download so the next session can't append onto a stale stream.
+            NetworkInterface.CancelWorldTransfers();
+            _packetStream = null;
 
             _networkManager?.Stop();
 

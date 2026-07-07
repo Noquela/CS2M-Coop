@@ -82,8 +82,10 @@ namespace CS2M.Sync
             EntityManager.AddComponent<CS2M_RemotePlaced>(e);
             EntityManager.AddComponent<Created>(e);
             EntityManager.AddComponent<Updated>(e);
+            // Issue #8: stamp the sender's cross-PC id so later move/edit/delete resolve exactly.
+            CS2M_SyncIdSystem.Register(EntityManager, e, cmd.SyncId);
 
-            CS2M.Log.Info($"[Water] APPLIED pos=({cmd.PosX:F0},{cmd.PosZ:F0}) yLocal={y:F1} (sender {cmd.PosY:F1}) r={cmd.Radius} entity={e.Index}");
+            CS2M.Log.Info($"[Water] APPLIED pos=({cmd.PosX:F0},{cmd.PosZ:F0}) yLocal={y:F1} (sender {cmd.PosY:F1}) r={cmd.Radius} entity={e.Index} id={cmd.SyncId}");
         }
 
         /// <summary>Repositions the nearest source (any origin) within ~10 m of the OLD address to the new
@@ -91,7 +93,7 @@ namespace CS2M.Sync
         /// move back (the moved source is a plain entity with no CS2M_RemotePlaced tag to exclude it).</summary>
         private void ApplyMove(WaterCommand cmd)
         {
-            Entity best = FindNearestSource(cmd.OldX, cmd.OldZ, out _);
+            Entity best = ResolveSource(cmd.SyncId, cmd.OldX, cmd.OldZ);
             if (best == Entity.Null)
             {
                 CS2M.Log.Info($"[Water] SKIP move noMatch old=({cmd.OldX:F0},{cmd.OldZ:F0})");
@@ -127,7 +129,7 @@ namespace CS2M.Sync
         /// our detector doesn't bounce the edit back.</summary>
         private void ApplyEdit(WaterCommand cmd)
         {
-            Entity best = FindNearestSource(cmd.PosX, cmd.PosZ, out _);
+            Entity best = ResolveSource(cmd.SyncId, cmd.PosX, cmd.PosZ);
             if (best == Entity.Null)
             {
                 CS2M.Log.Info($"[Water] SKIP edit noMatch pos=({cmd.PosX:F0},{cmd.PosZ:F0})");
@@ -151,6 +153,23 @@ namespace CS2M.Sync
             WaterSync.MarkRemoteEdit(pos); // detector must not bounce this param change back
             CS2M.Log.Info($"[Water] APPLIED edit pos=({cmd.PosX:F0},{cmd.PosZ:F0}) r={cmd.Radius:F1} " +
                           $"h={cmd.Height:F1} m={cmd.Multiplier:F2} entity={best.Index}");
+        }
+
+        /// <summary>Issue #8: single identity rule for every water op — SyncId first (exact), then the
+        /// legacy nearest-within-10 m fallback for save-loaded sources (or a post-transfer world where
+        /// the id tag didn't survive the save).</summary>
+        private Entity ResolveSource(ulong syncId, float x, float z)
+        {
+            if (syncId != 0
+                && CS2M_SyncIdSystem.Map.TryGetValue(syncId, out Entity byId)
+                && EntityManager.Exists(byId)
+                && !EntityManager.HasComponent<Deleted>(byId)
+                && EntityManager.HasComponent<WaterSourceData>(byId))
+            {
+                return byId;
+            }
+
+            return FindNearestSource(x, z, out _);
         }
 
         /// <summary>Nearest live water source within ~10 m² of (x,z).</summary>
@@ -187,37 +206,10 @@ namespace CS2M.Sync
             return best;
         }
 
-        /// <summary>Removes the nearest water source (any origin) within ~10 m of the address.</summary>
+        /// <summary>Removes the addressed source (SyncId first, else nearest within ~10 m).</summary>
         private void ApplyDelete(WaterCommand cmd)
         {
-            EntityQuery sources = GetEntityQuery(new EntityQueryDesc
-            {
-                All = new[] { ComponentType.ReadOnly<WaterSourceData>(), ComponentType.ReadOnly<Transform>() },
-                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
-            });
-
-            Entity best = Entity.Null;
-            float bestD = 100f; // 10 m²
-            NativeArray<Entity> ents = sources.ToEntityArray(Allocator.Temp);
-            try
-            {
-                foreach (Entity cand in ents)
-                {
-                    float3 p = EntityManager.GetComponentData<Transform>(cand).m_Position;
-                    float dx = p.x - cmd.PosX, dz = p.z - cmd.PosZ;
-                    float d = dx * dx + dz * dz;
-                    if (d < bestD)
-                    {
-                        bestD = d;
-                        best = cand;
-                    }
-                }
-            }
-            finally
-            {
-                ents.Dispose();
-            }
-
+            Entity best = ResolveSource(cmd.SyncId, cmd.PosX, cmd.PosZ);
             if (best == Entity.Null)
             {
                 CS2M.Log.Info($"[Water] SKIP delete noMatch pos=({cmd.PosX:F0},{cmd.PosZ:F0})");

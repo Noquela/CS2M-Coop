@@ -38,6 +38,9 @@ namespace CS2M.Sync
             public float3 Pos;
             public float Radius, Height, Multiplier, Polluted;
             public int ConstantDepth;
+            // Issue #8: cross-PC identity shipped with every move/edit/delete (0 = save source).
+            // Cached here so a VANISHED source can still be addressed by id after the entity is gone.
+            public ulong SyncId;
         }
 
         // In-flight local edit being debounced: last observed params + how many frames they held still.
@@ -59,12 +62,21 @@ namespace CS2M.Sync
         private readonly Dictionary<Entity, Pending> _pending = new Dictionary<Entity, Pending>();
         private bool _baselineDone;
 
-        private static Known Snap(float3 pos, WaterSourceData w) => new Known
+        private static Known Snap(float3 pos, WaterSourceData w, ulong syncId) => new Known
         {
             Pos = pos,
             Radius = w.m_Radius, Height = w.m_Height, Multiplier = w.m_Multiplier,
             Polluted = w.m_Polluted, ConstantDepth = w.m_ConstantDepth,
+            SyncId = syncId,
         };
+
+        /// <summary>The entity's cross-PC id, or 0 for a save-loaded source.</summary>
+        private ulong IdOf(Entity e)
+        {
+            return EntityManager.HasComponent<CS2M_SyncId>(e)
+                ? EntityManager.GetComponentData<CS2M_SyncId>(e).m_Id
+                : 0UL;
+        }
 
         private static bool ParamsDiffer(Known k, WaterSourceData w)
         {
@@ -104,7 +116,7 @@ namespace CS2M.Sync
                     foreach (Entity e in ents)
                     {
                         _seen[e] = Snap(EntityManager.GetComponentData<Transform>(e).m_Position,
-                            EntityManager.GetComponentData<WaterSourceData>(e));
+                            EntityManager.GetComponentData<WaterSourceData>(e), IdOf(e));
                     }
 
                     _baselineDone = true;
@@ -135,6 +147,7 @@ namespace CS2M.Sync
                             Command.SendToAll?.Invoke(new WaterCommand
                             {
                                 Move = true,
+                                SyncId = last.SyncId,
                                 OldX = last.Pos.x, OldZ = last.Pos.z,
                                 PosX = pos.x, PosY = pos.y, PosZ = pos.z,
                                 Radius = wm.m_Radius, Height = wm.m_Height, Multiplier = wm.m_Multiplier,
@@ -165,7 +178,7 @@ namespace CS2M.Sync
                                 }
 
                                 _pending.Remove(e);
-                                _seen[e] = Snap(pos, wm); // remotes get (or already have) these params
+                                _seen[e] = Snap(pos, wm, last.SyncId); // remotes get (or already have) these params
                                 if (WaterSync.ConsumeRemoteEdit(pos, 4f))
                                 {
                                     continue; // this edit came FROM the network — adopt, don't echo
@@ -174,6 +187,7 @@ namespace CS2M.Sync
                                 Command.SendToAll?.Invoke(new WaterCommand
                                 {
                                     Edit = true,
+                                    SyncId = last.SyncId,
                                     PosX = pos.x, PosY = pos.y, PosZ = pos.z,
                                     Radius = wm.m_Radius, Height = wm.m_Height, Multiplier = wm.m_Multiplier,
                                     Polluted = wm.m_Polluted, ConstantDepth = wm.m_ConstantDepth,
@@ -204,19 +218,25 @@ namespace CS2M.Sync
                     // a fresh LOCAL creation (it already exists on every other PC).
                     if (EntityManager.HasComponent<CS2M_RemotePlaced>(e))
                     {
-                        _seen[e] = Snap(pos, EntityManager.GetComponentData<WaterSourceData>(e));
+                        // Issue #8: the remote apply already registered the sender's id — adopt it.
+                        _seen[e] = Snap(pos, EntityManager.GetComponentData<WaterSourceData>(e), IdOf(e));
                         continue;
                     }
 
                     WaterSourceData w = EntityManager.GetComponentData<WaterSourceData>(e);
-                    _seen[e] = Snap(pos, w);
+                    // Issue #8: mint the cross-PC identity at creation — every later move/edit/delete
+                    // names the source directly instead of guessing by proximity.
+                    ulong syncId = CS2M_SyncIdSystem.Allocate();
+                    CS2M_SyncIdSystem.Register(EntityManager, e, syncId);
+                    _seen[e] = Snap(pos, w, syncId);
                     Command.SendToAll?.Invoke(new WaterCommand
                     {
+                        SyncId = syncId,
                         PosX = pos.x, PosY = pos.y, PosZ = pos.z,
                         Radius = w.m_Radius, Height = w.m_Height, Multiplier = w.m_Multiplier,
                         Polluted = w.m_Polluted, ConstantDepth = w.m_ConstantDepth,
                     });
-                    CS2M.Log.Info($"[Water] DETECT+SEND pos=({pos.x:F0},{pos.z:F0}) r={w.m_Radius}");
+                    CS2M.Log.Info($"[Water] DETECT+SEND pos=({pos.x:F0},{pos.z:F0}) r={w.m_Radius} id={syncId}");
                 }
             }
             finally
@@ -244,6 +264,7 @@ namespace CS2M.Sync
             foreach (Entity e in gone)
             {
                 float3 pos = _seen[e].Pos;
+                ulong goneId = _seen[e].SyncId;
                 _seen.Remove(e);
                 _pending.Remove(e);
                 if (WaterSync.ConsumeRemoteDelete(e))
@@ -253,6 +274,7 @@ namespace CS2M.Sync
 
                 Command.SendToAll?.Invoke(new WaterCommand
                 {
+                    SyncId = goneId,
                     PosX = pos.x, PosY = pos.y, PosZ = pos.z,
                     Delete = true,
                 });

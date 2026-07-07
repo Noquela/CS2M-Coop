@@ -24,6 +24,12 @@ namespace CS2M.Commands.Data.Game
         /// <summary>v50: true = remove the source nearest to (PosX, PosZ) instead of creating.</summary>
         public bool Delete { get; set; }
 
+        /// <summary>v62 (issue #8): cross-PC identity of the source. On a CREATE the sender allocates
+        /// it (CS2M_SyncIdSystem.Allocate) and every receiver stamps the same id; on MOVE/EDIT/DELETE
+        /// it names the target directly. 0 = save-loaded source (or a pre-transfer world where the tag
+        /// didn't survive the save) → the receiver falls back to nearest-within-10 m, as before.</summary>
+        public ulong SyncId { get; set; }
+
         /// <summary>v55: true = MOVE the source nearest to (OldX, OldZ) to (PosX, PosZ) in place — a
         /// relocation keeps the same entity, so the create/delete detectors never fired and the source
         /// stayed at the old spot (still simulating) on every remote.</summary>

@@ -21,8 +21,30 @@ namespace CS2M.Sync
         public static readonly Dictionary<ulong, Entity> Map = new Dictionary<ulong, Entity>();
 
         // 24-bit random per-process nonce in the high bits + a 40-bit local counter.
-        private static readonly ulong SessionNonce = (ulong) (new System.Random().Next() & 0xFFFFFF);
+        // Issue #14: the random draw alone is only PROBABLY unique (System.Random seeds from tick
+        // count — two processes with equal uptime-ms draw the SAME nonce). The join handshake now
+        // makes it certain: the client ships its nonce in PreconditionsCheckCommand and the host
+        // assigns a fresh one (OverrideNonce) if it collides with any nonce already in the session.
+        private static ulong SessionNonce = (ulong) (new System.Random().Next() & 0xFFFFFF);
         private static ulong _counter;
+
+        /// <summary>This process's id-namespace nonce (shipped in the join handshake).</summary>
+        public static ulong Nonce => SessionNonce;
+
+        /// <summary>Adopt the host-assigned nonce (issue #14). Called at join time, before any local
+        /// allocation happens in the new session — already-allocated ids keep their old prefix, which
+        /// is safe: the override only steers FUTURE allocations away from the collision.</summary>
+        public static void OverrideNonce(ulong nonce)
+        {
+            nonce &= 0xFFFFFF;
+            if (nonce == 0 || nonce == SessionNonce)
+            {
+                return;
+            }
+
+            CS2M.Log.Info($"[Id] NONCE override {SessionNonce} -> {nonce} (host-assigned, collision avoided)");
+            SessionNonce = nonce;
+        }
 
         private EntityQuery _query;
 

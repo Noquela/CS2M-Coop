@@ -286,6 +286,7 @@ namespace CS2M.Sync
                     PosX = new float[n], PosY = new float[n], PosZ = new float[n],
                     Radius = new float[n], Height = new float[n], Multiplier = new float[n],
                     Polluted = new float[n], ConstantDepth = new int[n],
+                    SyncIds = new ulong[n],
                 };
                 for (int i = 0; i < n; i++)
                 {
@@ -295,6 +296,10 @@ namespace CS2M.Sync
                     cmd.Radius[i] = w.m_Radius; cmd.Height[i] = w.m_Height;
                     cmd.Multiplier[i] = w.m_Multiplier; cmd.Polluted[i] = w.m_Polluted;
                     cmd.ConstantDepth[i] = w.m_ConstantDepth;
+                    // Issue #9: ship the cross-PC identity so the client reconciles by ID (0 = save source).
+                    cmd.SyncIds[i] = EntityManager.HasComponent<CS2M_SyncId>(ents[i])
+                        ? EntityManager.GetComponentData<CS2M_SyncId>(ents[i]).m_Id
+                        : 0UL;
                 }
 
                 Command.SendToAll?.Invoke(cmd);
@@ -564,25 +569,75 @@ namespace CS2M.Sync
                 var matched = new bool[ents.Length];
                 int created = 0, edited = 0, deleted = 0;
 
+                // Issue #9: index by entity so the SyncId fast-path can mark matches in O(1).
+                var indexOf = new Dictionary<Entity, int>(ents.Length);
+                for (int e = 0; e < ents.Length; e++)
+                {
+                    indexOf[ents[e]] = e;
+                }
+
                 for (int i = 0; i < n; i++)
                 {
-                    // Nearest unmatched local source within 2 m of the authoritative one.
                     int best = -1;
-                    float bestD = 4f; // 2 m²
-                    for (int e = 0; e < ents.Length; e++)
-                    {
-                        if (matched[e]) { continue; }
 
-                        float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(ents[e]).m_Position;
-                        float dx = p.x - cmd.PosX[i], dz = p.z - cmd.PosZ[i];
-                        float d = dx * dx + dz * dz;
-                        if (d < bestD) { bestD = d; best = e; }
+                    // Issue #9: identity FIRST — the same rule as WaterApplySystem.ResolveSource. The
+                    // old 2 m-only proximity match declared a drifted source "missing" and recreated it
+                    // as a duplicate while the normal apply kept editing the original (heal loop).
+                    ulong syncId = cmd.SyncIds != null && i < cmd.SyncIds.Length ? cmd.SyncIds[i] : 0UL;
+                    if (syncId != 0
+                        && CS2M_SyncIdSystem.Map.TryGetValue(syncId, out Entity byId)
+                        && indexOf.TryGetValue(byId, out int byIdIdx)
+                        && !matched[byIdIdx])
+                    {
+                        best = byIdIdx;
+                    }
+
+                    if (best < 0)
+                    {
+                        // Fallback: nearest unmatched local source within 10 m — the SAME radius the
+                        // normal apply uses, so the two layers share one notion of identity.
+                        float bestD = 100f; // 10 m²
+                        for (int e = 0; e < ents.Length; e++)
+                        {
+                            if (matched[e]) { continue; }
+
+                            float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(ents[e]).m_Position;
+                            float dx = p.x - cmd.PosX[i], dz = p.z - cmd.PosZ[i];
+                            float d = dx * dx + dz * dz;
+                            if (d < bestD) { bestD = d; best = e; }
+                        }
                     }
 
                     if (best >= 0)
                     {
                         matched[best] = true;
                         Entity ent = ents[best];
+
+                        // Matched by ID with a drifted position (>2 m): snap to the authoritative XZ
+                        // (Y re-anchored locally), echo-guarded like a normal remote move. The old
+                        // 2 m-proximity match could never see this case; the ID match can.
+                        float3 curPos = EntityManager.GetComponentData<Game.Objects.Transform>(ent).m_Position;
+                        float pdx = curPos.x - cmd.PosX[i], pdz = curPos.z - cmd.PosZ[i];
+                        if (pdx * pdx + pdz * pdz > 4f)
+                        {
+                            float ny = cmd.PosY[i];
+                            try
+                            {
+                                TerrainHeightData phd = _terrain.GetHeightData(true);
+                                ny = TerrainUtils.SampleHeight(ref phd,
+                                    new float3(cmd.PosX[i], cmd.PosY[i], cmd.PosZ[i]));
+                            }
+                            catch
+                            {
+                                // heightmap unavailable — host Y is a sane fallback
+                            }
+
+                            var authPos = new float3(cmd.PosX[i], ny, cmd.PosZ[i]);
+                            EntityManager.SetComponentData(ent, new Game.Objects.Transform(authPos, quaternion.identity));
+                            WaterSync.MarkRemoteMove(authPos);
+                            edited++;
+                        }
+
                         WaterSourceData w = EntityManager.GetComponentData<WaterSourceData>(ent);
                         if (math.abs(w.m_Radius - cmd.Radius[i]) > 1e-3f
                             || math.abs(w.m_Height - cmd.Height[i]) > 1e-3f
@@ -634,6 +689,12 @@ namespace CS2M.Sync
                     EntityManager.AddComponent<CS2M_RemotePlaced>(ne);
                     EntityManager.AddComponent<Created>(ne);
                     EntityManager.AddComponent<Updated>(ne);
+                    // Issue #9: healed-in sources keep their cross-PC identity too.
+                    if (cmd.SyncIds != null && i < cmd.SyncIds.Length)
+                    {
+                        CS2M_SyncIdSystem.Register(EntityManager, ne, cmd.SyncIds[i]);
+                    }
+
                     created++;
                 }
 

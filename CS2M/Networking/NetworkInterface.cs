@@ -38,6 +38,13 @@ namespace CS2M.Networking
         /// </summary>
         public List<Player> PlayerListJoined = new();
 
+        /// <summary>
+        ///     Issue #14 (host side): every SyncId-namespace nonce already in the session (the host's
+        ///     own + each admitted client's). PreconditionsCheckHandler assigns a fresh nonce to a
+        ///     joining client whose draw collides. Reset with the player lists.
+        /// </summary>
+        public readonly HashSet<ulong> SessionNonces = new();
+
         public NetworkInterface()
         {
             PlayerListConnected.Add(LocalPlayer);
@@ -183,6 +190,18 @@ namespace CS2M.Networking
         {
             PlayerListConnected.RemoveAll(p => !ReferenceEquals(p, LocalPlayer));
             PlayerListJoined.RemoveAll(p => !ReferenceEquals(p, LocalPlayer));
+            SessionNonces.Clear();
+        }
+
+        // Issue #15: monotonically bumped on session teardown. The async world-transfer task captures
+        // the value at start and aborts between slices when it changes — without this, a "stop server"
+        // mid-transfer kept calling peer.Send on a stopped NetManager from a background task.
+        private static int _transferEpoch;
+
+        /// <summary>Abort every in-flight world transfer (session teardown).</summary>
+        public static void CancelWorldTransfers()
+        {
+            _transferEpoch++;
         }
 
         /// <summary>Serializes the current world and streams it to one client as WorldTransferCommand slices.</summary>
@@ -192,34 +211,57 @@ namespace CS2M.Networking
             int maxPacketSize = player.NetPeer.GetMaxSinglePacketSize(DeliveryMethod.ReliableOrdered);
             maxPacketSize -= 25; // Maximum packet overhead as computed and tested in `PacketSizeOverhead` unit test
 
+            int epoch = _transferEpoch; // issue #15: this transfer belongs to the CURRENT session
             TaskManager.instance.EnqueueTask("LoadMap", async () =>
             {
-                SaveLoadHelper saveLoadHelper =
-                    World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<SaveLoadHelper>();
-                SlicedPacketStream stream = await saveLoadHelper.SaveGame(maxPacketSize);
-                int remainingBytes = (int)stream.Length;
-                bool newTransfer = true;
-
-                var watch = new Stopwatch();
-                watch.Start();
-
-                Log.Debug($"Sending world with size of {stream.Length} bytes. Slice size: {maxPacketSize}");
-                foreach (byte[] slice in stream.GetSlices())
+                try
                 {
-                    remainingBytes -= slice.Length;
-                    var cmd = new WorldTransferCommand
+                    SaveLoadHelper saveLoadHelper =
+                        World.DefaultGameObjectInjectionWorld.GetOrCreateSystemManaged<SaveLoadHelper>();
+                    SlicedPacketStream stream = await saveLoadHelper.SaveGame(maxPacketSize);
+                    int remainingBytes = (int)stream.Length;
+                    bool newTransfer = true;
+
+                    var watch = new Stopwatch();
+                    watch.Start();
+
+                    Log.Debug($"Sending world with size of {stream.Length} bytes. Slice size: {maxPacketSize}");
+                    foreach (byte[] slice in stream.GetSlices())
                     {
-                        WorldSlice = slice,
-                        RemainingBytes = remainingBytes,
-                        NewTransfer = newTransfer,
-                    };
+                        // Issue #15: abort between slices when the session ended or THIS peer dropped
+                        // (a several-second transfer easily outlives either).
+                        if (epoch != _transferEpoch)
+                        {
+                            Log.Info("[Transfer] aborted — session ended mid-transfer");
+                            return;
+                        }
 
-                    CommandInternal.Instance.SendToClient(player, cmd);
+                        if (player.NetPeer.ConnectionState != ConnectionState.Connected)
+                        {
+                            Log.Info($"[Transfer] aborted — peer {player.NetPeer.Id} disconnected mid-transfer");
+                            return;
+                        }
 
-                    newTransfer = false;
+                        remainingBytes -= slice.Length;
+                        var cmd = new WorldTransferCommand
+                        {
+                            WorldSlice = slice,
+                            RemainingBytes = remainingBytes,
+                            NewTransfer = newTransfer,
+                        };
+
+                        CommandInternal.Instance.SendToClient(player, cmd);
+
+                        newTransfer = false;
+                    }
+
+                    Log.Debug($"[SaveGame] Save game packaging took {watch.ElapsedMilliseconds}ms");
                 }
-
-                Log.Debug($"[SaveGame] Save game packaging took {watch.ElapsedMilliseconds}ms");
+                catch (System.Exception ex)
+                {
+                    // Issue #15: an unguarded throw here died inside the task scheduler, invisibly.
+                    Log.Error($"[Transfer] world transfer failed: {ex}");
+                }
             });
         }
 
