@@ -378,8 +378,18 @@ namespace CS2M.Networking
 
         public void SendToServer(CommandBase message)
         {
-            NetPeer server = _netManager.ConnectedPeerList[0];
-            server.Send(CommandInternal.Instance.Serialize(message), DeliveryMethod.ReliableOrdered);
+            // Guard the empty peer list: PlayerCursorSystem (and any per-frame sender) calls this every
+            // Rendering tick, so the instant a client drops — or during the reconnect window — the peer
+            // list is empty and ConnectedPeerList[0] threw ArgumentOutOfRangeException, taking the whole
+            // process down mid-session (host crash observed 06/07 when the client blinked). Nothing to
+            // send to = no-op, not a crash.
+            System.Collections.Generic.List<NetPeer> peers = _netManager.ConnectedPeerList;
+            if (peers == null || peers.Count == 0)
+            {
+                return;
+            }
+
+            peers[0].Send(CommandInternal.Instance.Serialize(message), DeliveryMethod.ReliableOrdered);
 
             Log.Debug($"Sending {message.GetType().Name} to server");
         }
