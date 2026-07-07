@@ -49,7 +49,7 @@ Flags: `-Port 1111`, `-HostLoadTimeoutSec 300`, `-TestTimeoutSec 240`, `-KillWhe
 ## Ressalvas
 
 - Duas instâncias de um jogo AAA na mesma máquina é **pesado** (RAM/GPU). Espere lentidão.
-- O crack pode ter trava de instância única própria (o código do jogo não tem). Se a 2a
+- O jogo pode ter trava de instância única. Se a 2a
   instância não subir, é isso — aí o teste tem que ser em 2 PCs.
 - As duas instâncias compartilham a pasta LocalLow (mesmo `CS2M.log`, mesmos settings).
   Por isso cada lado tem seu `CS2M_AP_LOG` próprio — o sinal do autopilot é confiável

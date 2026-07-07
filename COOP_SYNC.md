@@ -17,7 +17,7 @@ adiciona sincronização de gameplay completa para **Cities: Skylines II 1.5.3f1
 | Repo canônico local | `C:\Users\Bruno\CS2M-Coop` (clone estável; NÃO usar cópias em pastas temp) |
 | GitHub (fonte da verdade) | `https://github.com/Noquela/CS2M-Coop` (branch `main`) |
 | Mod deployado (PC do Bruno) | `C:\Users\Bruno\AppData\LocalLow\Colossal Order\Cities Skylines II\Mods\CS2M` |
-| Jogo | `C:\JogosCrackeados\Cities.Skylines.II.v1.5.3f1\game` (crack RUNE: **1 instância só**; single-instance NÃO deve ser burlado) |
+| Jogo | `<pasta-do-jogo>` (anti-tamper anti-tamper: **1 instância só**; single-instance NÃO deve ser burlado) |
 | Log do mod | `...\Cities Skylines II\Logs\CS2M.log` (alto volume atrás de `CS2M_VERBOSE=1`) |
 | Zip de release | `C:\Users\Bruno\Desktop\CS2M_v50.zip` (conteúdo da pasta do mod sem `.claude`) |
 
@@ -137,7 +137,7 @@ growables host-auth + `/resync`. Rádio/foto/câmera são locais.
 
 ### Build (da raiz do repo)
 ```bash
-GAME="C:/JogosCrackeados/Cities.Skylines.II.v1.5.3f1/game/Cities2_Data"
+GAME="<pasta-do-jogo>/Cities2_Data"
 TC="$GAME/Content/Game/.ModdingToolchain"
 export CSII_TOOLPATH="$TC" CSII_MANAGEDPATH="$GAME/Managed" \
   CSII_MSCORLIBPATH="$GAME/Managed/mscorlib.dll" CSII_ASSEMBLYSEARCHPATH="$GAME/Managed" \
@@ -155,7 +155,7 @@ dotnet build CS2M/CS2M.csproj -c Release -p:AssemblyVersion=1.0.N.0 -p:FileVersi
 
 ### 2) Selftest in-game (1 instância, ~9 min) — 28 checks
 ```bash
-cd "C:/JogosCrackeados/Cities.Skylines.II.v1.5.3f1/game"   # CWD = pasta do jogo (lei 8!)
+cd "<pasta-do-jogo>"   # CWD = pasta do jogo (lei 8!)
 export CS2M_AUTOPILOT=selftest CS2M_AP_TEST=1
 ./Cities2.exe -continuelastsave
 # aguardar "scripted test DONE" no CS2M.log; resultados: grep "\[Auto\] RESULT"

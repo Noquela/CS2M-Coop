@@ -8,9 +8,12 @@ O upstream conecta dois mundos, transfere o save inicial e tem chat — mas **de
 edita a própria cidade sozinho**: nada do que um faz aparece pro outro. Este fork sincroniza as
 **ações dos jogadores** de verdade, validado dentro do jogo.
 
-> **17 features validadas no jogo real** (não só "compila"): cada uma foi testada com um harness que roda
-> o jogo e confere o estado do mundo antes/depois — e o mod já passou por **sessões reais de 2 PCs**
-> (host + cliente via VPN), que expuseram e corrigiram os bugs que só rede de verdade mostra (v38).
+> **v1.0.56.0** — cobertura auditada: as **249 ações de UI** do jogo foram mapeadas, uma a uma, a um
+> sync ou confirmadas como emergentes (todo estado *autorado* pelo jogador está coberto; só a simulação
+> emergente — cidadãos, veículos, trânsito, chirps — diverge por design e não se sinca). Validado por um
+> harness que roda o jogo de verdade e confere o estado do mundo antes/depois — **selftest 88 PASS / 0
+> FAIL** — e por **sessões reais de 2 PCs** (host + cliente via VPN), que expuseram e corrigiram os bugs
+> que só rede de verdade mostra.
 > Veja [COOP_SYNC.md](COOP_SYNC.md) para a matriz de validação e o guia de debug.
 
 ---
@@ -74,9 +77,9 @@ Juntos localizam qualquer desync residual em campo. Detalhes em GAME_SYSTEMS.md 
 demais (topologia estrela) e carimba a identidade de cada conexão. Um **detector de divergência**
 compara contagens do mundo a cada 10 s e sugere `/resync` no chat quando algo escapa.
 
-**Lacunas conhecidas** (ver seção *Limites*): linhas de transporte, renomear coisas, políticas de
-distrito, e a **simulação emergente por-PC** (cidadãos, tráfego, economia por tick) — mitigada pelos
-growables host-autoritativos + `/resync`.
+**Lacuna conhecida** (ver seção *Limites*): a **simulação emergente por-PC** (cidadãos, tráfego,
+economia por tick) diverge por design entre PCs — o jogo não é determinístico entre máquinas. Mitigada
+pelos growables host-autoritativos + `/resync`.
 
 ---
 
@@ -252,28 +255,62 @@ que o jogador acabou de fazer. Não há varredura do mundo nem estado periódico
 
 ## O diferencial de engenharia: o harness que testa sozinho
 
-O crack RUNE mata a segunda instância do jogo, então o teste clássico de "2 PCs" era impossível na mesma
-máquina. A solução:
+O jogo trava múltiplas instâncias na mesma máquina, então o teste clássico de "2 PCs" era impossível
+sem um segundo computador. A solução: dois harnesses que dirigem o jogo real.
 
-- **`AutopilotSystem`** — um sistema **desligado por padrão** (só liga com a env var `CS2M_AUTOPILOT`,
-  então o build normal é idêntico). No modo `selftest` ele: sobe um servidor local (o que já coloca o
-  jogo em `PLAYING` sem precisar de cliente), **injeta os mesmos comandos que os detectores emitiriam**
-  direto nas filas de apply, e **lê o mundo de volta** pra conferir cada feature — tudo numa instância só.
-- **`tools/autotest/`** — o launcher e o roteiro (20 passos). Cada rodada imprime uma matriz
-  `RESULT <feature>: PASS/FAIL` com a evidência.
-- **Validações anti-mentira** (endurecidas na v38, depois que a 1ª sessão real desmentiu dois PASS):
-  rede só passa se a **construção real** aconteceu (composição selecionada + nó conectado + blocos de
-  zona, não só contagem de entidades); pause é validado pelo **`frameIndex` congelado** — inclusive sob
-  um write adversário de velocidade no meio (emulando a tecla espaço) — e não lendo de volta o valor que
-  nós mesmos escrevemos; o papel de host (`CurrentRole`) é conferido após o `StartServer` real; e um
-  cursor remoto falso ("FakeFriend") atravessa o pipeline inteiro do label até o **render-ack** do motor
-  de UI (retângulo com `w/h > 0`).
-- **Cuidado ao lançar**: não inicie o `Cities2.exe` com o diretório de trabalho dentro de uma pasta que
-  contenha DLLs do mod (o Mono sonda o CWD e o registro de mods do jogo quebra com
-  `NotSupportedException`). O launcher do autotest usa a pasta do jogo como CWD.
+### Selftest 1-instância (`AutopilotSystem`)
 
-O selftest valida a camada de apply + detectores; **as sessões reais de 2 PCs** (host + cliente via VPN)
-validaram o caminho completo com rede, latência e dois mundos vivos.
+Um sistema **desligado por padrão** (só liga com a env var `CS2M_AUTOPILOT`, então o build normal é
+idêntico). No modo `selftest` ele: sobe um servidor local (o que já coloca o jogo em `PLAYING` sem
+precisar de cliente), **injeta os mesmos comandos que os detectores emitiriam** direto nas filas de
+apply, roda uma matriz de **~40 passos**, e **lê o mundo de volta** pra conferir cada feature — tudo
+numa instância só. Cada rodada imprime uma matriz `RESULT <feature>: PASS/FAIL` com a evidência.
+Estado atual: **88 PASS / 0 FAIL** em save limpo com todos os gates ligados.
+
+**Validações anti-mentira** (endurecidas depois que a 1ª sessão real desmentiu dois PASS): rede só
+passa se a **construção real** aconteceu (composição selecionada + nó conectado + blocos de zona, não
+só contagem de entidades); pause é validado pelo **`frameIndex` congelado** — inclusive sob um write
+adversário de velocidade no meio (emulando a tecla espaço) — e não lendo de volta o valor que nós
+mesmos escrevemos; o papel de host (`CurrentRole`) é conferido após o `StartServer` real; e um cursor
+remoto falso ("FakeFriend") atravessa o pipeline inteiro do label até o **render-ack** do motor de UI
+(retângulo com `w/h > 0`).
+
+### 2-sim na mesma máquina (host + Sandboxie)
+
+Host normal + cliente rodando dentro do **Sandboxie** (`NoSecurityIsolation=y`) contorna o lock de
+instância única do jogo e dá **duas simulações reais no mesmo mundo**, sem precisar de um segundo PC.
+Cenas roteirizadas:
+
+- **test=1** — roteiro de ~20 tools over-the-wire (smoke test geral).
+- **test=3** (TRIREPRO) — triângulo de rua + splits + zonas + fazenda pelo caminho real do tool.
+- **test=5** (client-actions) — o cliente apaga água colocada pelo host, tax concorrente.
+- **test=6** — rota/política/devtree/move combinados.
+
+Foi com esse harness que **8 fixes** foram validados ao vivo (não só "compila"): fazenda/área por
+identidade de placeholder, overdraw de aresta (aresta não some mais), delete-de-remoto (apagar algo
+criado pelo outro jogador propaga), tax concorrente (granular por índice), move de prédio (sub-net/
+sub-área acompanham), route-reroute de linha carregada do save (por prefab+número), policy de prédio
+(filtro por prefab), e zonas (`ZoneOrderTiebreak` por hash de posição + `ZoneBlockAuthority` cura
+divergência).
+
+### `tools/autotest/`
+
+- `run_selftest.ps1` / `run_2sims.ps1` — ambos aceitam `-StartGame <guid>` (o guid é o conteúdo de
+  `.SaveGameData.cid` dentro do `.cok`, que é um zip) pra carregar um save específico sem depender do
+  ponteiro de last-save.
+- `statediff.py` — diff por-entidade (nodes/edges/areas/zones/buildings) entre os dois logs, com
+  `CS2M_NODEDUMP=1`; mascara divergência emergente de growable (não é bug).
+
+**Defaults**: os 8 fixes acima vêm **ligados** por padrão (uma env var `=0` desliga cada um, ex.:
+`CS2M_OVERDRAWFIX=0`). Ficam **desligados** por padrão, ainda experimentais: `CS2M_NODEHEAL`,
+`CS2M_DEVTREEFIX`, `CS2M_ATOMIC`.
+
+**Cuidado ao lançar**: não inicie o `Cities2.exe` com o diretório de trabalho dentro de uma pasta que
+contenha DLLs do mod (o Mono sonda o CWD e o registro de mods do jogo quebra com
+`NotSupportedException`). O launcher do autotest usa a pasta do jogo como CWD.
+
+O selftest valida a camada de apply + detectores; **as sessões reais de 2 PCs** (host + cliente via
+VPN) e o **2-sim local** validam o caminho completo com rede, latência e dois mundos vivos.
 
 ---
 
@@ -284,10 +321,8 @@ validaram o caminho completo com rede, latência e dois mundos vivos.
   sincronizar isso exigiria lockstep determinístico (o jogo não tem) ou stream de estado autoritativo
   (muita banda). O mod alinha o que **as ações + dinheiro + XP + velocidade** conseguem alinhar — e o
   **`/resync`** reconcilia qualquer divergência acumulada re-transmitindo o mundo do host.
-- **Pendentes (v2)**: linhas de transporte (recriar rota exige dirigir o pathfinding do tool);
-  clima/hora do dia (escalares baratos, mesmo padrão host-autoritativo); nome de distrito (UI-managed);
-  **split** de rede cross-PC (ponta no MEIO de um edge existente — snap em nós existentes já funciona);
-  edição de objetos nativos/growables (não têm `CS2M_SyncId`).
+- **Pendentes**: **split** de rede cross-PC (ponta no MEIO de um edge existente — snap em nós
+  existentes já funciona); edição de objetos nativos/growables (não têm `CS2M_SyncId`).
 - **Terraformação** é best-effort: o delta por frame do brush depende de frame-time, então o replay é
   aproximado; o `/resync` corrige o drift de terreno.
 
@@ -303,8 +338,12 @@ dotnet build CS2M/CS2M.csproj -c Release \
 # copie CS2M.dll / CS2M.API.dll / CS2M.BaseGame.dll para  …/Mods/CS2M/
 
 # UI (label do cursor, chat, menus) — sai direto em …/Mods/CS2M/CS2M.mjs + .css:
+# (o dotnet build NÃO roda isso sozinho — é um passo separado)
 cd CS2M.UI && npm run build
 ```
+
+Pasta final do mod (`…/Mods/CS2M/`): `CS2M.dll`, `CS2M.API.dll`, `CS2M.BaseGame.dll`, `CS2M.mjs`,
+`CS2M.css`, `lang/` (traduções).
 
 Rodar o autoteste in-game (uma instância):
 
