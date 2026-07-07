@@ -110,6 +110,14 @@ namespace CS2M.Sync
         private float3 _cfPendingPos;
         private string _cfPendingName;
         private bool _cfRealLogged;
+        // Set the first frame TryLogClientFarmReal finds the pending Temp entity (pre-Applied) — gates
+        // the one-shot "[Auto] CLIENTFARM TEMP" diagnostic so it doesn't spam every poll frame while the
+        // Temp entity is still pending promotion.
+        private bool _cfTempLogged;
+        // The building CreationDefinition entity ClientFarm_Plant creates each SUBMIT — kept around only
+        // so TryStripClientFarmWarning can report whether GenerateObjectsSystem has consumed/deleted it
+        // yet (definition entities are transient, gone once Modification1 processes them).
+        private Entity _cfDefEntity = Entity.Null;
 
         // CS2M_AP_TEST=5: CLIENT-ACTIONS — a THIRD scene, separate from TRIREPRO (host-solo) and
         // CLIENT-FARM (client-solo), built to exercise two audit gap-fixes that specifically need a
@@ -5029,9 +5037,39 @@ namespace CS2M.Sync
         /// before GenerateObjectsSystem has run for a given SUBMIT, or after PLACED-REAL already fired) is
         /// a cheap no-op — safe to call every frame from this poll. ApplyObjectsSystem's Create() path
         /// (ApplyObjectsSystem.cs:669-685) both strips Temp AND adds Applied+Created+Updated in the same
-        /// pass for a fresh build, so no separate ClearTool pump is needed afterward.</summary>
+        /// pass for a fresh build, so no separate ClearTool pump is needed afterward.
+        ///
+        /// UPDATE (last harness gap): the ApplyTool pump above is necessary but was NOT sufficient — the
+        /// Temp entity still never reached Applied. Root cause, confirmed in decomp (not the
+        /// ApplyObjectsSystem-skips-errors hypothesis this scene originally assumed — ApplyObjectsSystem
+        /// never once reads Error/ErrorSeverity; grep decomp/Game/Game/Tools/ApplyObjectsSystem.cs, zero
+        /// hits): the farm/extractor <c>BuildingPrefab</c> carries <c>Game.Prefabs.BuildingFlags.RequireRoad</c>,
+        /// and this scene's hand-built definition (deliberately a freestanding "brand new top-level
+        /// object", no Attach/Owner — see <see cref="ClientFarm_Plant"/>'s doc comment) never sets
+        /// <c>Building.m_RoadEdge</c>. <c>Game.Buildings.ValidationHelpers.ValidateBuilding</c>
+        /// (decomp/Game/Game/Buildings/ValidationHelpers.cs:16-33) enqueues <c>ErrorType.NoRoadAccess</c> at
+        /// <c>ErrorSeverity.Warning</c> every single frame the Temp exists (ValidationSystem runs every
+        /// Modification2, unconditionally — same "not phase-gated" category as GenerateObjectsSystem).
+        /// ValidationSystem's <c>UpdateComponentsJob</c> (ValidationSystem.cs, the
+        /// <c>case ErrorSeverity.Warning</c> branch around line 557) turns that into a literal
+        /// <c>Game.Tools.Warning</c> TAG COMPONENT added directly onto the Temp entity (not just an icon).
+        /// <c>ToolApplySystem</c> — scheduled FIRST in the ApplyTool phase group, BEFORE ApplyObjectsSystem
+        /// (SystemOrder.cs:711 vs :713) — then does, unconditionally, for any chunk whose archetype carries
+        /// Warning: <c>if (archetypeChunk.Has(ref m_WarningType)) { m_CommandBuffer.AddComponent&lt;Deleted&gt;
+        /// (nativeArray); }</c> (ToolApplySystem.cs:50-53). Both systems queue into the SAME
+        /// ToolOutputBarrier ECB, so by the time it's played back the entity has BOTH Deleted (from
+        /// ToolApplySystem) AND Applied/Created/Updated (from ApplyObjectsSystem.Create()) — it never
+        /// survives as a stable Applied building, which is exactly why PLACED-REAL never fired even after
+        /// the ApplyTool pump fix. <see cref="TryStripClientFarmWarning"/> (called first thing below, every
+        /// poll frame — Warning gets re-added every frame as long as the Temp exists, since m_RoadEdge
+        /// never changes) removes the Warning tag before ToolApplySystem can see it. NoRoadAccess is a
+        /// soft/cosmetic warning in real play too (players routinely plant buildings ahead of road
+        /// construction — the building just sits unconnected until a road reaches it), so stripping it for
+        /// THIS scene's own entity (matched by prefab+position, same tolerance as the PLACED-REAL match
+        /// below) is safe and narrowly scoped — not a blanket "ignore all validation" change.</summary>
         private void TryLogClientFarmReal()
         {
+            TryStripClientFarmWarning();
             _updateSystem.Update(SystemUpdatePhase.ApplyTool);
 
             EntityQuery q = GetEntityQuery(new EntityQueryDesc
@@ -5061,6 +5099,78 @@ namespace CS2M.Sync
                       $"pos=({p.x:F0},{p.y:F0},{p.z:F0}) entity={e.Index} (materialized by " +
                       "GenerateObjectsSystem/ApplyObjectsSystem — real tool pipeline, PlacementDetectorSystem " +
                       "will ship it to the host next ModificationEnd)");
+                    return;
+                }
+            }
+            finally { ents.Dispose(); }
+        }
+
+        /// <summary>Instrumentation + fix, called first thing every poll frame by
+        /// <see cref="TryLogClientFarmReal"/> (before its ApplyTool pump): finds the pending building's
+        /// Temp entity — matched the same way PLACED-REAL matches the post-Applied entity (PrefabRef ==
+        /// <see cref="_cfPendingPrefab"/>, position within 2m of <see cref="_cfPendingPos"/>), except this
+        /// query has NO Applied/None-CreationDefinition filter so it also finds the entity while it's
+        /// still mid-pipeline. First frame it's found, logs
+        /// <c>[Auto] CLIENTFARM TEMP entity=N flags=0x... comps=A,B,C defAlive=bool</c> — TempFlags in hex,
+        /// every component type currently on the entity (proof of exactly what ValidationSystem/
+        /// GenerateObjectsSystem attached, no guessing), and whether <see cref="_cfDefEntity"/> (the
+        /// CreationDefinition entity from ClientFarm_Plant) still exists. Then, every frame (not just the
+        /// first — see below), strips <c>Game.Tools.Warning</c> if present: see
+        /// <see cref="TryLogClientFarmReal"/>'s doc comment for the full decomp trail on why a bare Warning
+        /// tag here is fatal (ToolApplySystem.cs:50-53 deletes the whole chunk before ApplyObjectsSystem
+        /// can promote it to Applied) and why it's safe to remove for this scene's own entity. The strip
+        /// must be unconditional every poll frame, not one-shot, because ValidationSystem
+        /// (Modification2, unconditional) re-enqueues ErrorType.NoRoadAccess — and therefore re-adds
+        /// Warning — every single frame the entity is still Temp, since <c>Building.m_RoadEdge</c> never
+        /// changes (this scene never attaches the definition to a road).</summary>
+        private void TryStripClientFarmWarning()
+        {
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Tools.Temp>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+            });
+
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (EntityManager.GetComponentData<PrefabRef>(e).m_Prefab != _cfPendingPrefab) { continue; }
+
+                    float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(e).m_Position;
+                    float dx = p.x - _cfPendingPos.x, dz = p.z - _cfPendingPos.z;
+                    if (dx * dx + dz * dz > 4f) { continue; } // 2m — same building, not a coincidence
+
+                    if (!_cfTempLogged)
+                    {
+                        _cfTempLogged = true;
+                        Game.Tools.Temp temp = EntityManager.GetComponentData<Game.Tools.Temp>(e);
+
+                        NativeArray<ComponentType> comps = EntityManager.GetComponentTypes(e, Allocator.Temp);
+                        var names = new System.Text.StringBuilder();
+                        for (int i = 0; i < comps.Length; i++)
+                        {
+                            if (i > 0) { names.Append(','); }
+                            System.Type mt = comps[i].GetManagedType();
+                            names.Append(mt != null ? mt.Name : comps[i].ToString());
+                        }
+                        comps.Dispose();
+
+                        bool defAlive = _cfDefEntity != Entity.Null && EntityManager.Exists(_cfDefEntity);
+                        L($"[Auto] CLIENTFARM TEMP entity={e.Index} flags=0x{(uint)temp.m_Flags:X} " +
+                          $"comps={names} defAlive={defAlive}");
+                    }
+
+                    if (EntityManager.HasComponent<Game.Tools.Warning>(e))
+                    {
+                        EntityManager.RemoveComponent<Game.Tools.Warning>(e);
+                    }
+
                     return;
                 }
             }
@@ -5175,6 +5285,7 @@ namespace CS2M.Sync
             EntityManager.AddComponentData(buildDef, buildCd);
             EntityManager.AddComponentData(buildDef, buildOd);
             EntityManager.AddComponent<Updated>(buildDef);
+            _cfDefEntity = buildDef;
 
             // ---- 2. Work-area definition(s) from the prefab's own SubArea/SubAreaNode template ----
             var ownerDef = default(Game.Tools.OwnerDefinition);
@@ -5252,6 +5363,7 @@ namespace CS2M.Sync
             _cfPendingPos = pos;
             _cfPendingName = farmName;
             _cfRealLogged = false;
+            _cfTempLogged = false;
 
             L($"[Auto] CLIENTFARM SUBMIT name={farmName} pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) " +
               $"areaDefs={areasCreated} defEntity={buildDef.Index} (CreationDefinition/ObjectDefinition " +
