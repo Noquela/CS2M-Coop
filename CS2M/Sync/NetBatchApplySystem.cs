@@ -56,6 +56,7 @@ namespace CS2M.Sync
     {
         private PrefabSystem _prefabSystem;
         private EntityQuery _liveNodes;
+        private EntityQuery _liveEdges;
 
         // Edge definitions injected this frame (the vanilla path — see EmitEdgeCourse). Consumed by
         // GenerateNodes/Edges this same frame, then destroyed at the TOP of next OnUpdate. Exact mirror of
@@ -94,6 +95,17 @@ namespace CS2M.Sync
                 None = new[]
                 {
                     ComponentType.ReadOnly<Edge>(),
+                    ComponentType.ReadOnly<Game.Tools.Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                },
+            });
+            // Delete's position-fallback scan (FindEdgeByPosition): every LIVE edge, id or no id. Same
+            // None-set as the identity path (FindEdgeById skips Temp/Deleted transitively via ConnectedEdge).
+            _liveEdges = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<Curve>() },
+                None = new[]
+                {
                     ComponentType.ReadOnly<Game.Tools.Temp>(),
                     ComponentType.ReadOnly<Deleted>(),
                 },
@@ -690,13 +702,18 @@ namespace CS2M.Sync
             return true;
         }
 
-        /// <summary>Delete the edge the split removed, addressed by node-pair identity (never proximity). Tags
-        /// <c>CS2M_RemotePlaced</c> BEFORE <c>Deleted</c> (delete echo guard) and cascades the junction rebuild.</summary>
+        /// <summary>Delete the edge the split removed, addressed by node-pair identity FIRST, falling back to
+        /// a strict position match when identity can't resolve (save-loaded edges: <see cref="CS2M_NodeSyncId"/>
+        /// is never persisted to the save, so a node loaded from a previous session has id=0 on BOTH ends —
+        /// FindEdgeById always fails for it, and the batch used to just SKIP, leaving the edge stuck on the
+        /// side that never received the bulldoze). Tags <c>CS2M_RemotePlaced</c> BEFORE <c>Deleted</c> (delete
+        /// echo guard) and cascades the junction rebuild.</summary>
         private bool ApplyDelete(NetBatchCommand cmd, int i)
         {
             ulong aId = cmd.DelStartNodeIds[i];
             ulong bId = cmd.DelEndNodeIds[i];
-            if (!FindEdgeById(aId, bId, out Entity edge))
+            if (!FindEdgeById(aId, bId, out Entity edge)
+                && !FindEdgeByPosition(cmd, i, out edge))
             {
                 CS2M.Log.Info($"[Batch] delete SKIP noMatch startId={aId} endId={bId} " +
                               $"start=({cmd.DelStartX[i]:F0},{cmd.DelStartZ[i]:F0}) end=({cmd.DelEndX[i]:F0},{cmd.DelEndZ[i]:F0})");
@@ -875,6 +892,84 @@ namespace CS2M.Sync
                 }
             }
 
+            return false;
+        }
+
+        // How close BOTH endpoints of a live edge must sit to the wire's (DelStart, DelEnd) — in either
+        // orientation — to be treated as the edge a save-loaded delete named. Save geometry is byte-identical
+        // on both machines at join (same file), so this is exact resolution for that case, not proximity
+        // guessing; loose enough to absorb the sub-metre float round-trip NodePinSystem/BOUND-SNAP already
+        // tolerate elsewhere in this file, tight enough that two distinct junctions a street apart never
+        // collide.
+        private const float DeletePosTolerance = 3f;
+
+        /// <summary>Fallback for a save-loaded delete: <see cref="CS2M_NodeSyncId"/> is never persisted to the
+        /// save, so BOTH ends of an edge that came from a previous session carry id=0 on every machine and
+        /// <see cref="FindEdgeById"/> can never match it. Scans every LIVE edge (no Temp/Deleted) and matches
+        /// on the two endpoint NODE positions against the wire's (DelStart, DelEnd), tried in both
+        /// orientations, within <see cref="DeletePosTolerance"/>. Exactly one match → delete it. Zero or more
+        /// than one match within tolerance → refuse (logs <c>noMatch-pos</c>) rather than risk deleting the
+        /// wrong edge.</summary>
+        private bool FindEdgeByPosition(NetBatchCommand cmd, int i, out Entity edge)
+        {
+            edge = Entity.Null;
+
+            if (cmd.DelStartX == null || cmd.DelStartZ == null || cmd.DelEndX == null || cmd.DelEndZ == null
+                || i >= cmd.DelStartX.Length || i >= cmd.DelStartZ.Length
+                || i >= cmd.DelEndX.Length || i >= cmd.DelEndZ.Length)
+            {
+                return false;
+            }
+
+            float delStartY = cmd.DelStartY != null && i < cmd.DelStartY.Length ? cmd.DelStartY[i] : 0f;
+            float delEndY = cmd.DelEndY != null && i < cmd.DelEndY.Length ? cmd.DelEndY[i] : 0f;
+            var delStart = new float3(cmd.DelStartX[i], delStartY, cmd.DelStartZ[i]);
+            var delEnd = new float3(cmd.DelEndX[i], delEndY, cmd.DelEndZ[i]);
+
+            float tolSq = DeletePosTolerance * DeletePosTolerance;
+            int matches = 0;
+            Entity found = Entity.Null;
+
+            Unity.Collections.NativeArray<Entity> arr = _liveEdges.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity e in arr)
+                {
+                    Edge ed = EntityManager.GetComponentData<Edge>(e);
+                    if (!EntityManager.Exists(ed.m_Start) || !EntityManager.Exists(ed.m_End)
+                        || !EntityManager.HasComponent<Node>(ed.m_Start) || !EntityManager.HasComponent<Node>(ed.m_End))
+                    {
+                        continue;
+                    }
+
+                    float3 sPos = EntityManager.GetComponentData<Node>(ed.m_Start).m_Position;
+                    float3 ePos = EntityManager.GetComponentData<Node>(ed.m_End).m_Position;
+
+                    bool straight = math.distancesq(sPos, delStart) <= tolSq && math.distancesq(ePos, delEnd) <= tolSq;
+                    bool flipped = math.distancesq(sPos, delEnd) <= tolSq && math.distancesq(ePos, delStart) <= tolSq;
+                    if (straight || flipped)
+                    {
+                        matches++;
+                        found = e;
+                    }
+                }
+            }
+            finally
+            {
+                arr.Dispose();
+            }
+
+            if (matches == 1)
+            {
+                edge = found;
+                CS2M.Log.Info($"[Batch] delete FOUND-BY-POS edge={found.Index} " +
+                              $"start=({delStart.x:F1},{delStart.z:F1}) end=({delEnd.x:F1},{delEnd.z:F1})");
+                return true;
+            }
+
+            CS2M.Log.Info($"[Batch] delete noMatch-pos matches={matches} " +
+                          $"start=({delStart.x:F1},{delStart.z:F1}) end=({delEnd.x:F1},{delEnd.z:F1}) " +
+                          "(0 or >1 candidates within tolerance — refusing to guess)");
             return false;
         }
 

@@ -89,10 +89,15 @@ namespace CS2M.Commands.Data.Game
         // ---- REMOVED EDGES (the split cut them; delete by node-pair identity) ---------------------
         public ulong[] DelStartNodeIds { get; set; }
         public ulong[] DelEndNodeIds { get; set; }
-        // World positions of the removed edge's endpoints — for the SKIP/DROP log only (not resolution).
+        // World positions of the removed edge's endpoints. Used for the SKIP/DROP log AND — since save-loaded
+        // edges carry no CS2M_NodeSyncId on either PC (id=0/0) — as the receiver's position-based fallback
+        // resolution when FindEdgeById can't match (see NetBatchApplySystem.FindEdgeByPosition). Y included so
+        // that fallback compares the full 3D Node.m_Position, not just the XZ plan.
         public float[] DelStartX { get; set; }
+        public float[] DelStartY { get; set; }
         public float[] DelStartZ { get; set; }
         public float[] DelEndX { get; set; }
+        public float[] DelEndY { get; set; }
         public float[] DelEndZ { get; set; }
 
         // ---- BOUNDARY (pre-existing nodes referenced by new edges; NEVER their data) --------------

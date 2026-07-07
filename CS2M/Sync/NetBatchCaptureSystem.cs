@@ -356,7 +356,8 @@ namespace CS2M.Sync
 
             // ---- REMOVED EDGES (split originals / bulldozes) — delete by node-pair identity -------
             var dStart = new List<ulong>(); var dEnd = new List<ulong>();
-            var dsX = new List<float>(); var dsZ = new List<float>(); var deX = new List<float>(); var deZ = new List<float>();
+            var dsX = new List<float>(); var dsY = new List<float>(); var dsZ = new List<float>();
+            var deX = new List<float>(); var deY = new List<float>(); var deZ = new List<float>();
             foreach (Entity e in removedEnts)
             {
                 Edge ed = EntityManager.GetComponentData<Edge>(e);
@@ -378,7 +379,8 @@ namespace CS2M.Sync
                 }
 
                 dStart.Add(sId); dEnd.Add(eId);
-                dsX.Add(sp.x); dsZ.Add(sp.z); deX.Add(ep.x); deZ.Add(ep.z);
+                dsX.Add(sp.x); dsY.Add(sp.y); dsZ.Add(sp.z);
+                deX.Add(ep.x); deY.Add(ep.y); deZ.Add(ep.z);
             }
 
             if (nNodeIds.Count == 0 && eStart.Count == 0 && dStart.Count == 0)
@@ -409,7 +411,8 @@ namespace CS2M.Sync
                 EdgeBuildOrderStart = eBoStart.ToArray(), EdgeBuildOrderEnd = eBoEnd.ToArray(),
 
                 DelStartNodeIds = dStart.ToArray(), DelEndNodeIds = dEnd.ToArray(),
-                DelStartX = dsX.ToArray(), DelStartZ = dsZ.ToArray(), DelEndX = deX.ToArray(), DelEndZ = deZ.ToArray(),
+                DelStartX = dsX.ToArray(), DelStartY = dsY.ToArray(), DelStartZ = dsZ.ToArray(),
+                DelEndX = deX.ToArray(), DelEndY = deY.ToArray(), DelEndZ = deZ.ToArray(),
 
                 BoundaryNodeIds = boundaryIds.ToArray(),
                 BoundaryPosX = boundaryPosX.ToArray(),
