@@ -92,8 +92,14 @@ namespace CS2M.Sync
     /// </summary>
     public partial class ZoneBlockAuthoritySystem : GameSystemBase
     {
-        private const int SweepEveryNFrames = 240;
+        // v61: 240 (~4 s) → 15 (~250 ms @60fps). The sweep is already DELTA (per-block signature —
+        // steady state ships NOTHING), so cadence only bounds (a) the drift window a player can SEE
+        // and (b) how fast a big dirty burst drains through the 256-block cap (2.5 s instead of 40 s
+        // for a ~2.5k-block city). Sweep cost is O(cells) hashing (~90k ints) — well under 1 ms, fine
+        // at 4 Hz. The SEND log is throttled below so active painting doesn't spam CS2M.log.
+        private const int SweepEveryNFrames = 15;
         private const int MaxBlocksPerCommand = 256;
+        private double _lastSendLogAt;
 
         private PrefabSystem _prefabSystem;
         private EntityQuery _ownedBlocks;
@@ -162,6 +168,15 @@ namespace CS2M.Sync
             {
                 foreach (Entity e in blocks)
                 {
+                    // v61 (fast cadence): a block still being touched by THIS frame's derivation cascade
+                    // (road edit → block/cell settling runs over a few frames) ships half-baked state and
+                    // forces a re-send next sweep. Skip it — the tags are gone by the next sweep (~250 ms)
+                    // and the settled block ships once. At the old 4 s cadence this never mattered.
+                    if (EntityManager.HasComponent<Updated>(e) || EntityManager.HasComponent<Created>(e))
+                    {
+                        continue;
+                    }
+
                     Owner owner = EntityManager.GetComponentData<Owner>(e);
                     Entity edge = owner.m_Owner;
                     if (edge == Entity.Null || !EntityManager.Exists(edge) || !EntityManager.HasComponent<Edge>(edge))
@@ -284,7 +299,15 @@ namespace CS2M.Sync
             };
 
             Command.SendToAll?.Invoke(cmd);
-            CS2M.Log.Info($"[ZoneAuth] SEND blocks={sent} (sweep={_sweepCount})");
+
+            // At 4 Hz an active zone-paint drag would log every sweep — cap at ~1 line/s (the count
+            // still reflects everything shipped since dirty blocks accumulate into the next send).
+            double logNow = UnityEngine.Time.realtimeSinceStartupAsDouble;
+            if (logNow - _lastSendLogAt >= 1.0)
+            {
+                _lastSendLogAt = logNow;
+                CS2M.Log.Info($"[ZoneAuth] SEND blocks={sent} (sweep={_sweepCount})");
+            }
         }
 
         /// <summary>Emits every DIRTY block of one (edge, side) group, in ordinal order, capped at
