@@ -79,6 +79,18 @@ namespace CS2M.Sync
             public int Age;
         }
 
+        /// <summary>A boundary id resolved by POSITION rather than a direct <see cref="CS2M_NodeSyncIds"/>
+        /// hit — deferred (plan-then-commit) so the Map mutation happens only once every boundary id in the
+        /// batch has resolved. <see cref="Wide"/> distinguishes <see cref="FindNodeStrict"/> (bare node,
+        /// exact ≤0.5 m — safe to <c>Register</c>) from <see cref="FindNodeWide"/> (junction-scale match,
+        /// candidate MAY already carry a different id — commit must <c>Remap</c> instead of clobbering it).</summary>
+        private struct BoundaryAdopt
+        {
+            public ulong Id;
+            public Entity Node;
+            public bool Wide;
+        }
+
         // A batch whose boundary nodes are not all resolvable yet (a sibling batch that creates them may still
         // be in flight). Held until they resolve or it ages out — never applied partially.
         private NetBatchCommand _parked;
@@ -257,7 +269,7 @@ namespace CS2M.Sync
             // prevents two boundary ids adopting the SAME physical node (two save nodes <0.5 m apart —
             // the review's critical finding: it produced a degenerate self-loop edge and collapsed two
             // junctions into one).
-            var adoptPlan = new List<KeyValuePair<ulong, Entity>>();
+            var adoptPlan = new List<BoundaryAdopt>();
             var claimed = new HashSet<Entity>();
             if (cmd.BoundaryNodeIds != null)
             {
@@ -284,7 +296,21 @@ namespace CS2M.Sync
                                  claimed, out be))
                     {
                         claimed.Add(be);
-                        adoptPlan.Add(new KeyValuePair<ulong, Entity>(bid, be));
+                        adoptPlan.Add(new BoundaryAdopt { Id = bid, Node = be, Wide = false });
+                    }
+                    // JUNCTION-SCALE fallback: the strict 0.5 m match above assumes the save node never
+                    // moved, but attaching THIS batch's new arm re-centres the junction on the builder's
+                    // side (proven elsewhere in this exact codebase — NetPlaceApplySystem.FindJunctionNode:
+                    // "a busy junction re-centres MORE than 3.5 m as roads join over time") BEFORE the
+                    // client ever applies anything, so its still-untouched twin can sit meters from
+                    // BoundaryPos. Same two radii as that proven legacy path (3.5 m any node / 8 m existing
+                    // junction only) — see FindNodeWide for the ambiguity guard.
+                    else if (hasPos && FindNodeWide(
+                                 new float3(cmd.BoundaryPosX[bi], cmd.BoundaryPosY[bi], cmd.BoundaryPosZ[bi]),
+                                 claimed, out be))
+                    {
+                        claimed.Add(be);
+                        adoptPlan.Add(new BoundaryAdopt { Id = bid, Node = be, Wide = true });
                     }
                     else
                     {
@@ -304,10 +330,32 @@ namespace CS2M.Sync
             }
 
             // Every boundary resolved — NOW commit the planned adoptions.
-            foreach (KeyValuePair<ulong, Entity> adopt in adoptPlan)
+            foreach (BoundaryAdopt adopt in adoptPlan)
             {
-                CS2M_NodeSyncIds.Register(EntityManager, adopt.Value, adopt.Key);
-                CS2M.Log.Info($"[Batch] boundary adopt-by-pos id={adopt.Key} node={adopt.Value.Index}");
+                if (adopt.Wide)
+                {
+                    // The junction-scale candidate may already answer to a DIFFERENT id (e.g. an earlier
+                    // batch touching the same junction adopted it first). Remap only mutates the id↔entity
+                    // Map — never the node's own CS2M_NodeSyncId component — so that existing identity
+                    // keeps working exactly as SnapBoundaryNode's BOUND-MERGE branch already relies on.
+                    // A bare node (no component yet) is safe to stamp directly instead.
+                    if (EntityManager.HasComponent<CS2M_NodeSyncId>(adopt.Node))
+                    {
+                        CS2M_NodeSyncIds.Remap(adopt.Id, adopt.Node);
+                    }
+                    else
+                    {
+                        CS2M_NodeSyncIds.Register(EntityManager, adopt.Node, adopt.Id);
+                    }
+
+                    CS2M.Log.Info($"[Batch] boundary REMAP id={adopt.Id} -> node={adopt.Node.Index} " +
+                                  "por pos (junction-scale match)");
+                }
+                else
+                {
+                    CS2M_NodeSyncIds.Register(EntityManager, adopt.Node, adopt.Id);
+                    CS2M.Log.Info($"[Batch] boundary adopt-by-pos id={adopt.Id} node={adopt.Node.Index}");
+                }
             }
 
             // (1b) SNAP a boundary node the builder MOVED after this batch's junction snapped two arms
@@ -800,6 +848,117 @@ namespace CS2M.Sync
             }
 
             return node != Entity.Null;
+        }
+
+        /// <summary>Junction-scale fallback for when <see cref="FindNodeStrict"/>'s exact ≤0.5 m match
+        /// misses: an existing junction RE-CENTRES as a new arm attaches to it, so the builder's settled
+        /// <c>BoundaryPos</c> can land several metres from the client's still-untouched twin BEFORE the
+        /// client has applied anything at all — the same physics the proven legacy path already accounts
+        /// for (<see cref="NetPlaceApplySystem"/>.FindJunctionNode: "a busy junction re-centres MORE than
+        /// 3.5 m as roads join over time"). Reuses that path's exact two radii: 3.5 m for ANY live node,
+        /// 8 m reserved for a node that is ALREADY a junction (2+ live connected edges) so a distant
+        /// dead-end never fuses onto an unrelated intersection. Unlike <see cref="FindNodeStrict"/>, a
+        /// candidate here MAY already carry a <see cref="CS2M_NodeSyncId"/> — the client's twin can have
+        /// adopted a different id first (e.g. an earlier batch that touched this same junction) — the
+        /// caller REMAPS this id onto it instead of re-deriving identity from scratch.
+        ///
+        /// Ambiguity-safe: each radius tier is accepted ONLY when it has EXACTLY ONE candidate within it
+        /// (mirrors <see cref="FindEdgeByPosition"/>'s matches==1 rule) — two candidates in range means
+        /// "can't tell which junction this is" and the whole lookup refuses rather than guess. The tight
+        /// tier is tried first; the wide (junction-only) tier only fires when the tight tier found NOTHING
+        /// (an ambiguous tight tier does not fall through — it is already an unresolvable read).</summary>
+        private bool FindNodeWide(float3 pos, HashSet<Entity> claimed, out Entity node)
+        {
+            node = Entity.Null;
+            const float tightRadiusSq = 12.25f; // 3.5 m — any live node
+            const float wideRadiusSq = 64f;     // 8 m — existing junction (degree >= 2) only
+
+            Entity tightBest = Entity.Null;
+            float tightBestSq = tightRadiusSq;
+            int tightMatches = 0;
+            Entity wideBest = Entity.Null;
+            float wideBestSq = wideRadiusSq;
+            int wideMatches = 0;
+
+            Unity.Collections.NativeArray<Entity> arr = _liveNodes.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity n in arr)
+                {
+                    if (claimed.Contains(n))
+                    {
+                        continue;
+                    }
+
+                    float d = math.distancesq(EntityManager.GetComponentData<Node>(n).m_Position, pos);
+                    if (d < tightRadiusSq)
+                    {
+                        tightMatches++;
+                        if (d < tightBestSq)
+                        {
+                            tightBestSq = d;
+                            tightBest = n;
+                        }
+                    }
+
+                    if (d < wideRadiusSq && IsJunctionNodeWide(n))
+                    {
+                        wideMatches++;
+                        if (d < wideBestSq)
+                        {
+                            wideBestSq = d;
+                            wideBest = n;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                arr.Dispose();
+            }
+
+            if (tightMatches == 1)
+            {
+                node = tightBest;
+                return true;
+            }
+
+            if (tightMatches == 0 && wideMatches == 1)
+            {
+                node = wideBest;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>True when a live node has 2+ live connected edges (a real junction, not a dead-end).
+        /// Local copy of the same check <see cref="NetPlaceApplySystem"/> uses for its own 8 m fallback
+        /// tier, so <see cref="FindNodeWide"/>'s wide radius never fuses a road that merely ENDS near an
+        /// intersection.</summary>
+        private bool IsJunctionNodeWide(Entity node)
+        {
+            if (!EntityManager.HasBuffer<ConnectedEdge>(node))
+            {
+                return false;
+            }
+
+            DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(node, true);
+            int live = 0;
+            for (int i = 0; i < ce.Length; i++)
+            {
+                Entity e = ce[i].m_Edge;
+                if (EntityManager.Exists(e) && !EntityManager.HasComponent<Deleted>(e))
+                {
+                    live++;
+                    if (live >= 2)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Pure-read pre-validation of every prefab (and its archetype) the batch references, so
