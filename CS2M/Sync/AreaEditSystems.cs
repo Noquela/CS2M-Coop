@@ -310,21 +310,45 @@ namespace CS2M.Sync
                         continue;
                     }
 
-                    // First-sight fields at WORLD-LOAD are identical on both PCs (loaded from the same save) →
-                    // no need to ship. But a first-sight field AFTER warmup is a farm the host placed THIS
-                    // session, whose field spawned with a shape the client can't match → ship the baseline so
-                    // the client rewrites to the host's exact polygon. This is the real "farm field never syncs" fix.
-                    if (firstSight && _scanPasses <= WarmupScans)
-                    {
-                        continue;
-                    }
-
                     // Anchor = the nearest ancestor up the owner chain that has a Transform (a building, or
                     // a farm's "Agriculture Area Placeholder"). Using the OWNER anchor (not the polygon
                     // centre) is what makes a RESIZE sync: the field's centroid MOVES when you redraw it, but
                     // its owner does not. Old code skipped any non-Building owner outright, so the farm work-
-                    // area never synced. Walk up to 4 links to reach a Transform.
+                    // area never synced. Walk up to 4 links to reach a Transform. Computed here (before the
+                    // firstSight gate below) because v58 AREA-FIX needs it to check CS2M_RemotePlaced.
                     Entity anchor = FindAnchor(EntityManager.GetComponentData<Owner>(area).m_Owner);
+
+                    if (firstSight)
+                    {
+                        // First-sight fields at WORLD-LOAD are identical on both PCs (loaded from the same
+                        // save) → no need to ship. A first-sight field AFTER warmup is normally a farm the
+                        // HOST placed THIS session, whose field spawned with a shape the client can't match
+                        // → ship the baseline so the client rewrites to the host's exact polygon.
+                        //
+                        // v58 AREA-FIX (campo-de-fazenda-diverge-CLIENT-plantou, 2-sim 07/07): that rule is
+                        // wrong for a field whose anchor carries CS2M_RemotePlaced — that anchor (the farm's
+                        // building/placeholder) was materialised by RemotePlacementApplySystem.ApplyOne
+                        // because a REMOTE player placed it, and the field itself was just spawned by
+                        // RemotePlacementApplySystem.CreateSubAreas using the PREFAB's fixed/default sub-area
+                        // geometry (not what the remote player actually drew). The SENDER's own
+                        // AreaEditDetectorSystem create-detect loop (the Applied-tag, non-isServer-gated
+                        // block above OnUpdate) already shipped — or is about to ship — the real polygon, and
+                        // AreaEditApplySystem.ApplyOne will rewrite THIS exact entity to match within a few
+                        // frames (see its park/retry queue). If THIS scan lands in that narrow window it would
+                        // firstSight-ship the still-default shape and stamp it over the polygon the other PC
+                        // just sent — a race that reproduces intermittently (confirmed: this exact session's
+                        // farm dodged it, an earlier session didn't — host/client node COUNTS matched at 4 but
+                        // shapes differed, host's centroid sitting close to the owner like a default shape
+                        // would). Baseline silently instead and let a LATER scan (which will observe the
+                        // post-rewrite hash) decide whether anything really changed.
+                        bool ownerIsRemotePlaced = anchor != Entity.Null
+                            && EntityManager.HasComponent<CS2M_RemotePlaced>(anchor);
+                        if (_scanPasses <= WarmupScans || ownerIsRemotePlaced)
+                        {
+                            continue;
+                        }
+                    }
+
                     if (anchor == Entity.Null
                         || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(area).m_Prefab,
                             out PrefabBase prefab) || prefab == null
