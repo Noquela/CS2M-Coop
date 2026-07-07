@@ -244,6 +244,7 @@ namespace CS2M.Sync
         private TaxSystem _taxSystem;
         private CityServiceBudgetSystem _budgetSystem;
         private TerrainSystem _terrain;
+        private UpdateSystem _updateSystem;
 
         private EntityQuery _treeQuery;
         private EntityQuery _buildingQuery;
@@ -376,6 +377,7 @@ namespace CS2M.Sync
             _taxSystem = World.GetOrCreateSystemManaged<TaxSystem>();
             _budgetSystem = World.GetOrCreateSystemManaged<CityServiceBudgetSystem>();
             _terrain = World.GetOrCreateSystemManaged<TerrainSystem>();
+            _updateSystem = World.GetOrCreateSystemManaged<UpdateSystem>();
 
             _treeQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -4994,9 +4996,44 @@ namespace CS2M.Sync
         /// first frame it's found — this is the proof the client's local build went through the same
         /// GenerateObjectsSystem→FindOwnersSystem→ApplyObjectsSystem pipeline a human's Object-tool click
         /// does (and, by construction, that AreaSpawnSystem now has a real Extractor building + work-area
-        /// Lot to grow crops in — see ClientFarm_Plant's doc comment for the full chain).</summary>
+        /// Lot to grow crops in — see ClientFarm_Plant's doc comment for the full chain).
+        ///
+        /// Before searching, this PUMPS <c>SystemUpdatePhase.ApplyTool</c> by hand
+        /// (<see cref="_updateSystem"/>.Update(ApplyTool)) — without this the Temp entities
+        /// GenerateObjectsSystem/GenerateAreasSystem create from our hand-built definitions would sit as
+        /// Temp FOREVER and PLACED-REAL would never fire. Root cause (confirmed in decomp, not the
+        /// ApplyObjectsSystem-gates-on-tool-state hypothesis this scene's own doc originally assumed):
+        /// <c>ToolOutputSystem.OnUpdate</c> (decomp/Game/Game/Tools/ToolOutputSystem.cs:19-31) is what
+        /// actually invokes the ClearTool/ApplyTool phase groups each frame, and it does so via a
+        /// <c>switch (m_ToolSystem.applyMode)</c> that only pumps <c>ApplyTool</c> when
+        /// <c>ApplyMode.Apply</c> and only pumps <c>ClearTool</c> when <c>ApplyMode.Clear</c> — for
+        /// <c>ApplyMode.None</c> (ToolSystem.cs:149-159: <c>m_LastTool == null</c> or whatever
+        /// <c>ToolBaseSystem.applyMode</c> the last-active tool reports, ApplyMode.None by default with no
+        /// tool ever activated) it pumps NEITHER. ApplyObjectsSystem/ApplyAreasSystem themselves
+        /// (ApplyObjectsSystem.cs:911-927, ApplyAreasSystem.cs:~273) have no applyMode/tool-state gate at
+        /// all — they just RequireForUpdate on a Temp query and run unconditionally whenever scheduled;
+        /// they simply never GET scheduled because ToolOutputSystem never asks for the ApplyTool phase
+        /// with no tool active. Modification1..ModificationEnd (GenerateObjectsSystem, GenerateAreasSystem,
+        /// FindOwnersSystem, ValidationSystem) are NOT phase-gated this way and run every frame regardless,
+        /// which is why SUBMIT always logs but PLACED-REAL never did: the Temp entities got created and
+        /// validated, then stranded — ToolClearSystem (decomp/Game/Game/Tools/ToolClearSystem.cs:218-220,
+        /// same ToolOutputSystem gate) never ran either, so they weren't even cleaned up, just silently
+        /// accumulated as orphaned Temp entities every SUBMIT.
+        ///
+        /// Calling <c>UpdateSystem.Update(SystemUpdatePhase.ApplyTool)</c> directly (public API,
+        /// decomp/Game/Game/UpdateSystem.cs:183-221) is exactly what ToolOutputSystem itself does — it
+        /// just runs every system registered at that phase (SystemOrder.cs:710-719: ToolApplySystem,
+        /// ApplyZonesSystem, ApplyObjectsSystem, ApplyNetSystem, ApplyNotificationsSystem, ApplyAreasSystem,
+        /// ApplyBrushesSystem, ApplyRoutesSystem, ApplyWaterSourcesSystem). Each has its own
+        /// RequireForUpdate on a Temp-shaped query, so calling this when nothing is pending (most frames,
+        /// before GenerateObjectsSystem has run for a given SUBMIT, or after PLACED-REAL already fired) is
+        /// a cheap no-op — safe to call every frame from this poll. ApplyObjectsSystem's Create() path
+        /// (ApplyObjectsSystem.cs:669-685) both strips Temp AND adds Applied+Created+Updated in the same
+        /// pass for a fresh build, so no separate ClearTool pump is needed afterward.</summary>
         private void TryLogClientFarmReal()
         {
+            _updateSystem.Update(SystemUpdatePhase.ApplyTool);
+
             EntityQuery q = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -5965,6 +6002,13 @@ namespace CS2M.Sync
             if (_t6MoveFallbackSettle < 0)
             {
                 if (_cfPendingPrefab == Entity.Null) { return; } // ClientFarm_Plant SKIP'd — nothing to poll for
+
+                // Same forced ApplyTool pump TryLogClientFarmReal needs — see that method's doc comment
+                // for the full root-cause writeup. ToolOutputSystem only pumps ClearTool/ApplyTool when a
+                // real tool is active; with none active here, the Temp entities GenerateObjectsSystem/
+                // GenerateAreasSystem create from ClientFarm_Plant's hand-built definitions would never be
+                // promoted to Applied on their own.
+                _updateSystem.Update(SystemUpdatePhase.ApplyTool);
 
                 Entity found = Entity.Null;
                 EntityQuery q = GetEntityQuery(new EntityQueryDesc
