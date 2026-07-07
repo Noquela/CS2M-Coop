@@ -9,6 +9,7 @@ namespace CS2M.Commands.Handler.Game
         public SpeedSyncHandler()
         {
             TransactionCmd = false;
+            RelayOnServer = false; // issue #6: host-authoritative — a client never legitimately authors this
         }
 
         protected override void Handle(SpeedCommand command)

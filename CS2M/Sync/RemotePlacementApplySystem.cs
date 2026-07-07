@@ -207,6 +207,11 @@ namespace CS2M.Sync
                     && !EntityManager.HasComponent<Game.Prefabs.BuildingExtensionData>(prefabEntity))
                 {
                     CS2M.Log.Info($"[Place] SKIP derived sub-object name={cmd.PrefabName} owner={cmd.OwnerPrefabName}");
+                    // Issue #5: the discard happens BEFORE the CS2M_RemotePlaced stamp below, so this
+                    // half-built entity (PrefabRef+Transform, no Owner/SyncId) matched DeleteDetector's
+                    // native query and re-broadcast a phantom DeleteCommand that erased the REAL
+                    // extension at this position on every other PC. Tag it as a remote-side delete.
+                    EntityManager.AddComponent<CS2M_RemoteDeleted>(obj);
                     EntityManager.AddComponent<Deleted>(obj);
                     return;
                 }
@@ -215,6 +220,8 @@ namespace CS2M.Sync
                 if (owner == Entity.Null)
                 {
                     CS2M.Log.Info($"[Place] SKIP extension noOwner name={cmd.PrefabName} owner={cmd.OwnerPrefabName}");
+                    // Issue #5: same phantom-delete echo as the SKIP above.
+                    EntityManager.AddComponent<CS2M_RemoteDeleted>(obj);
                     EntityManager.AddComponent<Deleted>(obj);
                     return;
                 }

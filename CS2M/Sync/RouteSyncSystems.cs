@@ -711,7 +711,11 @@ namespace CS2M.Sync
                 ComponentType.ReadOnly<RouteNumber>(),
                 ComponentType.ReadOnly<PrefabRef>(),
                 ComponentType.Exclude<Temp>(),
-                ComponentType.Exclude<Deleted>());
+                ComponentType.Exclude<Deleted>(),
+                // Issue #10: a session-created line is ONLY addressable by its SyncId. Without this
+                // exclusion, a save-line command (syncId==0) whose number the game recycled onto a
+                // NEW session line matched it by number+prefab and rewrote its waypoints.
+                ComponentType.Exclude<CS2M_SyncId>());
             // Anything a waypoint can connect to keeps a ConnectedRoute buffer (stops, platforms).
             _stops = GetEntityQuery(
                 ComponentType.ReadOnly<ConnectedRoute>(),

@@ -156,6 +156,35 @@ namespace CS2M.Networking
             SendWorldTo(player);
         }
 
+        /// <summary>
+        ///     Host-side cleanup when a client peer drops (issue #3): without this the ghost entry
+        ///     blocked the same username from ever reconnecting (PreconditionsCheckHandler) and
+        ///     ResyncAll kept streaming the world to a dead NetPeer.
+        /// </summary>
+        public void PlayerDisconnected(NetPeer peer)
+        {
+            RemotePlayer player = GetPlayerByPeer(peer);
+            if (player == null)
+            {
+                return;
+            }
+
+            Log.Info($"RemotePlayer '{player.Username}' disconnected (peer {peer.Id}).");
+            PlayerListConnected.Remove(player);
+            PlayerListJoined.Remove(player);
+            PlayerDisconnectedEvent?.Invoke(player);
+        }
+
+        /// <summary>
+        ///     Session teardown (issue #3): the singleton (and its lists) outlives the session, so
+        ///     drop every remote entry and keep only the local player. Called from LocalPlayer.Inactive().
+        /// </summary>
+        public void ResetPlayerLists()
+        {
+            PlayerListConnected.RemoveAll(p => !ReferenceEquals(p, LocalPlayer));
+            PlayerListJoined.RemoveAll(p => !ReferenceEquals(p, LocalPlayer));
+        }
+
         /// <summary>Serializes the current world and streams it to one client as WorldTransferCommand slices.</summary>
         public void SendWorldTo(RemotePlayer player)
         {

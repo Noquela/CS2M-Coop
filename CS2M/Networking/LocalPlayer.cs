@@ -404,14 +404,9 @@ namespace CS2M.Networking
             //     return false;
             // }
 
-            if (PlayerType == PlayerType.SERVER)
-            {
-                //TODO: Clear server variables (player list, etc.)
-            }
-            else if (PlayerType == PlayerType.CLIENT)
-            {
-                //TODO: Clean-Up client
-            }
+            // Issue #3: the NetworkInterface singleton (and its player lists) outlives the session —
+            // drop every remote entry so a future session doesn't inherit ghost players.
+            NetworkInterface.Instance.ResetPlayerLists();
 
             _networkManager?.Stop();
 

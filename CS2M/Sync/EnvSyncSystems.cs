@@ -95,6 +95,14 @@ namespace CS2M.Sync
                 return;
             }
 
+            // Issue #6: host-authoritative — the host's own climate/time IS the truth; never absorb
+            // a client-authored EnvSyncCommand (mirrors SpeedSyncApplySystem's role guard).
+            if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
+            {
+                RemoteEnvQueue.TryTake(out _);
+                return;
+            }
+
             if (!RemoteEnvQueue.TryTake(out EnvSyncCommand cmd))
             {
                 return;

@@ -655,6 +655,28 @@ namespace CS2M.Sync
                 return; // already converged — silent skip (idempotent)
             }
 
+            // Issue #4: a cell painted THIS frame (game tool writes at Mod4; we run at Mod5) hasn't
+            // been seen by ZoneDetectorSystem (ModificationEnd) yet — the shared snapshot still holds
+            // the pre-paint state. Overwriting now would revert the paint on screen AND absorb it as
+            // baseline, so it would never ship. Defer instead: the paint round-trips to the host and
+            // the next authority sweep (≤250 ms) re-broadcasts this block with the edit merged in.
+            if (ZoneSync.Snapshot.TryGetValue(target, out ushort[] snap) && EntityManager.HasBuffer<Cell>(target))
+            {
+                DynamicBuffer<Cell> curCells = EntityManager.GetBuffer<Cell>(target, true);
+                if (snap.Length == curCells.Length)
+                {
+                    for (int i = 0; i < snap.Length; i++)
+                    {
+                        if (curCells[i].m_Zone.m_Index != snap[i])
+                        {
+                            CS2M.Log.Info($"[ZoneAuth] DEFER heal block=({cmd.PosX[idx]:F0},{cmd.PosZ[idx]:F0}) " +
+                                          "— local edit pending detection");
+                            return;
+                        }
+                    }
+                }
+            }
+
             int oldW = localBlock.m_Size.x;
             int oldH = localBlock.m_Size.y;
 

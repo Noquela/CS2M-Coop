@@ -29,6 +29,15 @@ namespace CS2M.Sync
                 return;
             }
 
+            // Issue #6: host-authoritative — the host's own cash IS the truth, it must never absorb
+            // a MoneySyncCommand (which only a buggy/foreign client could have authored). Same guard
+            // SpeedSyncApplySystem already has. Drain the queue so stale values don't linger.
+            if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
+            {
+                RemoteMoneyQueue.TryTake(out _);
+                return;
+            }
+
             if (!RemoteMoneyQueue.TryTake(out int cash))
             {
                 return;

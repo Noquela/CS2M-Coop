@@ -250,6 +250,12 @@ namespace CS2M.Sync
                 Entity covering = FindCoveringEdge(bezier, netPrefab);
                 if (covering != Entity.Null && !EntityManager.HasComponent<Deleted>(covering))
                 {
+                    // Echo guard (issue #1): without this Mark, NetEditDetectorSystem sees the covering
+                    // edge Deleted and re-broadcasts a NetDeleteCommand for it — every received T/X
+                    // split leaked a phantom delete. Same bookkeeping SplitTargetEdge already does;
+                    // the detector hashes NODE positions, which sit on the curve endpoints (0.5 m grid).
+                    Curve coveringCurve = EntityManager.GetComponentData<Curve>(covering);
+                    RemoteNetEcho.Mark(RemoteNetEcho.SegHash(coveringCurve.m_Bezier.a, coveringCurve.m_Bezier.d, "del"));
                     EntityManager.AddComponent<Deleted>(covering);
                     CS2M.Log.Info($"[Net] DELETE split-original edge={covering.Index} (piece {cmd.PrefabName} replaces it)");
                 }

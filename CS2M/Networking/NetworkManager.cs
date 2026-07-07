@@ -212,6 +212,22 @@ namespace CS2M.Networking
         private void ListenerOnNetworkReceiveEvent(NetPeer peer, NetPacketReader reader, byte channel,
             DeliveryMethod deliveryMethod)
         {
+            // Issue #2: per-packet guard. Without it a single malformed payload (or an exception
+            // inside a handler's Parse) threw out of PollEvents — the packet (and the rest of that
+            // frame's queue) was silently lost, which is itself a desync. Log and drop instead;
+            // law 9 ("a bad command must never kill a system") applied to the outermost gate.
+            try
+            {
+                ReceiveOne(peer, reader);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"NetworkManager: dropping packet from peer {peer.Id}: {ex}");
+            }
+        }
+
+        private void ReceiveOne(NetPeer peer, NetPacketReader reader)
+        {
             CommandBase command = CommandInternal.Instance.Deserialize(reader.GetRemainingBytes());
             // v52 wire-tap IN: the single point every received packet funnels through, with the peer
             // id so the host can attribute who sent what. Inert unless CS2M_WIRETAP=1; never throws.
@@ -221,6 +237,15 @@ namespace CS2M.Networking
             }
 
             CommandHandler handler = CommandInternal.Instance.GetCommandHandler(command.GetType());
+            // Issue #2: unknown command type (protocol skew that slipped past the version handshake)
+            // returned a silent null and NRE'd below — reject loudly instead.
+            if (handler == null)
+            {
+                Log.Error($"NetworkManager: no handler for command type {command.GetType()} " +
+                          $"[PeerId: {peer.Id}] — dropping (protocol mismatch?)");
+                return;
+            }
+
             Log.Trace($"NetworkManager: OnNetworkReceiveEvent [PeerId: {peer.Id}] {command.GetType()}");
             if (command is PreconditionsCheckCommand)
             {
@@ -306,7 +331,9 @@ namespace CS2M.Networking
             else if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
             {
                 NetworkInterface.Instance.GetPlayerByPeer(peer)?.HandleDisconnect();
-                // TODO: Handle peer disconnect on server
+                // Issue #3: remove the player from the connected/joined lists so the username can
+                // reconnect and ResyncAll stops iterating dead peers.
+                NetworkInterface.Instance.PlayerDisconnected(peer);
             }
         }
 
@@ -431,6 +458,13 @@ namespace CS2M.Networking
         public void Stop()
         {
             _netManager.Stop();
+            // Issue #3: on an abrupt shutdown the per-peer removal in the disconnect listener never
+            // ran — the static map would leak ghost latencies into the next session's roster.
+            lock (_latencyLock)
+            {
+                _latencyByPlayerId.Clear();
+            }
+
             Log.Info("NetworkManager stopped.");
         }
     }

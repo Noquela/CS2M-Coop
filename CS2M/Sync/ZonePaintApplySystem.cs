@@ -170,13 +170,32 @@ namespace CS2M.Sync
                 applied++;
             }
 
-            // Refresh snapshot (handle still valid: no structural change since GetBuffer) and mark the
-            // echo TTL so the detector absorbs the game's own cell recompute instead of re-sending.
+            // Refresh snapshot + echo TTL so the detector doesn't bounce this apply back.
+            // Issue #4: overlay ONLY the cells this command wrote onto the previous snapshot —
+            // snapshotting the whole buffer absorbed any LOCAL paint pending on OTHER cells of this
+            // block (painted this frame, not yet seen by the detector) as baseline: it stayed on this
+            // screen but never shipped, a silent one-machine divergence. With the overlay, the local
+            // cells still differ from the snapshot at ModificationEnd and the detector ships them.
             int n = cells.Length;
-            var cur = new ushort[n];
-            for (int i = 0; i < n; i++)
+            ushort[] cur;
+            if (ZoneSync.Snapshot.TryGetValue(target, out ushort[] prevSnap) && prevSnap.Length == n)
             {
-                cur[i] = cells[i].m_Zone.m_Index;
+                cur = (ushort[])prevSnap.Clone();
+            }
+            else
+            {
+                // No usable baseline: mirror the detector's first-sight rule (all-Unzoned), so
+                // derivation-restored zones on a never-snapshotted block still ship as a local edit.
+                cur = new ushort[n];
+            }
+
+            for (int k = 0; k < count; k++)
+            {
+                int idx = cmd.CellIndices[k];
+                if (idx >= 0 && idx < n && ZoneSync.IsKnown(cmd.ZoneNames[k]))
+                {
+                    cur[idx] = ZoneSync.Index(cmd.ZoneNames[k]);
+                }
             }
 
             ZoneSync.Snapshot[target] = cur;

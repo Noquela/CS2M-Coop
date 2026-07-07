@@ -90,8 +90,38 @@ namespace CS2M.Sync
                     // branch below and be treated as a fresh local edit.
                     if (ZoneEcho.IsMarked(e))
                     {
-                        ZoneSync.Snapshot[e] = cur;
-                        continue;
+                        // Issue #4: absorb ONLY when the buffer matches what the remote apply wrote
+                        // (ZonePaintApply/ZoneAuth both refresh the snapshot at write time). A cell
+                        // that differs here was painted LOCALLY inside the echo window — swallowing
+                        // it as baseline lost the player's paint permanently. Fall through and let
+                        // the normal diff ship it (the receiver's apply is idempotent, no ping-pong).
+                        bool matchesSnapshot = !firstSight && prev.Length == n;
+                        if (matchesSnapshot)
+                        {
+                            for (int i = 0; i < n; i++)
+                            {
+                                if (cur[i] != prev[i])
+                                {
+                                    matchesSnapshot = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (matchesSnapshot)
+                        {
+                            continue; // true echo — nothing new
+                        }
+
+                        if (firstSight)
+                        {
+                            // A block BORN from a remote apply must never be first-sighted as a local
+                            // edit (pre-#4 behavior kept): absorb and move on.
+                            ZoneSync.Snapshot[e] = cur;
+                            continue;
+                        }
+
+                        CS2M.Log.Info($"[Zone] LOCAL-EDIT-IN-ECHO-WINDOW block={e.Index} — shipping diff");
                     }
 
                     if (firstSight)

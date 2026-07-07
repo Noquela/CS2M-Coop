@@ -1035,8 +1035,17 @@ namespace CS2M.Sync
         private HashBundle _lastLocal;
         private HashBundle _lastHost;
         private bool _haveLast;
-        private int _strikes;
+        // Issue #12: strikes are per-domain — two transient drifts in DIFFERENT domains must not
+        // add up to a heal/warn trigger for either (the old single counter did exactly that).
+        private readonly Dictionary<string, int> _domainStrikes = new Dictionary<string, int>();
         private double _lastWarnedAt;
+
+        /// <summary>Domain key of a drift string ("water 3vs4(hash)" → "water").</summary>
+        private static string DomainKey(string drift)
+        {
+            int cut = drift.IndexOfAny(new[] { ' ', '(' });
+            return cut >= 0 ? drift.Substring(0, cut) : drift;
+        }
 
         protected override void OnCreate()
         {
@@ -1062,7 +1071,7 @@ namespace CS2M.Sync
         {
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
-                _strikes = 0;
+                _domainStrikes.Clear();
                 _haveLast = false;
                 return;
             }
@@ -1110,9 +1119,37 @@ namespace CS2M.Sync
 
                 if (drifts.Count > 0)
                 {
-                    _strikes++;
-                    CS2M.Log.Info($"[Hash] DRIFT strike={_strikes} [{string.Join(", ", drifts)}] " +
-                                  $"money {local.Money}vs{host.Money}");
+                    // Per-domain bookkeeping: bump strikes for the domains drifting NOW, drop the
+                    // ones that recovered (their transient cleared on its own).
+                    var current = new HashSet<string>();
+                    foreach (string d in drifts)
+                    {
+                        current.Add(DomainKey(d));
+                    }
+
+                    var gone = new List<string>();
+                    foreach (string dom in _domainStrikes.Keys)
+                    {
+                        if (!current.Contains(dom))
+                        {
+                            gone.Add(dom);
+                        }
+                    }
+
+                    foreach (string dom in gone)
+                    {
+                        _domainStrikes.Remove(dom);
+                    }
+
+                    var strikeParts = new List<string>();
+                    foreach (string dom in current)
+                    {
+                        _domainStrikes[dom] = _domainStrikes.TryGetValue(dom, out int s) ? s + 1 : 1;
+                        strikeParts.Add($"{dom}:{_domainStrikes[dom]}");
+                    }
+
+                    CS2M.Log.Info($"[Hash] DRIFT strikes=[{string.Join(",", strikeParts)}] " +
+                                  $"[{string.Join(", ", drifts)}] money {local.Money}vs{host.Money}");
 
                     // DIAGNOSTIC: on a node/road divergence, dump this side's nodes+edges so the phantom
                     // node/edge is pinpointable by diffing against the host's [NodeDump/EdgeDump:HOST] lines.
@@ -1137,27 +1174,37 @@ namespace CS2M.Sync
                     {
                         StateHash.DumpBuildings(EntityManager, _buildings, _prefabs, "CLIENT");
                     }
-                    if (_strikes >= 2)
+                    // Only domains that drifted on 2+ CONSECUTIVE samples are ripe for heal/warn.
+                    var ripe = new List<string>();
+                    foreach (string d in drifts)
                     {
-                        SyncHealth.SetDrift(true, string.Join(", ", drifts));
+                        if (_domainStrikes[DomainKey(d)] >= 2)
+                        {
+                            ripe.Add(d);
+                        }
+                    }
+
+                    if (ripe.Count > 0)
+                    {
+                        SyncHealth.SetDrift(true, string.Join(", ", ripe));
                         // v60 auto-heal: request the diverged domains' authoritative slices instead of
                         // nagging the players. The chat warning only fires when some drifting domain
                         // is NOT healable (roads/buildings/areas) or a heal isn't converging.
-                        if (!AutoHealClient.TryHeal(drifts, _terrain))
+                        if (!AutoHealClient.TryHeal(ripe, _terrain))
                         {
-                            Warn(drifts);
+                            Warn(ripe);
                         }
                     }
                 }
                 else
                 {
-                    if (_strikes > 0)
+                    if (_domainStrikes.Count > 0)
                     {
                         CS2M.Log.Verbose("[Hash] converged (drift cleared)");
                         AutoHealClient.Converged();
                     }
 
-                    _strikes = 0;
+                    _domainStrikes.Clear();
                     SyncHealth.SetDrift(false, "");
                 }
             }
@@ -1181,7 +1228,7 @@ namespace CS2M.Sync
 
         private void Warn(List<string> drifts)
         {
-            _strikes = 0;
+            _domainStrikes.Clear();
             double now = UnityEngine.Time.realtimeSinceStartupAsDouble;
             if (now - _lastWarnedAt < 300.0)
             {
