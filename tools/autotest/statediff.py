@@ -117,10 +117,16 @@ _CELL_FLAG_RE = re.compile(r"~([0-9A-Fa-f]+)")
 
 
 def block_strip_emergent(tok):
-    """Zera os bits emergentes (Occupied/Overridden) de cada sufixo ~hex de célula; remove o ~ quando
-    o resto fica 0. Dois blocos que só diferem por growable colapsam no mesmo token depois disto."""
+    """Zera os bits emergentes de cada sufixo ~hex de célula; remove o ~ quando o resto fica 0. Dois
+    blocos que só diferem por growable colapsam no mesmo token. Emergente = Occupied/Overridden SEMPRE;
+    E quando a célula está Occupied (prédio cresceu ali, sincado), o bit Visible (0x8) tambconfigém é
+    derivado/transiente do render do predio — as duas maquinas podem discordar 1 bit sem que o predio
+    divirja (host ~28 vs client ~20: ambas Occupied, só o Visible flutua). Então mascara Visible SÓ
+    quando Occupied está presente."""
     def repl(m):
-        v = int(m.group(1), 16) & ~_EMERGENT_MASK
+        raw = int(m.group(1), 16)
+        mask = _EMERGENT_MASK | (0x8 if (raw & 0x20) else 0)  # +Visible se Occupied
+        v = raw & ~mask
         return "" if v == 0 else f"~{v:X}"
     return _CELL_FLAG_RE.sub(repl, tok)
 
@@ -150,6 +156,7 @@ def diff_subsys(tag, host_log, client_log):
     # "some/sobra de verdade". Em BlockDump: FALTANDO = o próprio bloco derivado da rua não
     # existe no client (cascata BuildOrder); FORMA DIFERE = bloco existe mas células/pintura
     # divergem (índice/paint).
+    real_divergence = False  # ORDEM/growable-only NAO contam — sao benignos (tiebreak / sim emergente)
     if tag in ("AreaDump", "BlockDump"):
         h_by_c = {area_center(t): t for t in only_host}
         c_by_c = {area_center(t): t for t in only_client}
@@ -168,18 +175,26 @@ def diff_subsys(tag, host_log, client_log):
                     print(f"  . growable-only @ {ctr} (Occupied/Overridden divergem — emergente, esperado)")
                     continue
             print(f"  ~ FORMA DIFERE @ {ctr}:  host={h_by_c[ctr]}  client={c_by_c[ctr]}")
+            real_divergence = True
         gone = [h_by_c[k] for k in h_by_c if k not in c_by_c]
         extra = [c_by_c[k] for k in c_by_c if k not in h_by_c]
         for t in sorted(gone):
             print(f"  - FALTANDO no client:  {t}")
+            real_divergence = True
         for t in sorted(extra):
             print(f"  + FANTASMA no client:  {t}")
+            real_divergence = True
     else:
         for t in sorted(only_host):
             print(f"  - FALTANDO no client:  {t}")
+            real_divergence = True
         for t in sorted(only_client):
             print(f"  + FANTASMA no client:  {t}")
+            real_divergence = True
 
+    if not real_divergence:
+        print("  [OK] só diferenças benignas (ordem/growable emergente) — sincronia real intacta")
+        return True
     return False
 
 
