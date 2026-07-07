@@ -156,25 +156,42 @@ namespace CS2M.Sync
         private int _t5ClientWaterPollFrames;
         private bool _t5ClientFinishLogged;
 
-        // CS2M_AP_TEST=6: FOUR-GAP — a single 2-sim scene exercising the four gated fixes that had no
-        // scene of their own yet: route-reroute (CS2M_ROUTEFIX), building-policy prefab-filter
-        // (CS2M_POLICYFIX), devtree negative-balance race (CS2M_DEVTREEFIX) and building move w/
-        // SubNet/SubArea children + rotation (CS2M_MOVEFIX). All four sub-scenarios are HOST-AUTHORED
+        // CS2M_AP_TEST=6: FIVE-GAP — a single 2-sim scene exercising the gated fixes that had no scene
+        // of their own yet: route-reroute (CS2M_ROUTEFIX), building-policy prefab-filter
+        // (CS2M_POLICYFIX), devtree negative-balance race (CS2M_DEVTREEFIX), building move w/
+        // SubNet/SubArea children + rotation (CS2M_MOVEFIX) and, v60, the legacy-net-path node-position
+        // reconciliation (CS2M_NODEHEAL — see RunTest6NodeHeal). All five sub-scenarios are HOST-AUTHORED
         // using the SAME "dual-apply" pattern every other 2-sim Send* helper in this class already uses
         // (RemoteXQueue.Enqueue so the host's OWN world applies exactly what a genuinely remote command
         // would, plus Command.SendToAll so the client applies the identical command) — see
         // SendZone/SendMove/SendPolicy/SendDevTree for the established precedent this scene follows. No
-        // client-side scripted action is needed for any of the four: the client's own ALWAYS-ON apply
-        // systems (RouteApplySystem/PolicyApplySystem/DevTreeApplySystem/RemoteEditApplySystem) consume
-        // the shipped commands on their own — exactly the code path each fix lives on. Four independent
-        // step machines (dev/pol/move/route) run in parallel off one shared join-settle timer; the FINAL
-        // "TEST6 DONE" marker only fires once all four report done AND an extra settle window has
-        // elapsed — the TEST5 lesson: FINAL must be measured AFTER propagation, never before.
+        // client-side SCRIPTED action is needed for any of the five (the client's own ALWAYS-ON apply
+        // systems — RouteApplySystem/PolicyApplySystem/DevTreeApplySystem/RemoteEditApplySystem/
+        // NetPlaceApplySystem — consume the shipped commands on their own, exactly the code path each fix
+        // lives on) EXCEPT one delayed READ: DEVTREEFIX's negative-balance race can only be confirmed by
+        // also reading the CLIENT's own DevTreePoints singleton some time after the host's purchase
+        // propagates (see RunTest6ClientStep's "TEST6 DEVTREE CLIENT" log) — a host-only read can't tell
+        // whether the client's mirrored deduction actually went negative or was floored. Five independent
+        // step machines (dev/pol/move/route/nodeheal) run in parallel off one shared join-settle timer;
+        // the FINAL "TEST6 DONE" marker only fires once all five report done AND an extra settle window
+        // has elapsed — the TEST5 lesson: FINAL must be measured AFTER propagation, never before.
         private bool _test6;
         private int _t6HostTimer = 150; // ~2.5s settle after the join handshake, same order as TEST5's 120f
 
         private bool _t6DevDone;
         private int _t6DevTimer;
+        private int _t6DevStep;              // v60: 0 = force+buy, 1 = delayed FINAL read — see RunTest6Dev
+        private int _t6DevBefore;            // forced points balance right before the buy (for the FINAL log)
+        private int _t6DevCost;
+        private string _t6DevNodeName;
+
+        // v60: the CLIENT's own delayed read of DevTreePoints — see RunTest6ClientStep. Fires once, off a
+        // fixed frame count from the client's own first RunTest6ClientStep call (not off any host signal;
+        // this process never sees the host's clock) chosen generous enough to cover the host's own
+        // settle(150f) + delayed FINAL(300f) plus network round-trip — the same "host/client fire within
+        // ~1-2s of each other in real time" assumption TEST5 already established for this file.
+        private bool _t6DevClientLogged;
+        private int _t6DevClientTimer = 480; // ~8s
 
         private bool _t6PolDone;
         private int _t6PolStep;
@@ -200,6 +217,19 @@ namespace CS2M.Sync
         private Entity _t6RouteEntity;
         private string _t6RoutePrefabName;
         private int _t6RouteNumber;
+
+        // v60: NODEHEAL (CS2M_NODEHEAL) — see RunTest6NodeHeal's doc comment for the full scenario.
+        private bool _t6NodeHealDone;
+        private int _t6NodeHealStep;         // 0 = build road1, 1 = send road2 (id reuse + 15 m offset), 2 = FINAL
+        private int _t6NodeHealTimer = 60;   // ~1s own settle on top of the shared _t6HostTimer
+        private string _t6NodeHealType;
+        private string _t6NodeHealName;
+        private ulong _t6NodeHealIdA;        // road1's start node id (fresh, unused after setup — logged for completeness)
+        private ulong _t6NodeHealIdB;        // road1's end node id — REUSED by road2's start at a moved position
+        private ulong _t6NodeHealIdD;        // road2's own far end (fresh)
+        private float3 _t6NodeHealP1Start;
+        private float3 _t6NodeHealP1End;     // road1's end position == idB's ORIGINAL position
+        private float3 _t6NodeHealP2;        // idB's DECLARED position on road2 == P1End + ~15 m (the drift)
 
         private bool _t6FinalLogged;
         private int _t6FinalTimer = 600; // ~10s settle after every sub-scenario reports done before DONE
@@ -5427,11 +5457,11 @@ namespace CS2M.Sync
             L($"[Auto] TEST5 CLIENT-DELETED-WATER pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) entity={target.Index}");
         }
 
-        // ------------------------- CS2M_AP_TEST=6: FOUR-GAP (ROUTEFIX/POLICYFIX/DEVTREEFIX/MOVEFIX) -------------------------
+        // ------------------------- CS2M_AP_TEST=6: FIVE-GAP (ROUTEFIX/POLICYFIX/DEVTREEFIX/MOVEFIX/NODEHEAL) -------------------------
 
-        /// <summary>Host driver: one shared join-settle timer, then four independent step machines run
+        /// <summary>Host driver: one shared join-settle timer, then five independent step machines run
         /// every frame in parallel (they touch disjoint entities, so there is no ordering dependency
-        /// between them). Logs the "TEST6 DONE" marker only once ALL FOUR report done AND an extra
+        /// between them). Logs the "TEST6 DONE" marker only once ALL FIVE report done AND an extra
         /// settle window has elapsed, so the client's apply systems have had time to consume every
         /// shipped command before anything downstream reads the client's state as final.</summary>
         private void RunTest6HostStep()
@@ -5442,8 +5472,9 @@ namespace CS2M.Sync
             if (!_t6PolDone) { RunTest6Policy(); }
             if (!_t6MoveDone) { RunTest6Move(); }
             if (!_t6RouteDone) { RunTest6Route(); }
+            if (!_t6NodeHealDone) { RunTest6NodeHeal(); }
 
-            if (_t6DevDone && _t6PolDone && _t6MoveDone && _t6RouteDone && !_t6FinalLogged)
+            if (_t6DevDone && _t6PolDone && _t6MoveDone && _t6RouteDone && _t6NodeHealDone && !_t6FinalLogged)
             {
                 if (_t6FinalTimer > 0) { _t6FinalTimer--; return; }
                 _t6FinalLogged = true;
@@ -5453,9 +5484,9 @@ namespace CS2M.Sync
 
         /// <summary>DEVTREE sub-scenario (CS2M_DEVTREEFIX): buys a locked node the SAME way the normal
         /// roteiro's SendDevTree does (host applies via the real RemoteDevTreeQueue/DevTreeApplySystem
-        /// primitive, then ships the identical command), but also logs the points balance before/after
-        /// so a runner can confirm it doesn't get floored to 0 when the mirrored XP hasn't crossed the
-        /// milestone yet on one side — see DevTreeApplySystem's class doc for the exact race.
+        /// primitive, then ships the identical command), then reads back the points balance so a runner
+        /// can confirm it doesn't get floored to 0 when the mirrored XP hasn't crossed the milestone yet
+        /// on one side — see DevTreeApplySystem's class doc for the exact race.
         ///
         /// v56: a fresh/near-fresh save has the host sitting at DevTreePoints=0, so a 0-cost-or-covered
         /// purchase floors to 0 whether or not CS2M_DEVTREEFIX is on — 0-cost=0 either way, never
@@ -5464,11 +5495,26 @@ namespace CS2M.Sync
         /// mirrored XP crosses the milestone): set DevTreePoints — the EXACT singleton
         /// DevTreeApplySystem.ApplyOne itself reads/writes — to LESS than the chosen node's cost right
         /// before buying, so the deduction goes negative with the fix on (or is silently floored/erased
-        /// with it off).</summary>
+        /// with it off).
+        ///
+        /// v60 FIX: the old version read the balance back IMMEDIATELY after Enqueue/SendToAll — but
+        /// RemoteDevTreeQueue is drained by DevTreeApplySystem's OWN OnUpdate, a DIFFERENT system that may
+        /// not have run yet this frame (or even this tick, depending on system-group order relative to
+        /// AutopilotSystem). Two live runs measured "2->2" — a no-op read that never saw the deduction,
+        /// so the scene validated nothing. Split into two steps: buy, then a DELAYED read ~5s later — the
+        /// same "measure after propagation, never before" lesson TEST5/TEST6-ROUTE already teach this
+        /// file — and log DevTreeFix's live gate value at read time so a runner knows which floor/negative
+        /// outcome to expect without cross-referencing source.</summary>
         private void RunTest6Dev()
         {
             if (_t6DevTimer > 0) { _t6DevTimer--; return; }
 
+            if (_t6DevStep == 0) { Test6_DevBuy(); return; }
+            if (_t6DevStep == 1) { Test6_DevFinal(); }
+        }
+
+        private void Test6_DevBuy()
+        {
             EntityQuery nodes = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.DevTreeNodeData>());
             Entity node = Entity.Null;
             NativeArray<Entity> ents = nodes.ToEntityArray(Allocator.Temp);
@@ -5529,8 +5575,24 @@ namespace CS2M.Sync
             RemoteDevTreeQueue.Enqueue(cmd);     // host buys (same primitive SendDevTree/DevTreeApplySystem use)
             Command.SendToAll?.Invoke(cmd);      // client buys -> exercises DEVTREEFIX's negative-balance path
 
-            int after = pointsQuery.IsEmptyIgnoreFilter ? int.MinValue : pointsQuery.GetSingleton<DevTreePoints>().m_Points;
-            L($"[Auto] TEST6 DEVTREE points {forcedPoints}->{after} cost={cost} node={p.name} " +
+            _t6DevNodeName = p.name;
+            _t6DevCost = cost;
+            _t6DevBefore = forcedPoints;
+            _t6DevStep = 1;
+            _t6DevTimer = 300; // ~5s — see v60 doc above: DevTreeApplySystem drains the queue on its own
+                                // OnUpdate, not synchronously here, so reading immediately can miss the
+                                // deduction entirely ("2->2").
+        }
+
+        private void Test6_DevFinal()
+        {
+            EntityQuery pointsQuery = GetEntityQuery(ComponentType.ReadOnly<DevTreePoints>());
+            int finalPoints = pointsQuery.IsEmptyIgnoreFilter
+                ? int.MinValue
+                : pointsQuery.GetSingleton<DevTreePoints>().m_Points;
+
+            L($"[Auto] TEST6 DEVTREE FINAL hostPoints={finalPoints} forcedBefore={_t6DevBefore} " +
+              $"cost={_t6DevCost} node={_t6DevNodeName} gate={DevTreeFix.Enabled} " +
               $"expectFloorAt0={!DevTreeFix.Enabled} expectNegative={DevTreeFix.Enabled}");
             _t6DevDone = true;
         }
@@ -6128,16 +6190,203 @@ namespace CS2M.Sync
             _t6RouteDone = true;
         }
 
-        /// <summary>Client side of the FOUR-GAP scene: nothing to script. All four sub-scenarios are
-        /// host-authored and dual-applied (see the class-level TEST6 doc comment), so the client's own
-        /// always-on apply systems consume every shipped command with no scripted action needed here —
-        /// this just logs once so the log makes that explicit instead of looking silently idle.</summary>
+        /// <summary>NODEHEAL sub-scenario (CS2M_NODEHEAL): synthesizes the SENDER-reused-node-identity
+        /// drift the legacy net path's NetPlaceApplySystem.HealNodePosition exists for, but which never
+        /// happens on its own in these scenes (real drift needs a mid-draw split/merge on the sender —
+        /// see NodeHeal's class doc — and no other TEST6/TRIREPRO scene edits a road that way). Built with
+        /// the SAME dual-apply primitive every other Send* helper in this class uses
+        /// (RemoteNetQueue.Enqueue + Command.SendToAll), on the LEGACY identity path (HasNodes=true,
+        /// StartNodeId/EndNodeId set, no AtomicBatch) — the exact path ResolveNode/HealNodePosition live
+        /// on, and the one the real NetDetectorSystem.DetectPlaced ships for by calling
+        /// CS2M_NodeSyncIds.Ensure on the local node's own entity (see that system's DETECT+SEND site).
+        /// This scene has no local node entity to Ensure() from (nothing was drawn with the real tool), so
+        /// it mints ids directly via CS2M_SyncIdSystem.Allocate() — the same thing Ensure does internally
+        /// on a first touch, and the same shortcut every other synthetic Send* helper here already takes
+        /// (see StraightNet/AuthNet: SyncId = CS2M_SyncIdSystem.Allocate()).
+        ///
+        /// Step 0 places a short 50 m road (idA -> idB, fresh ids) — the SAME real primitive a placed road
+        /// uses, so idB ends up registered to a REAL Game.Net.Node entity on both host and client (each
+        /// process keeps its own CS2M_NodeSyncIds.Map — there is no cross-process state here, exactly like
+        /// every other dual-applied sub-scenario in this file). Step 1 sends a SECOND road whose start
+        /// REUSES idB but declares its position ~15 m away from where idB's node actually sits — the exact
+        /// shape a real sender emits when its own net editor folds a split/reused endpoint's identity onto
+        /// a node that has since moved (see HealNodePosition's doc comment: "a split/derived node's
+        /// identity can be handed off to a DIFFERENT physical node... once TryResolve hit, the freshly-
+        /// declared pos was silently discarded"). 15 m sits ABOVE NodeHealMergeDist (10 m) but nothing else
+        /// is registered near the declared position, so NodeHeal.Enabled — if the search for a merge
+        /// survivor finds nothing — falls through to the SNAP branch and logs HEAL-LARGE (dist>10m warning)
+        /// immediately followed by HEAL-SNAP (the node actually moves); with the gate OFF, ResolveNode
+        /// returns the STALE node untouched and NEITHER log line appears — the drift persists exactly as
+        /// field-reported. Both log lines are emitted by NetPlaceApplySystem itself (this class only sends
+        /// the command and reports what it sent); a runner confirms the fix by grepping each PC's own log
+        /// for "[Net] HEAL-SNAP" / "[Net] HEAL-MERGE".
+        ///
+        /// The host applies BOTH commands to its OWN world too (RemoteNetQueue.Enqueue), same as every
+        /// other Send* helper here — there is no special "client-only" send primitive in this codebase (no
+        /// Command.SendToAll-without-local-apply exists; Command.SendToAll always ships to every OTHER
+        /// connected peer, and RemoteNetQueue.Enqueue is how THIS process applies its own copy — the two
+        /// calls target disjoint audiences by construction, not by an opt-out flag). This is not a side
+        /// effect to work around: HealNodePosition is the exact same code path on host and client, so the
+        /// host reusing/moving idB's node exercises (and reports on) the identical mechanic, deterministically,
+        /// on both sides — precisely the cross-machine confirmation every other 2-sim STRESS helper in this
+        /// class (SendJunctionStress, SendMovedJunctionStress) already relies on host-applies-too for.</summary>
+        private void RunTest6NodeHeal()
+        {
+            if (_t6NodeHealTimer > 0) { _t6NodeHealTimer--; return; }
+
+            if (_t6NodeHealStep == 0) { Test6_NodeHealBuildRoad1(); return; }
+            if (_t6NodeHealStep == 1) { Test6_NodeHealSendRoad2(); return; }
+            if (_t6NodeHealStep == 2) { Test6_NodeHealFinal(); }
+        }
+
+        private void Test6_NodeHealBuildRoad1()
+        {
+            if (_edgeQuery.IsEmptyIgnoreFilter || !TryAnchor(out float3 anchor))
+            {
+                L("[Auto] TEST6 NODEHEAL SKIP no road/anchor available to source a prefab from");
+                _t6NodeHealDone = true;
+                return;
+            }
+
+            NativeArray<Entity> ents = _edgeQuery.ToEntityArray(Allocator.Temp);
+            string type, name;
+            try
+            {
+                Entity src = ents[0];
+                if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(src).m_Prefab, out PrefabBase prefab)
+                    || prefab == null)
+                {
+                    L("[Auto] TEST6 NODEHEAL SKIP no resolvable road prefab");
+                    _t6NodeHealDone = true;
+                    return;
+                }
+
+                type = prefab.GetType().Name;
+                name = prefab.name;
+            }
+            finally { ents.Dispose(); }
+
+            _t6NodeHealType = type;
+            _t6NodeHealName = name;
+
+            // Clear quadrant, well away from anything else TEST6 touches — POLICY/MOVE/ROUTE all act on
+            // whatever native building/line the save already has (unknown position), not on world
+            // geometry this scene places, so any offset clear of the anchor is disjoint from them by
+            // construction. +400/-400 keeps it clear of TRIREPRO's own STRESS offsets too (that scene
+            // never runs concurrently with test=6, but reusing distinct coordinates avoids any confusion
+            // reading a combined log).
+            _t6NodeHealP1Start = new float3(anchor.x + 400f, anchor.y, anchor.z - 400f);
+            _t6NodeHealP1End = new float3(anchor.x + 450f, anchor.y, anchor.z - 400f);
+
+            _t6NodeHealIdA = CS2M_SyncIdSystem.Allocate();
+            _t6NodeHealIdB = CS2M_SyncIdSystem.Allocate();
+
+            NetPlaceCommand cmd = IdNet(type, name, _t6NodeHealP1Start, _t6NodeHealIdA, _t6NodeHealP1End, _t6NodeHealIdB);
+            RemoteNetQueue.Enqueue(cmd);      // host applies (same dual-apply primitive every Send* helper here uses)
+            Command.SendToAll?.Invoke(cmd);   // client applies -> both sides register idB on their OWN real node
+
+            L($"[Auto] TEST6 NODEHEAL road1 idA={_t6NodeHealIdA} idB={_t6NodeHealIdB} prefab={name} " +
+              $"start=({_t6NodeHealP1Start.x:F1},{_t6NodeHealP1Start.z:F1}) " +
+              $"end=({_t6NodeHealP1End.x:F1},{_t6NodeHealP1End.z:F1})");
+
+            _t6NodeHealStep = 1;
+            // ~2s settle: GenerateNodesSystem must build the real node from last frame's course and
+            // ProcessPendingStamps must stamp idB onto it (ages out after only 6 frames if it never does —
+            // see NetPlaceApplySystem.ProcessPendingStamps) before road2 can reuse idB as an ALREADY-
+            // resolvable identity, the same "measure/mutate after propagation, never before" lesson TEST5
+            // established.
+            _t6NodeHealTimer = 120;
+        }
+
+        private void Test6_NodeHealSendRoad2()
+        {
+            // idD: a brand-new fresh far end — never referenced before, so it always resolves to a fresh
+            // node (ResolveNode's Null branch), keeping this step's ONLY variable the reused idB.
+            _t6NodeHealIdD = CS2M_SyncIdSystem.Allocate();
+            _t6NodeHealP2 = new float3(_t6NodeHealP1End.x, _t6NodeHealP1End.y, _t6NodeHealP1End.z + 15f);
+            var p3 = new float3(_t6NodeHealP2.x, _t6NodeHealP2.y, _t6NodeHealP2.z + 40f);
+
+            NetPlaceCommand cmd = IdNet(_t6NodeHealType, _t6NodeHealName, _t6NodeHealP2, _t6NodeHealIdB, p3, _t6NodeHealIdD);
+
+            L($"[Auto] TEST6 NODEHEAL SENT id={_t6NodeHealIdB} from=({_t6NodeHealP1End.x:F1},{_t6NodeHealP1End.z:F1}) " +
+              $"to=({_t6NodeHealP2.x:F1},{_t6NodeHealP2.z:F1}) dist={math.distance(_t6NodeHealP1End, _t6NodeHealP2):F1}m " +
+              $"gate CS2M_NODEHEAL={NodeHeal.Enabled}");
+
+            RemoteNetQueue.Enqueue(cmd);      // host applies too — see class doc: same code path, expected
+                                                // to converge identically on both sides, not a side effect
+            Command.SendToAll?.Invoke(cmd);   // client applies -> exercises HEAL-SNAP/HEAL-MERGE (or nothing, gate off)
+
+            _t6NodeHealStep = 2;
+            _t6NodeHealTimer = 90; // ~1.5s settle before reading back the final position
+        }
+
+        private void Test6_NodeHealFinal()
+        {
+            bool resolved = CS2M_NodeSyncIds.TryResolve(EntityManager, _t6NodeHealIdB, out Entity node);
+            float3 pos = resolved ? EntityManager.GetComponentData<Game.Net.Node>(node).m_Position : default;
+            float movedFromOriginal = resolved ? math.distance(pos, _t6NodeHealP1End) : -1f;
+
+            L($"[Auto] TEST6 NODEHEAL FINAL id={_t6NodeHealIdB} resolved={resolved} entity={(resolved ? node.Index : -1)} " +
+              $"pos=({pos.x:F1},{pos.z:F1}) movedFromP1End={movedFromOriginal:F1}m gate CS2M_NODEHEAL={NodeHeal.Enabled} " +
+              "(host-side reading; expectMoved~15 with the gate on, expectMoved~0 with it off — cross-check " +
+              "against [Net] HEAL-SNAP/HEAL-MERGE in THIS PC's own log and the client's for the full picture)");
+
+            _t6NodeHealDone = true;
+        }
+
+        /// <summary>A road on the identity (StartNodeId/EndNodeId) path — the SAME primitive
+        /// NetDetectorSystem.DetectPlaced ships for a real placed segment (see that system's DETECT+SEND
+        /// site: CS2M_NodeSyncIds.Ensure on each live endpoint), used here by RunTest6NodeHeal to drive
+        /// NetPlaceApplySystem.ResolveNode/HealNodePosition directly. Distinct from AuthNet (position-only
+        /// fusion, ids left at 0) — this scene specifically needs the id-reuse path AuthNet does not
+        /// exercise.</summary>
+        private static NetPlaceCommand IdNet(string type, string name, float3 startNode, ulong startId,
+            float3 endNode, ulong endId)
+        {
+            float3 s = startNode, e = endNode;
+            float3 b = math.lerp(s, e, 1f / 3f);
+            float3 c = math.lerp(s, e, 2f / 3f);
+            return new NetPlaceCommand
+            {
+                SyncId = CS2M_SyncIdSystem.Allocate(),
+                PrefabType = type, PrefabName = name,
+                Ax = s.x, Ay = s.y, Az = s.z,
+                Bx = b.x, By = b.y, Bz = b.z,
+                Cx = c.x, Cy = c.y, Cz = c.z,
+                Dx = e.x, Dy = e.y, Dz = e.z,
+                HasNodes = true,
+                StartNodeX = s.x, StartNodeY = s.y, StartNodeZ = s.z,
+                EndNodeX = e.x, EndNodeY = e.y, EndNodeZ = e.z,
+                StartNodeId = startId, EndNodeId = endId,
+                RandomSeed = 0,
+            };
+        }
+
+        /// <summary>Client side of the FIVE-GAP scene: nothing SCRIPTED for four of the five. All five
+        /// sub-scenarios are host-authored and dual-applied (see the class-level TEST6 doc comment), so
+        /// the client's own always-on apply systems consume every shipped command with no scripted action
+        /// needed here — this just logs once so the log makes that explicit instead of looking silently
+        /// idle. The exception is DEVTREE: a delayed READ (not a scripted action) of the client's own
+        /// DevTreePoints singleton, fired off a fixed timer (see _t6DevClientTimer's doc), because only
+        /// the client's OWN balance can confirm its mirrored deduction actually went negative instead of
+        /// being floored — the host's own "TEST6 DEVTREE FINAL" log cannot see the client's state.</summary>
         private void RunTest6ClientStep()
         {
-            if (_t6ClientIdleLogged) { return; }
-            _t6ClientIdleLogged = true;
-            L("[Auto] TEST6 client idle (test=6 is fully host-authored/dual-applied — the client's own " +
-              "always-on apply systems consume the shipped commands with no scripted action needed here)");
+            if (!_t6ClientIdleLogged)
+            {
+                _t6ClientIdleLogged = true;
+                L("[Auto] TEST6 client idle (test=6 is fully host-authored/dual-applied — the client's own " +
+                  "always-on apply systems consume the shipped commands with no scripted action needed " +
+                  "here, except a delayed DEVTREE points read below)");
+            }
+
+            if (_t6DevClientLogged) { return; }
+            if (_t6DevClientTimer > 0) { _t6DevClientTimer--; return; }
+
+            EntityQuery pointsQuery = GetEntityQuery(ComponentType.ReadOnly<DevTreePoints>());
+            int points = pointsQuery.IsEmptyIgnoreFilter ? int.MinValue : pointsQuery.GetSingleton<DevTreePoints>().m_Points;
+            L($"[Auto] TEST6 DEVTREE CLIENT points={points} gate CS2M_DEVTREEFIX={DevTreeFix.Enabled}");
+            _t6DevClientLogged = true;
         }
 
         private void UpdateClient()

@@ -7,9 +7,9 @@
 
         <!-- CS2M multiplayer build version. Bump the third number for each build
              (v3 = 1.0.3.0). Both players must be on the same version to connect. -->
-        <AssemblyVersion>1.0.56.0</AssemblyVersion>
-        <FileVersion>1.0.56.0</FileVersion>
-        <Version>1.0.56.0</Version>
+        <AssemblyVersion>1.0.57.0</AssemblyVersion>
+        <FileVersion>1.0.57.0</FileVersion>
+        <Version>1.0.57.0</Version>
 
         <!--The file where mod information which is required for publishing mod on PDX mods are stored-->
         <PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>

@@ -27,7 +27,9 @@ namespace CS2M.Sync
             {
                 if (_state < 0)
                 {
-                    _state = System.Environment.GetEnvironmentVariable("CS2M_NODEHEAL") == "1" ? 1 : 0;
+                    // ON por padrão desde 2026-07-07 — validado em 2-sim (drift sintético de 15m:
+                    // client logou HEAL-SNAP e o nó convergiu). CS2M_NODEHEAL=0 desliga.
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_NODEHEAL") == "0" ? 0 : 1;
                 }
 
                 return _state == 1;

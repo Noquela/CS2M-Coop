@@ -45,7 +45,9 @@ namespace CS2M.Sync
             {
                 if (_state < 0)
                 {
-                    _state = System.Environment.GetEnvironmentVariable("CS2M_DEVTREEFIX") == "1" ? 1 : 0;
+                    // ON por padrão desde 2026-07-07 — validado em 2-sim (saldo -2 transitório sem
+                    // floor, auto-corrige quando o milestone local soma). CS2M_DEVTREEFIX=0 desliga.
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_DEVTREEFIX") == "0" ? 0 : 1;
                 }
 
                 return _state == 1;
