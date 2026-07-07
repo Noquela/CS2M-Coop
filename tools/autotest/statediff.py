@@ -108,6 +108,23 @@ def block_strip_order(tok):
     return order, stripped
 
 
+# CellFlags emergentes (decomp Zones/CellFlags.cs): Occupied=0x20 (prédio físico intersecta a célula,
+# via CellOccupyJobs) e Overridden=0x10 (prédio força a zona). Growables nascem por demanda/timing LOCAL
+# — o contrato de sync deixa divergir de propósito — então esses 2 bits diferem legitimamente numa célula
+# com prédio crescido. Mascará-los antes de comparar evita marcar essa divergência emergente como bug.
+_EMERGENT_MASK = 0x30  # Occupied | Overridden
+_CELL_FLAG_RE = re.compile(r"~([0-9A-Fa-f]+)")
+
+
+def block_strip_emergent(tok):
+    """Zera os bits emergentes (Occupied/Overridden) de cada sufixo ~hex de célula; remove o ~ quando
+    o resto fica 0. Dois blocos que só diferem por growable colapsam no mesmo token depois disto."""
+    def repl(m):
+        v = int(m.group(1), 16) & ~_EMERGENT_MASK
+        return "" if v == 0 else f"~{v:X}"
+    return _CELL_FLAG_RE.sub(repl, tok)
+
+
 def diff_subsys(tag, host_log, client_log):
     friendly, meaning = SUBSYS[tag]
     h = last_dump(host_log, tag, "HOST")
@@ -144,6 +161,11 @@ def diff_subsys(tag, host_log, client_log):
                 if h_order is not None and c_order is not None and h_order != c_order and h_rest == c_rest:
                     # Mesmo bloco (pos/tamanho/celulas identicos) — SO o BuildOrder difere.
                     print(f"  ~ ORDEM DIFERE @ {ctr}:  host=o{h_order} client=o{c_order}")
+                    continue
+                # Se o UNICO diff sao os bits emergentes (growable Occupied/Overridden), NAO e bug:
+                # crescimento de predio e sim local por design. Mascara e reporta como informativo.
+                if block_strip_emergent(h_rest) == block_strip_emergent(c_rest):
+                    print(f"  . growable-only @ {ctr} (Occupied/Overridden divergem — emergente, esperado)")
                     continue
             print(f"  ~ FORMA DIFERE @ {ctr}:  host={h_by_c[ctr]}  client={c_by_c[ctr]}")
         gone = [h_by_c[k] for k in h_by_c if k not in c_by_c]
