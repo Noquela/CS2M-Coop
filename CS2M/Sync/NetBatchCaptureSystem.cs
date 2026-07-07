@@ -259,7 +259,9 @@ namespace CS2M.Sync
 
             // ---- PASS 3: NEW NODE arrays. When any edge was echo-skipped this frame, ship ONLY nodes a
             // shipped edge references — the skipped (remote-applied) road's nodes would otherwise go out
-            // as orphans. With no echo in the frame, unreferenced nodes (Point-mode placements) still ship.
+            // as orphans. With no echo in the frame, unreferenced nodes (Point-mode placements) still ship,
+            // UNLESS one sits on top of a boundary node THIS SAME batch resolved (see IsStrayNearBoundary
+            // below) — that is a materialization artifact, not a legitimate standalone placement.
             var nNodeIds = new List<ulong>();
             var nPosX = new List<float>(); var nPosY = new List<float>(); var nPosZ = new List<float>();
             var nRotX = new List<float>(); var nRotY = new List<float>(); var nRotZ = new List<float>(); var nRotW = new List<float>();
@@ -267,6 +269,7 @@ namespace CS2M.Sync
             var nStandalone = new List<bool>();
             var nHasElev = new List<bool>(); var nElevX = new List<float>(); var nElevY = new List<float>();
             var nSeeds = new List<int>();
+            int droppedStray = 0;
 
             foreach (Entity n in nodeEnts)
             {
@@ -280,13 +283,51 @@ namespace CS2M.Sync
                     continue;
                 }
 
+                Node node = EntityManager.GetComponentData<Node>(n);
+
+                // STRAY-NEAR-BOUNDARY (proven live 06/07, XSESSION-OVERDRAW): a control point given no
+                // explicit snap owner (ControlPoint.m_OriginalEntity == Entity.Null, e.g. this batch's
+                // builder replayed the tool with snap=0 near pre-existing infra after a session
+                // rejoin) makes CreateDefinitionsJob instantiate a genuine free NODE for it — but
+                // GenerateNodes/Edges' OWN later, position-based reuse still re-points the new EDGE onto
+                // the pre-existing node at that same spot (that pre-existing node is exactly what Pass 2
+                // above resolved into CAP-BOUND). Nothing ever deletes the now-redundant free node it
+                // leaves behind: it carries Applied+Created (so it looks like a normal new node to the
+                // queries above) but no shipped edge ever references it (excluded from
+                // referencedNodeIds). Shipping it anyway hands the receiver a disconnected phantom entity
+                // NetBatchApplySystem.CreateNode can never prune (raw archetype instantiation — it never
+                // runs through vanilla's own dedup, unlike a real tool apply). Measured: HOST kept a
+                // degree-0(ish) orphan at the exact coordinate of a CAP-BOUND entry while the CLIENT
+                // dutifully manufactured a matching permanent phantom node from the wire payload — a
+                // node-count divergence (581 vs 580) with zero edge/zone/area drift otherwise. Fixed at
+                // the SOURCE (never shipped) instead of asking the receiver to merge it by proximity —
+                // this architecture's identity-over-proximity law applies to the CAPTURE side too: the
+                // receiver must never guess, so the builder must never hand it something to guess about.
+                if (!referencedNodeIds.Contains(id)
+                    && IsStrayNearBoundary(node.m_Position, boundaryPosX, boundaryPosY, boundaryPosZ))
+                {
+                    droppedStray++;
+                    CS2M.Log.Info($"[Batch] DROP-STRAY id={id} pos=({node.m_Position.x:F1},{node.m_Position.z:F1}) " +
+                                  "(unreferenced new node coincident with a boundary node this same batch " +
+                                  "— materialization artifact, not shipped)");
+                    // Also delete the artifact LOCALLY: no edge references it, and keeping it host-only
+                    // would leave a permanent nodes-count divergence (the R14 581vs580) that every
+                    // statediff run flags forever. Deleted → the game's CleanupSystem destroys it
+                    // end-of-frame — both worlds converge instead of just both-not-knowing.
+                    if (!EntityManager.HasComponent<Deleted>(n))
+                    {
+                        EntityManager.AddComponent<Deleted>(n);
+                    }
+
+                    continue;
+                }
+
                 if (!_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(n).m_Prefab,
                         out PrefabBase prefab) || prefab == null)
                 {
                     continue;
                 }
 
-                Node node = EntityManager.GetComponentData<Node>(n);
                 nNodeIds.Add(id);
                 nPosX.Add(node.m_Position.x); nPosY.Add(node.m_Position.y); nPosZ.Add(node.m_Position.z);
                 nRotX.Add(node.m_Rotation.value.x); nRotY.Add(node.m_Rotation.value.y);
@@ -391,7 +432,34 @@ namespace CS2M.Sync
             }
 
             CS2M.Log.Info(
-                $"[Batch] CAPTURED nodes={nNodeIds.Count} edges={eStart.Count} dels={dStart.Count} boundary={boundaryIds.Count}");
+                $"[Batch] CAPTURED nodes={nNodeIds.Count} edges={eStart.Count} dels={dStart.Count} " +
+                $"boundary={boundaryIds.Count} strays={droppedStray}");
+        }
+
+        // How close an unreferenced new node must sit to one of THIS batch's boundary nodes to be
+        // treated as the CreateDefinitionsJob-vs-GenerateEdges materialization artifact described above,
+        // rather than a genuinely distinct standalone placement. 2.5 m is comfortably inside normal net
+        // node spacing (road junctions are metres apart at minimum) yet wide enough to catch the
+        // sub-metre float drift the proven case showed (308/309/310 all rounded to the same F1 digits).
+        // Full 3D (not just XZ) so a vertically-stacked distinct junction (overpass/underpass ramps,
+        // legitimately close in plan but metres apart in elevation) is never misclassified as a stray.
+        private const float StrayNearBoundaryDistance = 2.5f;
+
+        private static bool IsStrayNearBoundary(float3 pos, List<float> bx, List<float> by, List<float> bz)
+        {
+            float maxSq = StrayNearBoundaryDistance * StrayNearBoundaryDistance;
+            for (int i = 0; i < bx.Count; i++)
+            {
+                float dx = pos.x - bx[i];
+                float dy = pos.y - by[i];
+                float dz = pos.z - bz[i];
+                if (dx * dx + dy * dy + dz * dz <= maxSq)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Debug-only formatter: "<c>id@x,z</c>" tokens, space-separated, capped at 32 items
