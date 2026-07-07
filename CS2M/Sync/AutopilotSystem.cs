@@ -782,17 +782,20 @@ namespace CS2M.Sync
             int money = ReadMoney(out _moneyUnlimited);
             if (money == int.MinValue) { Result("money", false, "no City/PlayerMoney"); _moneyExpected = int.MinValue; return; }
             _moneyExpected = money + MoneyAdd;
-            L($"[Auto] TEST money INJECT before={money} unlimited={_moneyUnlimited} -> set={_moneyExpected}");
+            L($"[Auto] TEST money INJECT before={money} unlimited={_moneyUnlimited} -> set={_moneyExpected} -> guard must BLOCK (issue #6)");
             RemoteMoneyQueue.Set(_moneyExpected);
         }
 
+        // issue #6: MoneySyncApplySystem now drains client-authored commands without applying
+        // them when running as SERVER (host is authoritative). Flipped: this step now passes
+        // when the host does NOT absorb the injected value.
         private void VerifyMoney()
         {
             if (_moneyExpected == int.MinValue) { return; }
             int money = ReadMoney(out bool unl);
             if (unl) { Result("money", true, "guard OK: city has unlimited money -> apply correctly skipped"); return; }
-            bool ok = Math.Abs(money - _moneyExpected) < 200_000;
-            Result("money", ok, $"after={money} expected~{_moneyExpected}");
+            bool ok = Math.Abs(money - _moneyExpected) >= 200_000;
+            Result("money", ok, $"guard held: after={money} injected={_moneyExpected} (host must NOT absorb client-authored MoneySync — issue #6)");
         }
 
         private void ActXp()
@@ -1842,6 +1845,8 @@ namespace CS2M.Sync
 
             _envElapsedTarget = elapsed + 5000;
             _envFrameIndexAtInject = _sim.frameIndex;
+            // issue #6: EnvSyncSystems apply now drains this without applying when running as
+            // SERVER (host is authoritative) -> guard must BLOCK.
             RemoteEnvQueue.Set(new CS2M.Commands.Data.Game.EnvSyncCommand
             {
                 Temperature = 7.75f, Precipitation = 0.66f, Cloudiness = 0.55f,
@@ -1902,7 +1907,9 @@ namespace CS2M.Sync
                 clock = drift > -120 && drift < 120;
             }
 
-            Result("env", weather && clock, $"weatherOverride={weather} clockRealigned={clock}");
+            // issue #6: flipped — host must NOT absorb client-authored EnvSync, so this step
+            // now passes only when neither the weather override nor the clock realign applied.
+            Result("env", !weather && !clock, $"guard held: weatherOverride={weather} clockRealigned={clock} (host must NOT absorb client-authored EnvSync — issue #6)");
 
             if (_nativeTree != Entity.Null)
             {
@@ -3289,10 +3296,15 @@ namespace CS2M.Sync
                 return;
             }
 
-            L($"[Auto] TEST line-visibility INJECT hide number={number}");
+            // Issue #10: a session-created line (the number-77 line this very run built) is only
+            // addressable by SyncId now — ship it exactly like DetectVisibility does (id else number).
+            ulong visId = EntityManager.HasComponent<CS2M_SyncId>(_visRoute)
+                ? EntityManager.GetComponentData<CS2M_SyncId>(_visRoute).m_Id
+                : 0UL;
+            L($"[Auto] TEST line-visibility INJECT hide number={number} id={visId}");
             RouteSync.EnqueueVisibility(new CS2M.Commands.Data.Game.RouteVisibilityCommand
             {
-                SyncId = 0, PrefabName = pname, Number = number, Hidden = true,
+                SyncId = visId, PrefabName = pname, Number = number, Hidden = true,
             });
         }
 
