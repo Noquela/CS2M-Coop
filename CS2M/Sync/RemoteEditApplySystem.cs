@@ -53,6 +53,9 @@ namespace CS2M.Sync
     {
         private CS2M_SyncIdSystem _idSystem;
         private Game.Prefabs.PrefabSystem _prefabSystem;
+        private Game.Simulation.CitySystem _citySystem;
+        private Game.Simulation.SimulationSystem _simulationSystem;
+        private EntityQuery _economyParams;
         private EntityQuery _nativeObjects;
 
         protected override void OnCreate()
@@ -60,6 +63,9 @@ namespace CS2M.Sync
             base.OnCreate();
             _idSystem = World.GetOrCreateSystemManaged<CS2M_SyncIdSystem>();
             _prefabSystem = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
+            _citySystem = World.GetOrCreateSystemManaged<Game.Simulation.CitySystem>();
+            _simulationSystem = World.GetOrCreateSystemManaged<Game.Simulation.SimulationSystem>();
+            _economyParams = GetEntityQuery(ComponentType.ReadOnly<Game.Prefabs.EconomyParameterData>());
             _nativeObjects = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -130,6 +136,16 @@ namespace CS2M.Sync
                 return;
             }
 
+            // v59: mirror the bulldoze REFUND on the host before deleting. The acting player's own
+            // vanilla flow credits their local balance, but the host's ~1 Hz money sync is authoritative
+            // and would overwrite that credit away — so a client's bulldoze of a Recent building was
+            // effectively refund-0 (MATRIX P1). Same decay math as the tool: ObjectUtils.GetRefundAmount
+            // over Recent{frame, cost} (decomp Objects/ObjectUtils.cs:356-371).
+            if (NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.SERVER)
+            {
+                RefundRecent(e);
+            }
+
             // v51: cascade every live child too — replica buildings hold definition-made
             // sub-nets/sub-areas the vanilla cascade can miss ("part of the building stays behind").
             // Delete-echo stamping (CS2M_RemoteDeleted on target + children) happens inside the util —
@@ -180,6 +196,46 @@ namespace CS2M.Sync
             }
 
             CS2M.Log.Info($"[Del] APPLIED route id={cmd.SyncId} number={cmd.Number} entity={route.Index}");
+        }
+
+        /// <summary>Credits the city (host balance) with the time-decayed refund of a deleted object
+        /// carrying <c>Recent</c> — the acting client's local credit is transient (host money sync wins).</summary>
+        private void RefundRecent(Entity e)
+        {
+            if (!EntityManager.HasComponent<Game.Tools.Recent>(e))
+            {
+                return; // old build (or free) — refund 0 is vanilla-correct
+            }
+
+            if (_economyParams.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
+            int refund = Game.Objects.ObjectUtils.GetRefundAmount(
+                EntityManager.GetComponentData<Game.Tools.Recent>(e),
+                _simulationSystem.frameIndex,
+                _economyParams.GetSingleton<Game.Prefabs.EconomyParameterData>());
+            if (refund <= 0)
+            {
+                return;
+            }
+
+            Entity city = _citySystem.City;
+            if (city == Entity.Null || !EntityManager.HasComponent<Game.City.PlayerMoney>(city))
+            {
+                return;
+            }
+
+            Game.City.PlayerMoney pm = EntityManager.GetComponentData<Game.City.PlayerMoney>(city);
+            if (pm.m_Unlimited)
+            {
+                return;
+            }
+
+            pm.Add(refund);
+            EntityManager.SetComponentData(city, pm);
+            CS2M.Log.Info($"[Del] REFUND {refund} entity={e.Index} cash={pm.money}");
         }
 
         /// <summary>Nearest object of the same prefab within 2 m of the sender's position (exact

@@ -1,6 +1,20 @@
 # MATRIZ DE COBERTURA — game-map (06/07/2026)
 
-> **⚠️ STATUS 07/07/2026 — vários P0/P1 abaixo JÁ FORAM FECHADOS (esta matriz é de 06/07, o código avançou).**
+> **⚠️ STATUS 07/07/2026 (tarde, v1.0.59.0) — a CAUDA P1/P2 do radar+fidelidade foi fechada:**
+> **BudgetHash/LoanHash** no radar (AccBudgets por nome de service prefab via CityServiceBudgetSystem;
+> AccLoan = Loan.m_Amount, m_LastModified fica fora — frame por-máquina); **water edit-in-place**
+> (WaterCommand.Edit + detector com debounce de 30 frames + ApplyEdit por proximidade + params foldados
+> no WaterHash); **Recent/reembolso** (StampRecent no RemotePlacementApplySystem em todo remoto +
+> RefundRecent no host ao aplicar delete remoto — GetRefundAmount igual vanilla); **WorkRoute**
+> (Any=[TransportLine,WorkRoute] nas 3 queries do RouteDetector + query de delete; ramo WorkRouteData
+> no ApplyCreate); **terrain fidelidade completa** (TerrainCommand ganhou Target/Start/Angle/BrushPrefab;
+> TerrainApplySystem despacha pelo switch do ApplyBrushesSystem — Ore/Oil/FertileLand/GroundWater via
+> port gerenciado do ApplyCellMapBrushJob, Height com guards vanilla + textura do BrushPrefab resolvida
+> por nome; Material = SKIP logado, caminho não verificado) e **TerrainHash** no radar (32×32 amostras,
+> quantum 2 m). Gaps que SOBRAM do dossiê terrain: §6.5 (strength ease-in/amostragem 1/12 frames —
+> best-effort por design) e Material paint.
+>
+> **⚠️ STATUS 07/07/2026 (manhã) — vários P0/P1 abaixo JÁ FORAM FECHADOS (esta matriz é de 06/07, o código avançou).**
 > Fechados desde então (ver memory/bug-juncao-sync.md): **ServiceDistrict** (commit 8d0bb8e — ServiceDistrictCommand/Detector/Apply, cobre removeDistrict do painel), **VehicleModel/SelectVehicles** (mesmo 8d0bb8e — VehicleModelCommand), **delete-de-extensão pelo painel** (v56 — DeleteDetector `_deletedExtensionQuery`), **fazenda/Extractor** (anchor por identidade de placeholder — areas IDÊNTICO validado 2-sim), **zone paint diverge** (ZoneOrderTiebreak PosHash32 + ZoneBlockAuthority; flags Blocked/Visible são derivadas, statediff refinado), **net BuildOrder** (ZoneOrderTiebreak). Novos fixes gated (OFF por padrão) prontos: CS2M_DELFIX (delete-de-remoto água/distrito), ROUTEFIX (reroute save-line), TAXFIX (tax concorrente granular), POLICYFIX (policy prédio por prefab), DEVTREEFIX, MOVEFIX (SubNet/SubArea no move), NODEHEAL, OVERDRAWFIX. **chirper.addLike = confirmado EMERGENTE (Chirp não tem identidade cross-machine), não é gap sincável.** Enumeração de UI recontada 07/07 = 249 TriggerBindings. Validado 2-sim ao vivo: fazenda, overdraw, delete-de-remoto, tax, move. **NÃO re-descobrir os gaps riscados acima como abertos.**
 
 > Síntese dos 13 dossiês (`dossiers/`) + classificação dos 555 tipos serializados (`state/*.json`)

@@ -234,15 +234,25 @@ namespace CS2M.Sync
         {
             base.OnCreate();
             _prefabSystem = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
+            // v59: Any=[TransportLine, WorkRoute] instead of All=[TransportLine] — a WorkRoutePrefab
+            // (harvest/service work route) goes through the SAME RouteToolSystem but never gets
+            // TransportLine, only the empty WorkRoute tag (decomp Prefabs/WorkRoutePrefab.cs:40), so the
+            // detector was fully blind to it: no create, no reroute, no delete (MATRIX P1 / dossier
+            // route.md §6.1). Any (not plain Route) so an unknown future Route subtype can't leak in;
+            // only the tool creates WorkRoutes (AreaLotSimulationSystem just READS them — no sim echo).
             _createdRoutes = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
                 {
                     ComponentType.ReadOnly<Route>(),
-                    ComponentType.ReadOnly<TransportLine>(),
                     ComponentType.ReadOnly<RouteWaypoint>(),
                     ComponentType.ReadOnly<PrefabRef>(),
                     ComponentType.ReadOnly<Created>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<TransportLine>(),
+                    ComponentType.ReadOnly<WorkRoute>(),
                 },
                 None = new[]
                 {
@@ -257,11 +267,15 @@ namespace CS2M.Sync
                 All = new[]
                 {
                     ComponentType.ReadOnly<Route>(),
-                    ComponentType.ReadOnly<TransportLine>(),
                     ComponentType.ReadOnly<RouteWaypoint>(),
                     ComponentType.ReadOnly<PrefabRef>(),
                     ComponentType.ReadOnly<Updated>(),
                     ComponentType.ReadOnly<CS2M_SyncId>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<TransportLine>(),
+                    ComponentType.ReadOnly<WorkRoute>(),
                 },
                 None = new[]
                 {
@@ -280,10 +294,14 @@ namespace CS2M.Sync
                 All = new[]
                 {
                     ComponentType.ReadOnly<Route>(),
-                    ComponentType.ReadOnly<TransportLine>(),
                     ComponentType.ReadOnly<RouteWaypoint>(),
                     ComponentType.ReadOnly<PrefabRef>(),
                     ComponentType.ReadOnly<Updated>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<TransportLine>(),
+                    ComponentType.ReadOnly<WorkRoute>(),
                 },
                 None = new[]
                 {
@@ -311,8 +329,12 @@ namespace CS2M.Sync
                 All = new[]
                 {
                     ComponentType.ReadOnly<Route>(),
-                    ComponentType.ReadOnly<TransportLine>(),
                     ComponentType.ReadOnly<PrefabRef>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<TransportLine>(),
+                    ComponentType.ReadOnly<WorkRoute>(),
                 },
                 None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
             });
@@ -868,6 +890,13 @@ namespace CS2M.Sync
             if (EntityManager.HasComponent<TransportLineData>(prefabEntity))
             {
                 SetOrAdd(route, new TransportLine(EntityManager.GetComponentData<TransportLineData>(prefabEntity)));
+            }
+            else if (EntityManager.HasComponent<WorkRouteData>(prefabEntity)
+                     && !EntityManager.HasComponent<WorkRoute>(route))
+            {
+                // v59: work route — the baked archetype already carries the empty WorkRoute tag
+                // (WorkRoutePrefab.GetArchetypeComponents), this is just a belt-and-braces guarantee.
+                EntityManager.AddComponent<WorkRoute>(route);
             }
 
             BuildElements(route, prefabEntity, rd, cmd);

@@ -53,5 +53,19 @@ namespace CS2M.Commands.Data.Game
 
         // v55: water source POSITIONS — the count alone missed a relocated source (water-move).
         public long WaterHash { get; set; }
+
+        // v59: service-budget sliders (per service prefab NAME) — budget sync existed but the radar
+        // never observed it, so a missed BudgetCommand diverged the sim's money flow silently.
+        public long BudgetHash { get; set; }
+
+        // v59: Loan.m_Amount on the City — same blind spot as budget (m_LastModified is a per-machine
+        // frame index and is deliberately NOT folded).
+        public long LoanHash { get; set; }
+
+        // v59: coarse heightmap fingerprint (32×32 samples, 2 m quantum) — terrain was classified
+        // WorldContract yet fully invisible to the radar (dossier terrain.md §6.6). Terrain replay is
+        // best-effort by design, so the quantum is deliberately coarse: sub-2 m residue stays quiet,
+        // a mountain that never crossed over lights the /resync alert.
+        public long TerrainHash { get; set; }
     }
 }

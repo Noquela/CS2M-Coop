@@ -40,6 +40,7 @@ namespace CS2M.Sync
         private PrefabSystem _prefabSystem;
         private CitySystem _citySystem;
         private CityConfigurationSystem _cityConfigSystem;
+        private SimulationSystem _simulationSystem;
         private readonly List<Entity> _pendingDefinitions = new List<Entity>();
 
         protected override void OnCreate()
@@ -48,6 +49,7 @@ namespace CS2M.Sync
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             _citySystem = World.GetOrCreateSystemManaged<CitySystem>();
             _cityConfigSystem = World.GetOrCreateSystemManaged<CityConfigurationSystem>();
+            _simulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
             CS2M.Log.Info("[Place] RemotePlacementApplySystem created (direct-archetype mode)");
         }
 
@@ -246,6 +248,14 @@ namespace CS2M.Sync
 
             // Same cross-PC id as the sender's entity, so later move/delete resolves here too.
             CS2M_SyncIdSystem.Register(EntityManager, obj, cmd.SyncId);
+
+            // v59: stamp Recent like vanilla ApplyObjectsSystem.Create (decomp Tools/ApplyObjectsSystem.cs:
+            // 676-682 — temp.m_Cost > 0 → Recent{simFrame, cost}); that path only runs in the LOCAL tool
+            // flow, so a remote-placed object had no Recent and its later bulldoze refunded 0 on every
+            // machine but the builder's (ObjectUtils.GetRefundAmount decays from Recent — MATRIX P1).
+            // m_ModificationFrame is this machine's OWN sim frame: frame counters aren't cross-machine
+            // comparable, and "the refund window starts now" matches the builder's window anyway.
+            StampRecent(obj, prefabEntity);
 
             CS2M.Log.Info(
                 $"[Place] APPLIED name={cmd.PrefabName} entity={obj.Index} syncId={cmd.SyncId} prefabEntity={prefabEntity.Index} " +
@@ -682,6 +692,32 @@ namespace CS2M.Sync
             pm.Subtract(cost); // clamps at ±2e9, same as vanilla
             EntityManager.SetComponentData(city, pm);
             CS2M.Log.Info($"[Place] CHARGED cost={cost} prefab={prefabName} cash={pm.money}");
+        }
+
+        /// <summary>Cost basis mirrors the tool's: ServiceUpgradeData.m_UpgradeCost for extensions,
+        /// PlaceableObjectData.m_ConstructionCost otherwise (dossier object.md §2 — ObjectUtils.Get*Cost).</summary>
+        private void StampRecent(Entity obj, Entity prefabEntity)
+        {
+            int cost = 0;
+            if (EntityManager.HasComponent<ServiceUpgradeData>(prefabEntity))
+            {
+                cost = (int) EntityManager.GetComponentData<ServiceUpgradeData>(prefabEntity).m_UpgradeCost;
+            }
+            else if (EntityManager.HasComponent<PlaceableObjectData>(prefabEntity))
+            {
+                cost = (int) EntityManager.GetComponentData<PlaceableObjectData>(prefabEntity).m_ConstructionCost;
+            }
+
+            if (cost <= 0)
+            {
+                return; // free is vanilla-correct: no Recent, no refund
+            }
+
+            SetOrAdd(obj, new Recent
+            {
+                m_ModificationFrame = _simulationSystem.frameIndex,
+                m_ModificationCost = cost,
+            });
         }
 
         private void SetOrAdd<T>(Entity e, T data) where T : unmanaged, IComponentData

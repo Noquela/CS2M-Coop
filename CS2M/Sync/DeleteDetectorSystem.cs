@@ -86,14 +86,20 @@ namespace CS2M.Sync
             // Addressed by SyncId or prefab + RouteNumber (save-loaded lines have no SyncId).
             // NOTE: no CS2M_RemotePlaced exclusion here — remotely-created lines carry it forever and
             // deleting one must still sync; the echo guard is RouteSync.ConsumeDeleteEcho instead.
+            // v59: Any=[TransportLine, WorkRoute] — work routes (harvest/service) never carry
+            // TransportLine, so their deletion was invisible (dossier route.md §6.1).
             _deletedRouteQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
                 {
                     ComponentType.ReadOnly<Deleted>(),
                     ComponentType.ReadOnly<Game.Routes.Route>(),
-                    ComponentType.ReadOnly<Game.Routes.TransportLine>(),
                     ComponentType.ReadOnly<PrefabRef>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<Game.Routes.TransportLine>(),
+                    ComponentType.ReadOnly<Game.Routes.WorkRoute>(),
                 },
                 None = new[]
                 {

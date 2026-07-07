@@ -43,6 +43,7 @@ namespace CS2M.Sync
                 {
                     if (cmd.Delete) { ApplyDelete(cmd); }
                     else if (cmd.Move) { ApplyMove(cmd); }
+                    else if (cmd.Edit) { ApplyEdit(cmd); }
                     else { ApplyOne(cmd); }
                 }
                 catch (System.Exception ex) { CS2M.Log.Info($"[Guard] apply failed in WaterApplySystem: {ex.Message}"); }
@@ -117,6 +118,39 @@ namespace CS2M.Sync
 
             WaterSync.MarkRemoteMove(newPos); // detector must not bounce this relocation back
             CS2M.Log.Info($"[Water] APPLIED move ({cmd.OldX:F0},{cmd.OldZ:F0})->({cmd.PosX:F0},{cmd.PosZ:F0}) yLocal={y:F1} entity={best.Index}");
+        }
+
+        /// <summary>v59: overwrites the editable params (radius/height/rate/pollution/depth) of the
+        /// nearest source in place — the water tool's EditSource drag never creates or moves an entity,
+        /// so none of the other paths ever fired for it. m_Id is preserved (it addresses the source in
+        /// the save) and m_Modifier stays 1f (same dead-source trap as ApplyOne). Marks the position so
+        /// our detector doesn't bounce the edit back.</summary>
+        private void ApplyEdit(WaterCommand cmd)
+        {
+            Entity best = FindNearestSource(cmd.PosX, cmd.PosZ, out _);
+            if (best == Entity.Null)
+            {
+                CS2M.Log.Info($"[Water] SKIP edit noMatch pos=({cmd.PosX:F0},{cmd.PosZ:F0})");
+                return;
+            }
+
+            WaterSourceData w = EntityManager.GetComponentData<WaterSourceData>(best);
+            w.m_Radius = cmd.Radius;
+            w.m_Height = cmd.Height;
+            w.m_Multiplier = cmd.Multiplier;
+            w.m_Polluted = cmd.Polluted;
+            w.m_ConstantDepth = cmd.ConstantDepth;
+            w.m_Modifier = 1f;
+            EntityManager.SetComponentData(best, w);
+            if (!EntityManager.HasComponent<Updated>(best))
+            {
+                EntityManager.AddComponent<Updated>(best);
+            }
+
+            float3 pos = EntityManager.GetComponentData<Transform>(best).m_Position;
+            WaterSync.MarkRemoteEdit(pos); // detector must not bounce this param change back
+            CS2M.Log.Info($"[Water] APPLIED edit pos=({cmd.PosX:F0},{cmd.PosZ:F0}) r={cmd.Radius:F1} " +
+                          $"h={cmd.Height:F1} m={cmd.Multiplier:F2} entity={best.Index}");
         }
 
         /// <summary>Nearest live water source within ~10 m² of (x,z).</summary>

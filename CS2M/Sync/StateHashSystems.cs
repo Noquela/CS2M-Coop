@@ -49,6 +49,9 @@ namespace CS2M.Sync
         public long TaxHash;
         public long PolicyHash;
         public long WaterHash;
+        public long BudgetHash;
+        public long LoanHash;
+        public long TerrainHash;
 
         public StateHashCommand ToCommand()
         {
@@ -73,6 +76,9 @@ namespace CS2M.Sync
                 TaxHash = TaxHash,
                 PolicyHash = PolicyHash,
                 WaterHash = WaterHash,
+                BudgetHash = BudgetHash,
+                LoanHash = LoanHash,
+                TerrainHash = TerrainHash,
             };
         }
 
@@ -99,6 +105,9 @@ namespace CS2M.Sync
                 TaxHash = c.TaxHash,
                 PolicyHash = c.PolicyHash,
                 WaterHash = c.WaterHash,
+                BudgetHash = c.BudgetHash,
+                LoanHash = c.LoanHash,
+                TerrainHash = c.TerrainHash,
             };
         }
     }
@@ -175,6 +184,13 @@ namespace CS2M.Sync
             None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
         };
 
+        // Service PREFABS (not world entities) — the budget sliders live per service prefab; no
+        // Temp/Deleted filter needed. Same enumeration BudgetDetectorSystem polls.
+        public static EntityQueryDesc ServiceDesc() => new EntityQueryDesc
+        {
+            All = new[] { ComponentType.ReadOnly<Game.Prefabs.ServiceData>() },
+        };
+
         public static EntityQueryDesc RouteDesc() => new EntityQueryDesc
         {
             All = new[]
@@ -188,7 +204,9 @@ namespace CS2M.Sync
         public static HashBundle Compute(EntityManager em, EntityQuery edges, EntityQuery nodes,
             EntityQuery buildings, EntityQuery blocks, EntityQuery areas, EntityQuery districts,
             EntityQuery water, EntityQuery routes, Game.Simulation.CitySystem city,
-            Game.Simulation.TaxSystem tax, Game.Prefabs.PrefabSystem prefabs)
+            Game.Simulation.TaxSystem tax, Game.Prefabs.PrefabSystem prefabs,
+            Game.Simulation.CityServiceBudgetSystem budget, EntityQuery services,
+            Game.Simulation.TerrainSystem terrain)
         {
             // O hash de zonas folda o NOME via ZoneSync — o registro tem que existir antes do primeiro
             // sample nos DOIS lados (senão NameHash=0 pra tudo). Idempotente, custo zero após a 1ª vez.
@@ -208,7 +226,101 @@ namespace CS2M.Sync
             b.FeeHash = AccFees(em, city);
             b.TaxHash = AccTax(tax);
             b.PolicyHash = AccPolicies(em, city, prefabs);
+            b.BudgetHash = AccBudgets(em, budget, services, prefabs);
+            b.LoanHash = AccLoan(em, city);
+            b.TerrainHash = AccTerrain(terrain);
             return b;
+        }
+
+        // Coarse heightmap fingerprint: 32×32 samples over the terrain bounds, quantized to 2 m.
+        // Terrain replay is best-effort (per-stroke delta scales with local frame time), so a fine
+        // quantum would cry wolf after every terraform session; 2 m keeps the residue quiet while a
+        // stroke that never crossed over (many meters) still lights up. Grid positions derive from
+        // GetTerrainBounds(), identical on both machines (fixed map extents).
+        private static long AccTerrain(Game.Simulation.TerrainSystem terrain)
+        {
+            if (terrain == null)
+            {
+                return 0;
+            }
+
+            try
+            {
+                Game.Simulation.TerrainHeightData hd = terrain.GetHeightData(false);
+                if (!hd.isCreated)
+                {
+                    return 0;
+                }
+
+                UnityEngine.Bounds bounds = terrain.GetTerrainBounds(); // fixed 14336×14336 map extents
+                const int N = 32;
+                float3 min = bounds.min, max = bounds.max;
+                float2 step = new float2(max.x - min.x, max.z - min.z) / N;
+                long acc = 0;
+                for (int i = 0; i < N; i++)
+                {
+                    for (int j = 0; j < N; j++)
+                    {
+                        var p = new float3(min.x + (i + 0.5f) * step.x, 0f, min.z + (j + 0.5f) * step.y);
+                        float h = Game.Simulation.TerrainUtils.SampleHeight(ref hd, p);
+                        acc = unchecked(acc + Mix(i * N + j, (long) math.round(h * 0.5f))); // 2 m quantum
+                    }
+                }
+
+                return acc;
+            }
+            catch
+            {
+                return 0; // heightmap unavailable this frame — transient 0 never settles into a drift
+            }
+        }
+
+        // Service-budget sliders folded per (service prefab NAME, percentage) — the same enumeration
+        // BudgetDetectorSystem diffs. Budget sync existed but the radar never watched it, so a missed
+        // BudgetCommand skewed income/expenses invisibly.
+        private static long AccBudgets(EntityManager em, Game.Simulation.CityServiceBudgetSystem budget,
+            EntityQuery services, Game.Prefabs.PrefabSystem prefabs)
+        {
+            if (budget == null)
+            {
+                return 0;
+            }
+
+            NativeArray<Entity> ents = services.ToEntityArray(Allocator.Temp);
+            long acc = 0;
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    if (!em.GetComponentData<Game.Prefabs.ServiceData>(e).m_BudgetAdjustable)
+                    {
+                        continue;
+                    }
+
+                    if (!prefabs.TryGetPrefab(e, out Game.Prefabs.PrefabBase pb) || pb == null)
+                    {
+                        continue;
+                    }
+
+                    acc = unchecked(acc + Mix(StableHash(pb.name), budget.GetServiceBudget(e)));
+                }
+            }
+            finally { ents.Dispose(); }
+
+            return acc;
+        }
+
+        // Loan.m_Amount on the City. m_LastModified is a per-machine simulation frame index (decomp
+        // Tools/LoanSystem.cs LoanActionJob) — folding it would manufacture permanent false drift.
+        private static long AccLoan(EntityManager em, Game.Simulation.CitySystem city)
+        {
+            Entity c = city.City;
+            if (c == Entity.Null || !em.HasComponent<Game.Simulation.Loan>(c))
+            {
+                return 0;
+            }
+
+            return em.GetComponentData<Game.Simulation.Loan>(c).m_Amount;
         }
 
         // City policy buffer (active flag + adjustment) keyed by policy prefab NAME (cross-machine stable,
@@ -704,7 +816,17 @@ namespace CS2M.Sync
                 {
                     if (em.HasComponent<Game.Objects.Transform>(e))
                     {
-                        acc = unchecked(acc + Pt(em.GetComponentData<Game.Objects.Transform>(e).m_Position));
+                        // v59: fold the editable params too — an in-place radius/height/rate edit moves no
+                        // entity, so the position-only fold was blind to it (the exact gap WaterCommand.Edit
+                        // closes). Quantized against float noise; Y stays out (anchored to LOCAL terrain).
+                        var w = em.GetComponentData<Game.Simulation.WaterSourceData>(e);
+                        long p = Mix((long) math.round(w.m_Radius * 10f),
+                            (long) math.round(w.m_Height * 10f));
+                        p = Mix(p, (long) math.round(w.m_Multiplier * 100f));
+                        p = Mix(p, (long) math.round(w.m_Polluted * 100f));
+                        p = Mix(p, w.m_ConstantDepth);
+                        acc = unchecked(acc +
+                            Mix(Pt(em.GetComponentData<Game.Objects.Transform>(e).m_Position), p));
                     }
                 }
             }
@@ -813,10 +935,13 @@ namespace CS2M.Sync
     {
         private const int SendEveryNFrames = 600;
 
-        private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water, _routes;
+        private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water, _routes,
+            _services;
         private Game.Simulation.CitySystem _city;
         private Game.Simulation.TaxSystem _tax;
         private Game.Prefabs.PrefabSystem _prefabs;
+        private Game.Simulation.CityServiceBudgetSystem _budget;
+        private Game.Simulation.TerrainSystem _terrain;
         private int _frame;
 
         protected override void OnCreate()
@@ -830,9 +955,12 @@ namespace CS2M.Sync
             _districts = GetEntityQuery(StateHash.DistrictDesc());
             _water = GetEntityQuery(StateHash.WaterDesc());
             _routes = GetEntityQuery(StateHash.RouteDesc());
+            _services = GetEntityQuery(StateHash.ServiceDesc());
             _city = World.GetOrCreateSystemManaged<Game.Simulation.CitySystem>();
             _tax = World.GetOrCreateSystemManaged<Game.Simulation.TaxSystem>();
             _prefabs = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
+            _budget = World.GetOrCreateSystemManaged<Game.Simulation.CityServiceBudgetSystem>();
+            _terrain = World.GetOrCreateSystemManaged<Game.Simulation.TerrainSystem>();
             CS2M.Log.Info($"[Hash] StateHashSenderSystem created (enabled={StateHash.Enabled})");
         }
 
@@ -852,7 +980,7 @@ namespace CS2M.Sync
 
             _frame = 0;
             HashBundle b = StateHash.Compute(EntityManager, _edges, _nodes, _buildings, _blocks,
-                _areas, _districts, _water, _routes, _city, _tax, _prefabs);
+                _areas, _districts, _water, _routes, _city, _tax, _prefabs, _budget, _services, _terrain);
             Command.SendToAll?.Invoke(b.ToCommand());
 
             if (StateHash.NodeDumpOn)
@@ -875,10 +1003,13 @@ namespace CS2M.Sync
     /// </summary>
     public partial class StateHashApplySystem : GameSystemBase
     {
-        private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water, _routes;
+        private EntityQuery _edges, _nodes, _buildings, _blocks, _areas, _districts, _water, _routes,
+            _services;
         private Game.Simulation.CitySystem _city;
         private Game.Simulation.TaxSystem _tax;
         private Game.Prefabs.PrefabSystem _prefabs;
+        private Game.Simulation.CityServiceBudgetSystem _budget;
+        private Game.Simulation.TerrainSystem _terrain;
 
         private HashBundle _lastLocal;
         private HashBundle _lastHost;
@@ -897,9 +1028,12 @@ namespace CS2M.Sync
             _districts = GetEntityQuery(StateHash.DistrictDesc());
             _water = GetEntityQuery(StateHash.WaterDesc());
             _routes = GetEntityQuery(StateHash.RouteDesc());
+            _services = GetEntityQuery(StateHash.ServiceDesc());
             _city = World.GetOrCreateSystemManaged<Game.Simulation.CitySystem>();
             _tax = World.GetOrCreateSystemManaged<Game.Simulation.TaxSystem>();
             _prefabs = World.GetOrCreateSystemManaged<Game.Prefabs.PrefabSystem>();
+            _budget = World.GetOrCreateSystemManaged<Game.Simulation.CityServiceBudgetSystem>();
+            _terrain = World.GetOrCreateSystemManaged<Game.Simulation.TerrainSystem>();
             CS2M.Log.Info($"[Hash] StateHashApplySystem created (enabled={StateHash.Enabled})");
         }
 
@@ -918,7 +1052,7 @@ namespace CS2M.Sync
             }
 
             HashBundle local = StateHash.Compute(EntityManager, _edges, _nodes, _buildings, _blocks,
-                _areas, _districts, _water, _routes, _city, _tax, _prefabs);
+                _areas, _districts, _water, _routes, _city, _tax, _prefabs, _budget, _services, _terrain);
             HashBundle host = HashBundle.FromCommand(cmd);
 
             if (_haveLast)
@@ -933,6 +1067,9 @@ namespace CS2M.Sync
                 Check(drifts, "fees", local.FeeHash, host.FeeHash, _lastLocal.FeeHash, _lastHost.FeeHash, -1, -1);
                 Check(drifts, "tax", local.TaxHash, host.TaxHash, _lastLocal.TaxHash, _lastHost.TaxHash, -1, -1);
                 Check(drifts, "policies", local.PolicyHash, host.PolicyHash, _lastLocal.PolicyHash, _lastHost.PolicyHash, -1, -1);
+                Check(drifts, "budget", local.BudgetHash, host.BudgetHash, _lastLocal.BudgetHash, _lastHost.BudgetHash, -1, -1);
+                Check(drifts, "loan", local.LoanHash, host.LoanHash, _lastLocal.LoanHash, _lastHost.LoanHash, -1, -1);
+                Check(drifts, "terrain", local.TerrainHash, host.TerrainHash, _lastLocal.TerrainHash, _lastHost.TerrainHash, -1, -1);
                 Check(drifts, "synced", local.SyncedObjects, host.SyncedObjects, _lastLocal.SyncedObjects, _lastHost.SyncedObjects, local.SyncedObjects, host.SyncedObjects);
                 Check(drifts, "districts", local.Districts, host.Districts, _lastLocal.Districts, _lastHost.Districts, local.Districts, host.Districts);
                 Check(drifts, "water", local.WaterHash, host.WaterHash, _lastLocal.WaterHash, _lastHost.WaterHash, local.WaterSources, host.WaterSources);

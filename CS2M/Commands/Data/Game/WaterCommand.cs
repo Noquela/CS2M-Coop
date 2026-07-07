@@ -31,5 +31,12 @@ namespace CS2M.Commands.Data.Game
 
         public float OldX { get; set; }
         public float OldZ { get; set; }
+
+        /// <summary>v59: true = EDIT the source nearest to (PosX, PosZ) in place — the game's water tool
+        /// (EditSource + attribute Radius/Rate/Height, decomp Tools/WaterToolSystem.cs) writes the new
+        /// values straight into the live entity during the drag, so no create/delete/move ever fires and
+        /// a radius/height/rate edit never reached the other PCs (MATRIX P1). Uses the same param fields
+        /// as a create; the receiver overwrites them on its matching source.</summary>
+        public bool Edit { get; set; }
     }
 }

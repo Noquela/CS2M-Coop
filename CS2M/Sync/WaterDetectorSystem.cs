@@ -32,10 +32,48 @@ namespace CS2M.Sync
     /// </summary>
     public partial class WaterDetectorSystem : GameSystemBase
     {
+        // Last state BROADCAST to (or adopted from) the remotes: position + the editable params.
+        private struct Known
+        {
+            public float3 Pos;
+            public float Radius, Height, Multiplier, Polluted;
+            public int ConstantDepth;
+        }
+
+        // In-flight local edit being debounced: last observed params + how many frames they held still.
+        private struct Pending
+        {
+            public float Radius, Height, Multiplier, Polluted;
+            public int ConstantDepth;
+            public int StableFrames;
+        }
+
+        // The water tool's EditSource drag writes radius/height/rate into the live entity EVERY frame
+        // (decomp Tools/WaterToolSystem.cs / dossier water.md) — sending on first diff would flood one
+        // command per drag frame. An edit is broadcast only after the params sit unchanged this long.
+        private const int EditSettleFrames = 30; // ~0.5 s
+
         private EntityQuery _sources;
         // Entity → last known position, so a REMOVED source can still be addressed on the wire.
-        private readonly Dictionary<Entity, float3> _seen = new Dictionary<Entity, float3>();
+        private readonly Dictionary<Entity, Known> _seen = new Dictionary<Entity, Known>();
+        private readonly Dictionary<Entity, Pending> _pending = new Dictionary<Entity, Pending>();
         private bool _baselineDone;
+
+        private static Known Snap(float3 pos, WaterSourceData w) => new Known
+        {
+            Pos = pos,
+            Radius = w.m_Radius, Height = w.m_Height, Multiplier = w.m_Multiplier,
+            Polluted = w.m_Polluted, ConstantDepth = w.m_ConstantDepth,
+        };
+
+        private static bool ParamsDiffer(Known k, WaterSourceData w)
+        {
+            return math.abs(k.Radius - w.m_Radius) > 1e-3f
+                   || math.abs(k.Height - w.m_Height) > 1e-3f
+                   || math.abs(k.Multiplier - w.m_Multiplier) > 1e-3f
+                   || math.abs(k.Polluted - w.m_Polluted) > 1e-3f
+                   || k.ConstantDepth != w.m_ConstantDepth;
+        }
 
         protected override void OnCreate()
         {
@@ -65,7 +103,8 @@ namespace CS2M.Sync
                 {
                     foreach (Entity e in ents)
                     {
-                        _seen[e] = EntityManager.GetComponentData<Transform>(e).m_Position;
+                        _seen[e] = Snap(EntityManager.GetComponentData<Transform>(e).m_Position,
+                            EntityManager.GetComponentData<WaterSourceData>(e));
                     }
 
                     _baselineDone = true;
@@ -76,31 +115,85 @@ namespace CS2M.Sync
                 {
                     current.Add(e);
                     float3 pos = EntityManager.GetComponentData<Transform>(e).m_Position;
-                    if (_seen.TryGetValue(e, out float3 last))
+                    if (_seen.TryGetValue(e, out Known last))
                     {
+                        WaterSourceData wm = EntityManager.GetComponentData<WaterSourceData>(e);
+
                         // A relocation keeps the same entity, so the create/delete paths never fire. Sync a
                         // MOVE once the source has drifted past a threshold from the last position the remotes
                         // know about (_seen is only updated on send, so a slow drag accumulates; sub-threshold
                         // tool/terrain nudges never trigger). Skip a move we just applied from the network.
-                        if (math.distancesq(pos.xz, last.xz) > 4f) // > 2 m from the last-broadcast spot
+                        if (math.distancesq(pos.xz, last.Pos.xz) > 4f) // > 2 m from the last-broadcast spot
                         {
                             if (WaterSync.ConsumeRemoteMove(pos, 4f))
                             {
-                                _seen[e] = pos; // this relocation came FROM the network — adopt, don't echo
+                                last.Pos = pos; // this relocation came FROM the network — adopt, don't echo
+                                _seen[e] = last;
                                 continue;
                             }
 
-                            WaterSourceData wm = EntityManager.GetComponentData<WaterSourceData>(e);
                             Command.SendToAll?.Invoke(new WaterCommand
                             {
                                 Move = true,
-                                OldX = last.x, OldZ = last.z,
+                                OldX = last.Pos.x, OldZ = last.Pos.z,
                                 PosX = pos.x, PosY = pos.y, PosZ = pos.z,
                                 Radius = wm.m_Radius, Height = wm.m_Height, Multiplier = wm.m_Multiplier,
                                 Polluted = wm.m_Polluted, ConstantDepth = wm.m_ConstantDepth,
                             });
-                            CS2M.Log.Info($"[Water] DETECT+SEND move ({last.x:F0},{last.z:F0})->({pos.x:F0},{pos.z:F0})");
-                            _seen[e] = pos; // remotes now have it here
+                            CS2M.Log.Info($"[Water] DETECT+SEND move ({last.Pos.x:F0},{last.Pos.z:F0})->({pos.x:F0},{pos.z:F0})");
+                            // Only the POSITION is adopted: ApplyMove ignores the param fields, so a
+                            // simultaneous radius/height edit must stay pending for the EDIT path below.
+                            last.Pos = pos;
+                            _seen[e] = last;
+                        }
+
+                        // v59: in-place param edit (EditSource drag) — same entity, same spot, new
+                        // radius/height/rate. Debounced: broadcast only after the values settle.
+                        if (ParamsDiffer(last, wm))
+                        {
+                            if (_pending.TryGetValue(e, out Pending p)
+                                && math.abs(p.Radius - wm.m_Radius) < 1e-3f
+                                && math.abs(p.Height - wm.m_Height) < 1e-3f
+                                && math.abs(p.Multiplier - wm.m_Multiplier) < 1e-3f
+                                && math.abs(p.Polluted - wm.m_Polluted) < 1e-3f
+                                && p.ConstantDepth == wm.m_ConstantDepth)
+                            {
+                                if (++p.StableFrames < EditSettleFrames)
+                                {
+                                    _pending[e] = p;
+                                    continue;
+                                }
+
+                                _pending.Remove(e);
+                                _seen[e] = Snap(pos, wm); // remotes get (or already have) these params
+                                if (WaterSync.ConsumeRemoteEdit(pos, 4f))
+                                {
+                                    continue; // this edit came FROM the network — adopt, don't echo
+                                }
+
+                                Command.SendToAll?.Invoke(new WaterCommand
+                                {
+                                    Edit = true,
+                                    PosX = pos.x, PosY = pos.y, PosZ = pos.z,
+                                    Radius = wm.m_Radius, Height = wm.m_Height, Multiplier = wm.m_Multiplier,
+                                    Polluted = wm.m_Polluted, ConstantDepth = wm.m_ConstantDepth,
+                                });
+                                CS2M.Log.Info($"[Water] DETECT+SEND edit pos=({pos.x:F0},{pos.z:F0}) " +
+                                              $"r={wm.m_Radius:F1} h={wm.m_Height:F1} m={wm.m_Multiplier:F2}");
+                            }
+                            else
+                            {
+                                _pending[e] = new Pending
+                                {
+                                    Radius = wm.m_Radius, Height = wm.m_Height, Multiplier = wm.m_Multiplier,
+                                    Polluted = wm.m_Polluted, ConstantDepth = wm.m_ConstantDepth,
+                                    StableFrames = 0,
+                                };
+                            }
+                        }
+                        else
+                        {
+                            _pending.Remove(e);
                         }
 
                         continue;
@@ -111,12 +204,12 @@ namespace CS2M.Sync
                     // a fresh LOCAL creation (it already exists on every other PC).
                     if (EntityManager.HasComponent<CS2M_RemotePlaced>(e))
                     {
-                        _seen[e] = pos;
+                        _seen[e] = Snap(pos, EntityManager.GetComponentData<WaterSourceData>(e));
                         continue;
                     }
 
-                    _seen[e] = pos;
                     WaterSourceData w = EntityManager.GetComponentData<WaterSourceData>(e);
+                    _seen[e] = Snap(pos, w);
                     Command.SendToAll?.Invoke(new WaterCommand
                     {
                         PosX = pos.x, PosY = pos.y, PosZ = pos.z,
@@ -135,7 +228,7 @@ namespace CS2M.Sync
             // forever on the other PCs, flooding "out of nowhere" — field report). Removals we
             // applied ourselves from the network are consumed silently (echo guard).
             List<Entity> gone = null;
-            foreach (KeyValuePair<Entity, float3> kv in _seen)
+            foreach (KeyValuePair<Entity, Known> kv in _seen)
             {
                 if (!current.Contains(kv.Key))
                 {
@@ -150,8 +243,9 @@ namespace CS2M.Sync
 
             foreach (Entity e in gone)
             {
-                float3 pos = _seen[e];
+                float3 pos = _seen[e].Pos;
                 _seen.Remove(e);
+                _pending.Remove(e);
                 if (WaterSync.ConsumeRemoteDelete(e))
                 {
                     continue; // this removal came FROM the network — don't bounce it back
@@ -174,6 +268,8 @@ namespace CS2M.Sync
         // Positions a remote MOVE just repositioned a source to; the detector consumes the nearest match
         // so it doesn't bounce the relocation back (the moved source has no CS2M_RemotePlaced to exclude).
         private static readonly List<float3> RemoteMoves = new List<float3>();
+        // Positions a remote EDIT just rewrote params at — same echo problem, same position-keyed answer.
+        private static readonly List<float3> RemoteEdits = new List<float3>();
         private static readonly object Lock = new object();
 
         public static void MarkRemoteDelete(Entity e)
@@ -210,9 +306,33 @@ namespace CS2M.Sync
             }
         }
 
+        public static void MarkRemoteEdit(float3 pos)
+        {
+            lock (Lock) { RemoteEdits.Add(pos); }
+        }
+
+        /// <summary>Consume the marked remote-edit within <paramref name="epsSq"/> (m²) of
+        /// <paramref name="pos"/>. Returns true if this param change originated from the network.</summary>
+        public static bool ConsumeRemoteEdit(float3 pos, float epsSq)
+        {
+            lock (Lock)
+            {
+                for (int i = 0; i < RemoteEdits.Count; i++)
+                {
+                    if (math.distancesq(RemoteEdits[i].xz, pos.xz) <= epsSq)
+                    {
+                        RemoteEdits.RemoveAt(i);
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
         public static void Clear()
         {
-            lock (Lock) { RemoteDeletes.Clear(); RemoteMoves.Clear(); }
+            lock (Lock) { RemoteDeletes.Clear(); RemoteMoves.Clear(); RemoteEdits.Clear(); }
         }
     }
 }
