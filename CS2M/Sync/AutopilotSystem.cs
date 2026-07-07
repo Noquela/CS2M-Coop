@@ -118,6 +118,11 @@ namespace CS2M.Sync
         // so TryStripClientFarmWarning can report whether GenerateObjectsSystem has consumed/deleted it
         // yet (definition entities are transient, gone once Modification1 processes them).
         private Entity _cfDefEntity = Entity.Null;
+        // v57: GHOST SINTÉTICO — see ClientFarm_Plant's creation comment and TickClientFarmGhost.
+        // Entity.Null when no ghost is alive (not yet created this run, or already destroyed).
+        private Entity _cfGhostEntity = Entity.Null;
+        private float3 _cfGhostPos;
+        private int _cfGhostFrames;
 
         // CS2M_AP_TEST=5: CLIENT-ACTIONS — a THIRD scene, separate from TRIREPRO (host-solo) and
         // CLIENT-FARM (client-solo), built to exercise two audit gap-fixes that specifically need a
@@ -4974,8 +4979,19 @@ namespace CS2M.Sync
         /// the host to receive+apply the remote build, AreaSpawnSystem (every 64f) to grow the Extractor
         /// work area on both machines, and any area-sync rewrite to settle) logs the DONE marker every
         /// runner/bot greps for.</summary>
+        private const int GhostLifetimeFrames = 1200; // ~20s @ 60 fps
+        private const int GhostMoveIntervalFrames = 30; // ~0.5s @ 60 fps -> 1m/tick == 2 m/s
+        private const float GhostMoveStep = 1f;
+
         private void RunClientFarmStep()
         {
+            // v57: ticks the GHOST SINTÉTICO (see ClientFarm_Plant's creation comment) on its own ~20s
+            // clock, UNCONDITIONALLY and ahead of the _cfStep gate right below — ClientFarm_Finish (case 1)
+            // flips _cfStep past 1 at ~15s (the 900-frame _cfTimer), which would otherwise make this whole
+            // method return early and strand the ghost alive+moving forever with nothing left to destroy
+            // it. No-op once _cfGhostEntity is Entity.Null (not created yet, or already destroyed).
+            TickClientFarmGhost();
+
             if (_cfStep > 1 || !_joinReAnnounced) { return; }
 
             // Independent of the step timer below: once step 0 has submitted the CreationDefinition
@@ -4996,6 +5012,41 @@ namespace CS2M.Sync
             }
 
             _cfStep++;
+        }
+
+        /// <summary>v57: advances the CLIENTFARM GHOST (see <see cref="ClientFarm_Plant"/>'s creation
+        /// comment) by <see cref="GhostMoveStep"/> along +x every <see cref="GhostMoveIntervalFrames"/>
+        /// frames (~2 m/s, simulating a cursor drifting while a player positions an object), then destroys
+        /// it once <see cref="_cfGhostFrames"/> reaches <see cref="GhostLifetimeFrames"/> (~20s) and logs
+        /// GHOST-END. Purely a SetComponentData walk on the ghost's own <c>Transform</c> — no Updated is
+        /// added (nothing downstream should react to this entity; it exists only for
+        /// ToolPreviewSystem._objPreview to poll). Called every frame from <see cref="RunClientFarmStep"/>;
+        /// no-ops immediately once <see cref="_cfGhostEntity"/> is <c>Entity.Null</c>.</summary>
+        private void TickClientFarmGhost()
+        {
+            if (_cfGhostEntity == Entity.Null) { return; }
+            if (!EntityManager.Exists(_cfGhostEntity))
+            {
+                _cfGhostEntity = Entity.Null; // destroyed some other way — stop ticking
+                return;
+            }
+
+            _cfGhostFrames++;
+
+            if (_cfGhostFrames >= GhostLifetimeFrames)
+            {
+                int idx = _cfGhostEntity.Index;
+                EntityManager.DestroyEntity(_cfGhostEntity);
+                _cfGhostEntity = Entity.Null;
+                L($"[Auto] CLIENTFARM GHOST-END entity={idx}");
+                return;
+            }
+
+            if (_cfGhostFrames % GhostMoveIntervalFrames != 0) { return; }
+
+            _cfGhostPos.x += GhostMoveStep;
+            EntityManager.SetComponentData(
+                _cfGhostEntity, new Game.Objects.Transform(_cfGhostPos, quaternion.identity));
         }
 
         /// <summary>Looks for the real building entity (PrefabRef+Transform+Applied, no CreationDefinition
@@ -5369,6 +5420,34 @@ namespace CS2M.Sync
               $"areaDefs={areasCreated} defEntity={buildDef.Index} (CreationDefinition/ObjectDefinition " +
               "submitted — GenerateObjectsSystem+GenerateAreasSystem materialize the real building+field " +
               "next Modification1, same as a player's Object-tool click)");
+
+            // ---- v57: GHOST SINTÉTICO — feeds ToolPreviewSystem._objPreview (CS2M/Sync/ToolPreviewSystem.
+            // cs:60-74: All<Temp,PrefabRef,Game.Objects.Transform,Game.Objects.ObjectGeometry>, None<
+            // Deleted,Curve>) so the v56 OBJECT preview has something to capture/broadcast — this scene's
+            // real building never stays a bare-enough Temp long enough (and shares CreationDefinition/
+            // Applied churn with the real pipeline above) to double as that ghost. A bare inert entity with
+            // exactly those four components, nothing else: no CreationDefinition/Updated, so
+            // GenerateObjectsSystem/ApplyObjectsSystem never touch it — it's not on the tool pipeline at
+            // all, just query bait. Offset 15m off `pos` (and only ever drifting FARTHER via
+            // TickClientFarmGhost's +x walk below) so it never falls inside TryStripClientFarmWarning's or
+            // TryLogClientFarmReal's 2m same-building position tolerance — both match by prefab+position
+            // with no guard that would otherwise exclude a second Temp entity sharing this prefab, and a
+            // false match there would skip the REAL Temp entity in the same poll frame. TickClientFarmGhost
+            // (polled every frame by RunClientFarmStep, ahead of that method's own step gate) walks it
+            // ~2 m/s for ~20s, then destroys it and logs GHOST-END.
+            float3 ghostPos = pos + new float3(15f, 0f, 0f);
+            Entity ghost = EntityManager.CreateEntity();
+            EntityManager.AddComponent<Game.Tools.Temp>(ghost);
+            EntityManager.AddComponentData(ghost, new PrefabRef(prefabEntity));
+            EntityManager.AddComponentData(ghost, new Game.Objects.Transform(ghostPos, rot));
+            EntityManager.AddComponent<Game.Objects.ObjectGeometry>(ghost);
+
+            _cfGhostEntity = ghost;
+            _cfGhostPos = ghostPos;
+            _cfGhostFrames = 0;
+
+            L($"[Auto] CLIENTFARM GHOST entity={ghost.Index} " +
+              $"pos=({ghostPos.x:F0},{ghostPos.y:F0},{ghostPos.z:F0})");
         }
 
         /// <summary>Step 1: final marker every runner/bot greps for. By now (~15s after PLACED) the host

@@ -22,7 +22,9 @@ namespace CS2M.Commands.Handler.Game
                 new float3(c.Bx, c.By, c.Bz),
                 new float3(c.Cx, c.Cy, c.Cz),
                 new float3(c.Dx, c.Dy, c.Dz));
-            RemoteToolPreviews.Update(c.SenderId, c.Active, bez, c.Username);
+            RemoteToolPreviews.Update(
+                c.SenderId, c.Active, bez, c.Username,
+                c.ObjPosX, c.ObjPosY, c.ObjPosZ, c.ObjRotY, c.ObjSizeX, c.ObjSizeZ);
         }
     }
 }

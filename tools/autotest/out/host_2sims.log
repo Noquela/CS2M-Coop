@@ -1,18 +1,6 @@
-11:45:52.690 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
-11:46:07.189 [Auto] loadingComplete purpose=LoadGame mode=Game
-11:46:07.190 [Auto] city loaded -> arming StartServer
-11:46:08.478 [Auto] StartServer on :1111 status=PLAYING
-11:46:59.074 [Auto] HOST client connected (peers=1); test begins in 600f
-11:47:01.209 [Auto] TEST6 DEVTREE forced points 0->2 (cost=4) node=ServerFarmNode gate CS2M_DEVTREEFIX=True
-11:47:01.513 [Auto] TEST6 POLICY setup target=50239 targetPrefab=IndustrialAgricultureHub01_L1 pos=(7602,3671) decoyPrefab=IndustrialManufacturing01_L1_4x3 decoyPos=(7605,3671) click=(7605,3671) distClickTarget=2,6m distClickDecoy=0,6m (decoy closer -> naive proximity would pick the WRONG one)
-11:47:01.838 [Auto] TEST6 MOVE found existing building entity=50241 hasSubNet=True hasSubArea=True (from save)
-11:47:01.842 [Auto] TEST6 NODEHEAL road1 idA=5218149144517935106 idB=5218149144517935107 prefab=High-voltage Line start=(4802,0,2370,7) end=(4852,0,2370,7)
-11:47:02.159 [Auto] TEST6 ROUTE-REROUTE line=Bus Line#88 entity=50668 gate CS2M_ROUTEFIX=True — baselined, settling ~1.5s before the real move so the line has been seen untouched first (never measure/mutate before a baseline exists)
-11:47:02.167 [Auto] TEST6 MOVE building=50241 old=(4402,2771) new=(4422,2791) hasSubNet=True hasSubArea=True
-11:47:02.747 [Auto] TEST6 POLICY act target=50239 prefab=IndustrialAgricultureHub01_L1 click=(7605,3671) gate CS2M_POLICYFIX=True
-11:47:03.027 [Auto] TEST6 ROUTE-REROUTE moved a waypoint on line=Bus Line#88 gate CS2M_ROUTEFIX=True — the always-on RouteDetectorSystem.DetectSaveRouteReroutes should ship it on its own next scan (watch for [Route] DETECT+SEND reroute in the host log; gate=false here means it never will, regardless of this scene)
-11:47:03.028 [Auto] TEST6 NODEHEAL SENT id=5218149144517935107 from=(4852,0,2370,7) to=(4852,0,2385,7) dist=15,0m gate CS2M_NODEHEAL=True
-11:47:03.426 [Auto] TEST6 POLICY VERIFY target=50239 onTarget=True decoy=50658 onDecoy=False gate CS2M_POLICYFIX=True -> CORRECT resolve
-11:47:05.068 [Auto] TEST6 NODEHEAL FINAL id=5218149144517935107 resolved=True entity=50666 pos=(4852,0,2370,7) movedFromP1End=0,0m gate CS2M_NODEHEAL=True (host-side reading; expectMoved~15 with the gate on, expectMoved~0 with it off — cross-check against [Net] HEAL-SNAP/HEAL-MERGE in THIS PC's own log and the client's for the full picture)
-11:47:06.262 [Auto] TEST6 DEVTREE FINAL hostPoints=-2 forcedBefore=2 cost=4 node=ServerFarmNode gate=True expectFloorAt0=False expectNegative=True
-11:47:12.298 [Auto] TEST6 DONE
+13:51:54.999 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
+13:52:09.712 [Auto] loadingComplete purpose=LoadGame mode=Game
+13:52:09.713 [Auto] city loaded -> arming StartServer
+13:52:11.035 [Auto] StartServer on :1111 status=PLAYING
+13:53:22.476 [Auto] HOST client connected (peers=1); test begins in 600f
+13:53:23.019 [Auto] CLIENTFARM host idle (test=4 drives the CLIENT side only — waiting for the client's farm to arrive as a normal remote ObjectPlaceCommand)
