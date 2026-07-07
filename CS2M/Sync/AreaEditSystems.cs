@@ -56,10 +56,14 @@ namespace CS2M.Sync
         private EntityQuery _appliedAreas;
         private EntityQuery _appliedStandalone;
         private EntityQuery _deletedAreas;
+        private EntityQuery _anchorBuildings;
         private readonly HashSet<Entity> _recentlySent = new HashSet<Entity>();
         private int _clearCounter;
         private int _scanCounter;
         private int _scanPasses;
+        // v57 AREA-FIX: bounded radius for the spatial nearest-Building fallback in FindAnchor — see its
+        // doc comment. Must match AreaEditApplySystem.AnchorBuildingSearchRadius byte-for-byte.
+        private const float AnchorBuildingSearchRadius = 30f;
         // ~4 scan passes (at ~1 Hz) of grace: a save's work-area fields are identical on both PCs, so their
         // first sighting at world-load needs no sync. A first-sight field AFTER warmup is a farm placed this
         // session whose field spawned divergently → the host ships its shape.
@@ -154,6 +158,25 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Temp>(),
                     ComponentType.ReadOnly<Game.Areas.MapTile>(),
                     ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+            });
+
+            // v57 AREA-FIX: nearest-Building spatial search used by FindAnchor when the owner-chain walk
+            // never reaches a Building (a farm's "Agriculture Area Placeholder" — see FindAnchor's doc
+            // comment). Same shape as AreaEditApplySystem's `_buildings` query (kept separate, one per
+            // class, to avoid a cross-class field dependency).
+            _anchorBuildings = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Buildings.Building>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(),
+                    ComponentType.ReadOnly<Deleted>(),
                 },
             });
 
@@ -364,10 +387,28 @@ namespace CS2M.Sync
         /// BUILDING gives both sides an anchor that (a) always carries a CS2M_SyncId (buildings register
         /// one on placement — PlacementDetectorSystem/RemotePlacementApplySystem) and (b) is reached
         /// identically by both FindAnchor (sender) and FindAnchorApply (receiver), since a placeholder's
-        /// own Owner already points at the same building. Falls back to the OLD behavior (nearest
-        /// Transform+PrefabRef, whatever it is) when no Building is found within the walk, for any
-        /// non-building-owned anchor this code may still need to cover. Entity.Null if nothing at all
-        /// within 5 links.</summary>
+        /// own Owner already points at the same building.
+        ///
+        /// v57 AREA-FIX (campo-de-fazenda-diverge, 2-sim 06/07): the walk above assumed a placeholder's
+        /// Owner chain eventually REACHES its building — measured false for a livestock "Agriculture Area
+        /// Placeholder": it has no Owner component leading to a Building at all (confirmed live: the
+        /// detector log still showed owner=Placeholder, i.e. this method fell through to the structural
+        /// `fallback`). Shipping OwnerSyncId=0 for that placeholder sent ResolveOwner into its OTHER
+        /// fallback — a ~3 m "nearest Building" search using the PLACEHOLDER's own coordinates, with NO
+        /// name/identity filter at all. On a map with more than one farm of the same work type (sharing
+        /// the identical placeholder prefab), that search can silently land on a DIFFERENT farm's building
+        /// if it happens to sit within 3 m of THIS farm's placeholder — the shipped polygon then overwrote
+        /// that OTHER farm's field, ~170 m from where it belonged (host/client both reported the same node
+        /// + owner COUNT, only the position differed — a wrong-target rewrite, not a malformed one).
+        /// Fix: when the structural walk finds no Building, do a bounded SPATIAL search (see
+        /// <see cref="AnchorBuildingSearchRadius"/>) for the nearest Building around the fallback anchor's
+        /// OWN position and anchor there instead of on the placeholder itself. A farm's placeholder always
+        /// sits within its own building's footprint, so this reliably finds the RIGHT building — which,
+        /// once synced, always carries a CS2M_SyncId, so the receiver resolves it by EXACT id (never by
+        /// position/name guessing). <see cref="AreaEditApplySystem.FindAnchorApply"/> mirrors this
+        /// byte-for-byte so both sides land on the same anchor level. Falls back to the OLD behavior
+        /// (return the raw structural fallback) when no Building is within the search radius. Entity.Null
+        /// if nothing at all within 5 links.</summary>
         private Entity FindAnchor(Entity owner)
         {
             Entity e = owner;
@@ -401,7 +442,49 @@ namespace CS2M.Sync
                 e = EntityManager.GetComponentData<Owner>(e).m_Owner;
             }
 
-            return fallback;
+            if (fallback == Entity.Null)
+            {
+                return Entity.Null;
+            }
+
+            Entity nearBuilding = FindNearestBuilding(fallback, _anchorBuildings);
+            return nearBuilding != Entity.Null ? nearBuilding : fallback;
+        }
+
+        /// <summary>Shared by FindAnchor/FindAnchorApply (mirrored in AreaEditApplySystem) — see
+        /// FindAnchor's v57 doc comment for why this exists.</summary>
+        private Entity FindNearestBuilding(Entity near, EntityQuery buildings)
+        {
+            if (!EntityManager.HasComponent<Game.Objects.Transform>(near))
+            {
+                return Entity.Null;
+            }
+
+            float3 pos = EntityManager.GetComponentData<Game.Objects.Transform>(near).m_Position;
+            Entity best = Entity.Null;
+            float bestDSq = AnchorBuildingSearchRadius * AnchorBuildingSearchRadius;
+            NativeArray<Entity> candidates = buildings.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity b in candidates)
+                {
+                    float3 bp = EntityManager.GetComponentData<Game.Objects.Transform>(b).m_Position;
+                    float dx = bp.x - pos.x;
+                    float dz = bp.z - pos.z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestDSq)
+                    {
+                        bestDSq = d;
+                        best = b;
+                    }
+                }
+            }
+            finally
+            {
+                candidates.Dispose();
+            }
+
+            return best;
         }
 
         private void DetectStandalone()
@@ -600,6 +683,8 @@ namespace CS2M.Sync
         private struct PendingArea { public AreaEditCommand Cmd; public int FramesLeft; }
         private readonly List<PendingArea> _pendingAreas = new List<PendingArea>();
         private const int AreaRetryTtlFrames = 300; // ~5 s at 60 fps
+        // v57 AREA-FIX: must match AreaEditDetectorSystem.AnchorBuildingSearchRadius byte-for-byte.
+        private const float AnchorBuildingSearchRadius = 30f;
 
         protected override void OnCreate()
         {
@@ -966,10 +1051,12 @@ namespace CS2M.Sync
         }
 
         /// <summary>MUST mirror the detector's FindAnchor byte-for-byte: prefer the actual building over
-        /// any intermediate Transform+PrefabRef anchor (e.g. a farm's placeholder), falling back to the
-        /// nearest Transform+PrefabRef ancestor when no Building is in the chain. Both sides need to land
-        /// on the SAME anchor level for the "is this area's anchor == the resolved owner" comparison in
-        /// ApplyOne to ever succeed — see FindAnchor's doc comment for the bug this fixes.</summary>
+        /// any intermediate Transform+PrefabRef anchor (e.g. a farm's placeholder), falling back to a
+        /// bounded SPATIAL search for the nearest Building around the fallback anchor when no Building is
+        /// in the owner chain (v57 AREA-FIX — see FindAnchor's doc comment for the wrong-target-rewrite
+        /// bug this fixes), and finally to the nearest Transform+PrefabRef ancestor when no Building is
+        /// found at all. Both sides need to land on the SAME anchor level for the "is this area's anchor
+        /// == the resolved owner" comparison in ApplyOne to ever succeed.</summary>
         private Entity FindAnchorApply(Entity owner)
         {
             Entity e = owner;
@@ -1003,7 +1090,49 @@ namespace CS2M.Sync
                 e = EntityManager.GetComponentData<Owner>(e).m_Owner;
             }
 
-            return fallback;
+            if (fallback == Entity.Null)
+            {
+                return Entity.Null;
+            }
+
+            Entity nearBuilding = FindNearestBuildingApply(fallback);
+            return nearBuilding != Entity.Null ? nearBuilding : fallback;
+        }
+
+        /// <summary>Shared by FindAnchorApply — mirrors AreaEditDetectorSystem.FindNearestBuilding
+        /// byte-for-byte, reusing the already-existing <see cref="_buildings"/> query.</summary>
+        private Entity FindNearestBuildingApply(Entity near)
+        {
+            if (!EntityManager.HasComponent<Game.Objects.Transform>(near))
+            {
+                return Entity.Null;
+            }
+
+            float3 pos = EntityManager.GetComponentData<Game.Objects.Transform>(near).m_Position;
+            Entity best = Entity.Null;
+            float bestDSq = AnchorBuildingSearchRadius * AnchorBuildingSearchRadius;
+            NativeArray<Entity> candidates = _buildings.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity b in candidates)
+                {
+                    float3 bp = EntityManager.GetComponentData<Game.Objects.Transform>(b).m_Position;
+                    float dx = bp.x - pos.x;
+                    float dz = bp.z - pos.z;
+                    float d = dx * dx + dz * dz;
+                    if (d < bestDSq)
+                    {
+                        bestDSq = d;
+                        best = b;
+                    }
+                }
+            }
+            finally
+            {
+                candidates.Dispose();
+            }
+
+            return best;
         }
 
         private Entity ResolveOwner(AreaEditCommand cmd)
