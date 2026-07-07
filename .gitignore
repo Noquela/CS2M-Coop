@@ -13,3 +13,6 @@ CS2M/Library
 *.sln.DotSettings.user
 *csproj.user
 *.drawio.bkp
+
+release_staging/
+CS2M-v*.zip
