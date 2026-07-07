@@ -321,8 +321,22 @@ namespace CS2M
             // SyncId connections).
 
             // EXPERIMENTAL: host-authoritative growables (CS2M_GROWABLE_SYNC=0 disables).
-            // Host detects sim spawns before ModificationEnd; clients suppress their zone spawning.
-            updateSystem.UpdateBefore<GrowableDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            // v56.2 STUCK-BUILDING FIX: Game.Simulation.ZoneSpawnSystem (the system that actually
+            // creates a grown building's entity) is registered at SystemUpdatePhase.GameSimulation
+            // (decomp/Game/Game/Common/SystemOrder.cs:543), which the SystemUpdatePhase enum orders
+            // AFTER ModificationEnd and BEFORE Cleanup (decomp/Game/Game/SystemUpdatePhase.cs:8-37:
+            // ...Modification5, ModificationEnd, PreSimulation, PostSimulation, GameSimulation,
+            // ..., Cleanup is last). Game.Common.CleanUpSystem strips the one-frame Created tag at
+            // Cleanup (decomp/Game/Game/Common/CleanUpSystem.cs:26,53), registered at
+            // SystemUpdatePhase.Cleanup (SystemOrder.cs:54) — the LAST phase of the frame.
+            // GrowableDetectorSystem used to sit at ModificationEnd: EARLIER in the SAME frame than
+            // GameSimulation, so every building ZoneSpawnSystem creates this frame gets its Created
+            // tag stripped by Cleanup before the detector's ModificationEnd slot ever runs again
+            // (next frame) — a 100%, structural miss, not a race. Moved to Rendering (after
+            // GameSimulation, before Cleanup, same frame — the same slot every other host-sender in
+            // this file already uses: StateHashSenderSystem, PlayerStatsSenderSystem, EnvSyncSenderSystem,
+            // SpeedSyncSenderSystem) so the detector now sees Created the very frame the building spawns.
+            updateSystem.UpdateAt<GrowableDetectorSystem>(SystemUpdatePhase.Rendering);
             updateSystem.UpdateAt<GrowableSuppressSystem>(SystemUpdatePhase.Rendering);
             // v56: clients suppress their own AreaSpawnSystem (fields/surfaces) — host-authoritative areas.
             updateSystem.UpdateAt<AreaSpawnSuppressSystem>(SystemUpdatePhase.Rendering);

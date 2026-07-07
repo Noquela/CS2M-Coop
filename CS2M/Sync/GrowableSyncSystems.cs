@@ -25,6 +25,18 @@ namespace CS2M.Sync
     ///     Clients meanwhile suppress their own zone spawning (see GrowableSuppressSystem), so the
     ///     physical city is identical on every PC. Population/citizens inside stay per-PC (emergent);
     ///     "/resync" remains the deep reconciler.
+    ///
+    ///     PHASE (v56.2 stuck-building fix): this system MUST run at SystemUpdatePhase.Rendering (set
+    ///     in Mod.cs), not ModificationEnd. Game.Simulation.ZoneSpawnSystem — the system that actually
+    ///     creates the grown building's entity — runs at SystemUpdatePhase.GameSimulation, which the
+    ///     enum places AFTER ModificationEnd and Game.Common.CleanUpSystem (which strips the one-frame
+    ///     Created tag) runs at the LAST phase, Cleanup — AFTER GameSimulation too. Sitting at
+    ///     ModificationEnd meant every spawn's Created tag was gone (stripped by Cleanup, same frame,
+    ///     before the detector's next ModificationEnd slot) before this query ever saw it: a permanent,
+    ///     100%-miss race, not a flaky one — hence buildings that grow after two PCs join stay forever
+    ///     "grown" on the host and "vacant lot" on the client (see docs symptom: host cell ~20 Occupied
+    ///     vs client cell ~8 Visible on the exact same block). Rendering runs after GameSimulation and
+    ///     before Cleanup in the same frame, so Created is still present when this query runs.
     /// </summary>
     public partial class GrowableDetectorSystem : GameSystemBase
     {
@@ -97,7 +109,10 @@ namespace CS2M.Sync
 
                     CS2M_SyncIdSystem.Register(EntityManager, e, cmd.SyncId);
                     Command.SendToAll?.Invoke(cmd);
-                    CS2M.Log.Verbose($"[Grow] DETECT+SEND spawn name={cmd.PrefabName} syncId={cmd.SyncId}");
+                    // Info (was Verbose): the stuck-building bug was invisible precisely because this
+                    // line never printed (the detector never actually saw a spawn — see phase comment
+                    // above); bumped so live 2-sim validation can confirm the fix in Player.log.
+                    CS2M.Log.Info($"[Grow] DETECT+SEND spawn name={cmd.PrefabName} syncId={cmd.SyncId}");
                 }
             }
             finally
