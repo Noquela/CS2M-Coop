@@ -182,9 +182,28 @@ namespace CS2M
             updateSystem.UpdateBefore<TerrainDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<TerrainApplySystem>(SystemUpdatePhase.Modification5);
 
-            // Delete/move sync of synced objects (by CS2M_SyncId).
-            updateSystem.UpdateBefore<DeleteDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            // Move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+
+            // Delete sync of synced objects (by CS2M_SyncId).
+            // v57 STUCK-BUILDING-ON-DELETE FIX (same root as the v56.2 growable-create fix above):
+            // SIMULATION-driven deletes — Game.Simulation.CollapsedBuildingSystem (abandoned-building
+            // teardown, once its collapse timer clears) AND the level-up old-building delete inside
+            // Game.Simulation.ZoneSpawnSystem — both AddComponent<Deleted> at
+            // SystemUpdatePhase.GameSimulation (decomp/Game/Game/Common/SystemOrder.cs:576 and :543).
+            // The enum (decomp/Game/Game/SystemUpdatePhase.cs:8-37) orders GameSimulation AFTER
+            // ModificationEnd and BEFORE Cleanup, and Game.Common.CleanUpSystem — registered at
+            // SystemUpdatePhase.Cleanup, the LAST phase (SystemOrder.cs:54) — is what actually
+            // DestroyEntity()s everything PrepareCleanUpSystem collected via its Deleted-tag query
+            // (CleanUpSystem.cs:35-53). Sitting at ModificationEnd meant every sim-driven delete this
+            // frame was PHYSICALLY GONE (destroyed at this frame's Cleanup) before the detector's next
+            // ModificationEnd slot (next frame) ever ran again — a 100% structural miss, not a race,
+            // identical in shape to the growable-create bug. PLAYER-driven deletes (bulldoze / info
+            // panel / upgrade-extension delete) still work fine here: they mark Deleted at some
+            // Modification1-9 phase, well before this frame's Cleanup, so Rendering (after
+            // GameSimulation, before Cleanup — same slot as GrowableDetectorSystem/StateHashSenderSystem/
+            // etc. above) still sees them. Single-type UpdateAt overload only (double-register lesson).
+            updateSystem.UpdateAt<DeleteDetectorSystem>(SystemUpdatePhase.Rendering);
             // v41: BEFORE Modification1 (was Modification5). Deleted/Updated added at Mod5 were never
             // seen by the cleanup consumers (References/SubObjects/etc. run Mod2B-4) but CleanUp still
             // destroyed the entity at end of frame -> dangling references -> delayed NATIVE crashes.

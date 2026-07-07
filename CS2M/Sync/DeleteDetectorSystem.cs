@@ -29,6 +29,17 @@ namespace CS2M.Sync
     ///     so <see cref="_deletedExtensionQuery"/> re-admits Owner but gates on the SAME prefab check
     ///     used at plant time (<c>ServiceUpgradeData</c>/<c>BuildingExtensionData</c>) so ordinary
     ///     derived sub-objects (walls, pipes, decorations — never allocated a SyncId) still don't leak.
+    ///
+    ///     PHASE (v57 fix — see Mod.cs registration): runs at <c>SystemUpdatePhase.Rendering</c>, not
+    ///     ModificationEnd. Abandoned-building teardown (<c>Game.Simulation.CollapsedBuildingSystem</c>)
+    ///     and the level-up old-building delete (<c>Game.Simulation.ZoneSpawnSystem</c>) both mark
+    ///     <c>Deleted</c> at <c>SystemUpdatePhase.GameSimulation</c> — AFTER ModificationEnd in the
+    ///     phase enum, so a detector sitting at ModificationEnd never saw them before
+    ///     <c>Game.Common.CleanUpSystem</c> (phase Cleanup, the LAST phase) physically destroyed the
+    ///     entity that same frame. Rendering runs after GameSimulation and before Cleanup, so all four
+    ///     queries below still catch the tag. Player-driven deletes (bulldoze/info-panel), which mark
+    ///     Deleted at some Modification1-9 phase, are unaffected — Rendering is strictly later in the
+    ///     same frame than ModificationEnd was, so nothing that used to be caught is now missed.
     /// </summary>
     public partial class DeleteDetectorSystem : GameSystemBase
     {
