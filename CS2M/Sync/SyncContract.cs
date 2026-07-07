@@ -106,6 +106,11 @@ namespace CS2M.Sync
             { "ResyncCommand",              SyncClass.Infra },
             { "StateHashCommand",           SyncClass.Infra },
             { "ToolPreviewCommand",         SyncClass.Infra }, // other player's placement ghost — cosmetic overlay
+            // v60 auto-heal: the request carries no world state (Infra); the two answers are host-owned
+            // mirrors of authoritative slices, same class as ZoneBlockAuthorityCommand.
+            { "HealRequestCommand",         SyncClass.Infra },
+            { "WaterHealCommand",           SyncClass.HostAuthoritative },
+            { "TerrainPatchCommand",        SyncClass.HostAuthoritative },
         };
 
         /// <summary>The construction tools the game exposes (Game.Tools.*ToolSystem), each mapped to the

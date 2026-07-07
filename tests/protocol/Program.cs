@@ -93,6 +93,34 @@ namespace CS2MTests
 
     public class TilePurchaseCommand : CommandBase { public float[] Xs { get; set; } public float[] Zs { get; set; } public int Cost { get; set; } }
 
+    // --- v60 auto-heal commands ---
+    public class HealRequestCommand : CommandBase
+    {
+        public string Domain { get; set; }
+        public float[] TerrainHeights { get; set; }
+    }
+
+    public class WaterHealCommand : CommandBase
+    {
+        public float[] PosX { get; set; }
+        public float[] PosY { get; set; }
+        public float[] PosZ { get; set; }
+        public float[] Radius { get; set; }
+        public float[] Height { get; set; }
+        public float[] Multiplier { get; set; }
+        public float[] Polluted { get; set; }
+        public int[] ConstantDepth { get; set; }
+    }
+
+    public class TerrainPatchCommand : CommandBase
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+        public int W { get; set; }
+        public int H { get; set; }
+        public ushort[] Data { get; set; }
+    }
+
     // --- v50 commands ---
     public class MapPingCommand : CommandBase
     {
@@ -488,6 +516,12 @@ namespace CS2MTests
             RoundTrip(opts, new NetDeleteCommand { StartX = 3644f, StartZ = 7096f, EndX = 3835f, EndZ = 7100f }, c => Math.Abs(c.StartX - 3644f) < 0.01f && Math.Abs(c.EndZ - 7100f) < 0.01f);
             RoundTrip(opts, new NetUpgradeCommand { StartX = 1f, EndX = 2f, General = 0u, Left = 0x1000u, Right = 0u }, c => c.Left == 0x1000u && c.General == 0u);
             RoundTrip(opts, new TilePurchaseCommand { Xs = new[] { 100f, 200f }, Zs = new[] { -100f, -200f }, Cost = 44000 }, c => c.Xs.Length == 2 && c.Zs[1] == -200f && c.Cost == 44000);
+
+            // --- v60 auto-heal commands (ushort[] payload is the novel wire type — prove it) ---
+            RoundTrip(opts, new HealRequestCommand { Domain = "terrain", TerrainHeights = new[] { 477.5f, 480f, 0f } }, c => c.Domain == "terrain" && c.TerrainHeights.Length == 3 && Math.Abs(c.TerrainHeights[0] - 477.5f) < 0.01f);
+            RoundTrip(opts, new HealRequestCommand { Domain = "water" }, c => c.Domain == "water" && c.TerrainHeights == null);
+            RoundTrip(opts, new WaterHealCommand { PosX = new[] { 1f, 2f }, PosY = new[] { 5f, 6f }, PosZ = new[] { 9f, 10f }, Radius = new[] { 20f, 30f }, Height = new[] { 5f, 6f }, Multiplier = new[] { 1f, 0.5f }, Polluted = new[] { 0f, 0.1f }, ConstantDepth = new[] { 0, 1 } }, c => c.PosX.Length == 2 && c.Radius[1] == 30f && c.ConstantDepth[1] == 1);
+            RoundTrip(opts, new TerrainPatchCommand { X = 2048, Y = 1024, W = 3, H = 2, Data = new ushort[] { 0, 1, 32767, 65535, 42, 7 } }, c => c.X == 2048 && c.W == 3 && c.Data.Length == 6 && c.Data[2] == 32767 && c.Data[3] == 65535);
 
             // --- v50 commands ---
             RoundTrip(opts, new MapPingCommand { X = -321.5f, Y = 480f, Z = 1204.25f, Username = "Bruno" }, c => c.Username == "Bruno" && Math.Abs(c.Z - 1204.25f) < 0.01f);

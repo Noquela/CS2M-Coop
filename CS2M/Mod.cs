@@ -182,6 +182,11 @@ namespace CS2M
             updateSystem.UpdateBefore<TerrainDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateAt<TerrainApplySystem>(SystemUpdatePhase.Modification5);
 
+            // v60 auto-heal: radar-triggered domain slices (water list / terrain patches / economy
+            // re-broadcast) instead of the manual full-world /resync. Recovery path only.
+            updateSystem.UpdateAt<AutoHealHostSystem>(SystemUpdatePhase.Modification5);
+            updateSystem.UpdateAt<AutoHealApplySystem>(SystemUpdatePhase.Modification5);
+
             // Move sync of synced objects (by CS2M_SyncId).
             updateSystem.UpdateBefore<MoveDetectorSystem>(SystemUpdatePhase.ModificationEnd);
 

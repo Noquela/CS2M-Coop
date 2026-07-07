@@ -674,7 +674,7 @@ namespace CS2M.Sync
 
         private void RunSelftestStep()
         {
-            if (_testStep > 54) { return; }
+            if (_testStep > 58) { return; }
             if (_testTimer > 0) { _testTimer--; return; }
             _testTimer = 200;
 
@@ -737,7 +737,16 @@ namespace CS2M.Sync
                 // derivation pipeline actually consumed (ConnectedEdge wired + Composition resolved).
                 case 52: ActNetBatch(); break;
                 case 53: VerifyNetBatch(); break;
-                case 54: Summary(); break;
+                // v60 auto-heal: exercise the riskiest client paths single-instance. Terrain: an exact
+                // texel patch (+8 m) must land at the EXACT world spot (CopyTexture row-orientation
+                // discriminator — a vertical flip would land it mirrored, far away) and a second patch
+                // restores the original texels. Water: a rogue local source must be reconciled away by
+                // an authoritative WaterHealCommand that omits it.
+                case 54: ActHealTerrainRaise(); break;
+                case 55: VerifyHealTerrainRaise(); break;
+                case 56: VerifyHealTerrainRestore(); ActHealWater(); break;
+                case 57: VerifyHealWater(); break;
+                case 58: Summary(); break;
             }
 
             _testStep++;
@@ -3375,6 +3384,160 @@ namespace CS2M.Sync
             float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(_extMoveEntity).m_Position;
             bool ok = math.distance(p.xz, _extMoveExpected.xz) < 1f;
             Result("ext-move", ok, $"pos=({p.x:F1},{p.z:F1}) expected=({_extMoveExpected.x:F1},{_extMoveExpected.z:F1}) (owned-upgrade move applied via SubObject resolve)");
+        }
+
+        // ------- v60 steps 54-57: AUTO-HEAL apply paths (terrain texel patch + water reconcile) -------
+        private float3 _healPatchCenter;      // world position the patch must land on
+        private float _healOriginalHeight;    // sampled height there before the patch
+        private float _healCtrlHeight;        // control spot 300 m away — must stay put
+        private ushort[] _healOriginalData;   // texels to restore in the second patch
+        private int _healX, _healY, _healW, _healH;
+        private const float HealRaiseMeters = 8f;
+        private Entity _healRogueWater;
+
+        private void ActHealTerrainRaise()
+        {
+            _healOriginalData = null;
+            var terrain = World.GetOrCreateSystemManaged<Game.Simulation.TerrainSystem>();
+            Game.Simulation.TerrainHeightData hd = terrain.GetHeightData(true);
+            if (!hd.isCreated || !TryAnchor(out float3 a))
+            {
+                Result("auto-heal-terrain", false, "no heightmap / anchor");
+                return;
+            }
+
+            // A spot ~400 m from the city so nothing else touches it during the test.
+            _healPatchCenter = new float3(a.x + 400f, 0f, a.z + 400f);
+            float3 px = Game.Simulation.TerrainUtils.ToHeightmapSpace(ref hd, _healPatchCenter);
+            _healW = 32; _healH = 32;
+            _healX = math.clamp((int) px.x - _healW / 2, 0, hd.resolution.x - _healW);
+            _healY = math.clamp((int) px.z - _healH / 2, 0, hd.resolution.z - _healH);
+            _healOriginalHeight = Game.Simulation.TerrainUtils.SampleHeight(ref hd, _healPatchCenter);
+            _healCtrlHeight = Game.Simulation.TerrainUtils.SampleHeight(ref hd,
+                _healPatchCenter + new float3(300f, 0f, 300f));
+
+            _healOriginalData = new ushort[_healW * _healH];
+            var raised = new ushort[_healW * _healH];
+            int deltaRaw = (int) math.round(HealRaiseMeters * hd.scale.y); // world→raw (ToWorldSpace inverse)
+            for (int row = 0; row < _healH; row++)
+            {
+                int src = (_healY + row) * hd.resolution.x + _healX;
+                for (int col = 0; col < _healW; col++)
+                {
+                    ushort orig = hd.heights[src + col];
+                    _healOriginalData[row * _healW + col] = orig;
+                    raised[row * _healW + col] = (ushort) math.clamp(orig + deltaRaw, 0, ushort.MaxValue);
+                }
+            }
+
+            L($"[Auto] TEST auto-heal-terrain PATCH rect=({_healX},{_healY}) {_healW}x{_healH} " +
+              $"center=({_healPatchCenter.x:F0},{_healPatchCenter.z:F0}) h={_healOriginalHeight:F1} +{HealRaiseMeters}m");
+            AutoHealQueues.EnqueueTerrainPatch(new CS2M.Commands.Data.Game.TerrainPatchCommand
+            {
+                X = _healX, Y = _healY, W = _healW, H = _healH, Data = raised,
+            });
+        }
+
+        private void VerifyHealTerrainRaise()
+        {
+            if (_healOriginalData == null) { return; }
+
+            var terrain = World.GetOrCreateSystemManaged<Game.Simulation.TerrainSystem>();
+            Game.Simulation.TerrainHeightData hd = terrain.GetHeightData(true);
+            float now = Game.Simulation.TerrainUtils.SampleHeight(ref hd, _healPatchCenter);
+            // Control point 300 m away — must NOT have moved (a row-flipped CopyTexture would raise
+            // the mirrored spot and leave the intended one untouched).
+            float ctrl = Game.Simulation.TerrainUtils.SampleHeight(ref hd,
+                _healPatchCenter + new float3(300f, 0f, 300f));
+            bool raisedOk = math.abs(now - (_healOriginalHeight + HealRaiseMeters)) < 2f;
+            bool ctrlOk = math.abs(ctrl - _healCtrlHeight) < 1f;
+            Result("auto-heal-terrain", raisedOk && ctrlOk,
+                $"h={now:F1} expected~{_healOriginalHeight + HealRaiseMeters:F1} ctrlMoved={math.abs(ctrl - _healCtrlHeight):F1} " +
+                "(exact texel patch landed at the exact world spot — CopyTexture orientation proven)");
+
+            // Restore pass (the actual heal semantics: authoritative texels overwrite local ones).
+            AutoHealQueues.EnqueueTerrainPatch(new CS2M.Commands.Data.Game.TerrainPatchCommand
+            {
+                X = _healX, Y = _healY, W = _healW, H = _healH, Data = _healOriginalData,
+            });
+        }
+
+        private void VerifyHealTerrainRestore()
+        {
+            if (_healOriginalData == null) { return; }
+
+            var terrain = World.GetOrCreateSystemManaged<Game.Simulation.TerrainSystem>();
+            Game.Simulation.TerrainHeightData hd = terrain.GetHeightData(true);
+            float now = Game.Simulation.TerrainUtils.SampleHeight(ref hd, _healPatchCenter);
+            bool ok = math.abs(now - _healOriginalHeight) < 1f;
+            Result("auto-heal-terrain-restore", ok, $"h={now:F1} expected~{_healOriginalHeight:F1} (original texels restored)");
+        }
+
+        /// <summary>Creates a rogue LOCAL water source, then feeds the apply an authoritative list that
+        /// omits it — the reconcile must delete the rogue and keep everything else untouched.</summary>
+        private void ActHealWater()
+        {
+            _healRogueWater = Entity.Null;
+            if (!TryAnchor(out float3 a)) { Result("auto-heal-water", false, "no anchor"); return; }
+
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Simulation.WaterSourceData>(),
+                    ComponentType.ReadOnly<Game.Objects.Transform>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+
+            // Authoritative list = the CURRENT sources (pre-rogue).
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            var cmd = new CS2M.Commands.Data.Game.WaterHealCommand
+            {
+                PosX = new float[ents.Length], PosY = new float[ents.Length], PosZ = new float[ents.Length],
+                Radius = new float[ents.Length], Height = new float[ents.Length],
+                Multiplier = new float[ents.Length], Polluted = new float[ents.Length],
+                ConstantDepth = new int[ents.Length],
+            };
+            try
+            {
+                for (int i = 0; i < ents.Length; i++)
+                {
+                    float3 p = EntityManager.GetComponentData<Game.Objects.Transform>(ents[i]).m_Position;
+                    var w = EntityManager.GetComponentData<Game.Simulation.WaterSourceData>(ents[i]);
+                    cmd.PosX[i] = p.x; cmd.PosY[i] = p.y; cmd.PosZ[i] = p.z;
+                    cmd.Radius[i] = w.m_Radius; cmd.Height[i] = w.m_Height;
+                    cmd.Multiplier[i] = w.m_Multiplier; cmd.Polluted[i] = w.m_Polluted;
+                    cmd.ConstantDepth[i] = w.m_ConstantDepth;
+                }
+            }
+            finally { ents.Dispose(); }
+
+            // The rogue: a plain local source the "host" list above does not contain.
+            var rogue = new float3(a.x + 500f, a.y, a.z + 500f);
+            _healRogueWater = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(_healRogueWater, new Game.Simulation.WaterSourceData
+            {
+                m_Radius = 20f, m_Height = 5f, m_Multiplier = 0.5f, m_Polluted = 0f,
+                m_ConstantDepth = 0, m_Modifier = 1f,
+            });
+            EntityManager.AddComponentData(_healRogueWater,
+                new Game.Objects.Transform(rogue, quaternion.identity));
+            EntityManager.AddComponent<Created>(_healRogueWater);
+            EntityManager.AddComponent<Updated>(_healRogueWater);
+
+            L($"[Auto] TEST auto-heal-water ROGUE at ({rogue.x:F0},{rogue.z:F0}) auth={cmd.PosX.Length}");
+            AutoHealQueues.EnqueueWater(cmd);
+        }
+
+        private void VerifyHealWater()
+        {
+            if (_healRogueWater == Entity.Null) { return; }
+
+            bool gone = !EntityManager.Exists(_healRogueWater)
+                        || EntityManager.HasComponent<Deleted>(_healRogueWater);
+            Result("auto-heal-water", gone,
+                $"rogueDeleted={gone} (reconcile removed the source the authoritative list omitted)");
         }
 
         private void Summary()

@@ -469,6 +469,8 @@ namespace CS2M.Networking
             Sync.PlayerStatsSync.Clear();
             Sync.FireSync.Clear();
             Sync.WaterSync.Clear();
+            Sync.AutoHealQueues.Clear();
+            Sync.AutoHealClient.Reset();
             Sync.WorkAreaHash.Clear();
             Sync.DemandSync.Clear();
             Sync.RemoteFeeQueue.Clear();

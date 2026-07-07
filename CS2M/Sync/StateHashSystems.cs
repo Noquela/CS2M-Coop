@@ -239,9 +239,31 @@ namespace CS2M.Sync
         // GetTerrainBounds(), identical on both machines (fixed map extents).
         private static long AccTerrain(Game.Simulation.TerrainSystem terrain)
         {
+            float[] grid = SampleTerrainGrid(terrain);
+            if (grid == null)
+            {
+                return 0; // heightmap unavailable this frame — transient 0 never settles into a drift
+            }
+
+            long acc = 0;
+            for (int k = 0; k < grid.Length; k++)
+            {
+                acc = unchecked(acc + Mix(k, (long) math.round(grid[k] * 0.5f))); // 2 m quantum
+            }
+
+            return acc;
+        }
+
+        public const int TerrainGridN = 32;
+
+        /// <summary>The radar's terrain sample grid (TerrainGridN², row-major i*N+j over cell centers of
+        /// GetTerrainBounds()). Shared with the v60 auto-heal so the client's HealRequest and the host's
+        /// divergence localization use bit-identical sample positions. Null when the heightmap isn't ready.</summary>
+        public static float[] SampleTerrainGrid(Game.Simulation.TerrainSystem terrain)
+        {
             if (terrain == null)
             {
-                return 0;
+                return null;
             }
 
             try
@@ -249,29 +271,28 @@ namespace CS2M.Sync
                 Game.Simulation.TerrainHeightData hd = terrain.GetHeightData(false);
                 if (!hd.isCreated)
                 {
-                    return 0;
+                    return null;
                 }
 
                 UnityEngine.Bounds bounds = terrain.GetTerrainBounds(); // fixed 14336×14336 map extents
-                const int N = 32;
+                const int N = TerrainGridN;
                 float3 min = bounds.min, max = bounds.max;
                 float2 step = new float2(max.x - min.x, max.z - min.z) / N;
-                long acc = 0;
+                var grid = new float[N * N];
                 for (int i = 0; i < N; i++)
                 {
                     for (int j = 0; j < N; j++)
                     {
                         var p = new float3(min.x + (i + 0.5f) * step.x, 0f, min.z + (j + 0.5f) * step.y);
-                        float h = Game.Simulation.TerrainUtils.SampleHeight(ref hd, p);
-                        acc = unchecked(acc + Mix(i * N + j, (long) math.round(h * 0.5f))); // 2 m quantum
+                        grid[i * N + j] = Game.Simulation.TerrainUtils.SampleHeight(ref hd, p);
                     }
                 }
 
-                return acc;
+                return grid;
             }
             catch
             {
-                return 0; // heightmap unavailable this frame — transient 0 never settles into a drift
+                return null;
             }
         }
 
@@ -1119,7 +1140,13 @@ namespace CS2M.Sync
                     if (_strikes >= 2)
                     {
                         SyncHealth.SetDrift(true, string.Join(", ", drifts));
-                        Warn(drifts);
+                        // v60 auto-heal: request the diverged domains' authoritative slices instead of
+                        // nagging the players. The chat warning only fires when some drifting domain
+                        // is NOT healable (roads/buildings/areas) or a heal isn't converging.
+                        if (!AutoHealClient.TryHeal(drifts, _terrain))
+                        {
+                            Warn(drifts);
+                        }
                     }
                 }
                 else
@@ -1127,6 +1154,7 @@ namespace CS2M.Sync
                     if (_strikes > 0)
                     {
                         CS2M.Log.Verbose("[Hash] converged (drift cleared)");
+                        AutoHealClient.Converged();
                     }
 
                     _strikes = 0;
