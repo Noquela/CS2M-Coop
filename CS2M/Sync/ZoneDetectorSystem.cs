@@ -15,9 +15,17 @@ namespace CS2M.Sync
 {
     /// <summary>
     ///     Detects zoning changes by diffing each Updated <c>Block</c>'s cell zones against a snapshot
-    ///     and broadcasting the changed cells (as ZonePrefab names). First sight of a block caches its
-    ///     baseline silently (handles road-driven block create/recreate). Echo guard: the apply system
-    ///     updates the same snapshot, so a remote-applied change produces no diff here.
+    ///     and broadcasting the changed cells (as ZonePrefab names). A brand-new block is born fully
+    ///     Unzoned, so its baseline on first sight is an all-zero array — NOT whatever the cells
+    ///     currently look like. This matters because a block can already be painted the very first
+    ///     time this system observes it (road-driven block create/recreate that preserves paint, or a
+    ///     player painting a cell in the same frame/batch the block is born) — caching the painted
+    ///     state as baseline would diff against itself forever and silently eat that edit (the
+    ///     "single zone block not detected" bug: the 18*Unzoned-vs-18*NA_Residential_Low drift). Echo
+    ///     guard: the apply system marks+updates the same snapshot for a remote-applied change (paint
+    ///     OR a block created/healed by remote sync), so it produces no diff here — this guard is
+    ///     checked BEFORE the first-sight zero-baseline logic, so a block born from a remote apply is
+    ///     never mistaken for a fresh local edit and bounced back.
     /// </summary>
     public partial class ZoneDetectorSystem : GameSystemBase
     {
@@ -70,19 +78,36 @@ namespace CS2M.Sync
                         cur[i] = cells[i].m_Zone.m_Index;
                     }
 
-                    if (!ZoneSync.Snapshot.TryGetValue(e, out ushort[] prev) || prev.Length != n)
-                    {
-                        ZoneSync.Snapshot[e] = cur; // first sight: cache baseline, don't send
-                        continue;
-                    }
+                    bool firstSight = !ZoneSync.Snapshot.TryGetValue(e, out ushort[] prev) || prev.Length != n;
 
-                    // Echo guard: this block was just remote-applied. The game recomputes its cells
-                    // over the next frames (CellCheckSystem overlap sharing), so absorb the REAL state
-                    // into the snapshot instead of diffing — otherwise we ping-pong the paint back.
+                    // Echo guard FIRST (covers both the "known block updated" path and the "brand-new
+                    // block" first-sight path): this block was just remote-applied (a zone paint, or a
+                    // block CREATED/HEALED by remote sync — ZonePaintApplySystem/ZoneBlockAuthorityApplySystem
+                    // both call ZoneEcho.Mark on the entity they wrote). The game recomputes cells over
+                    // the next frames (CellCheckSystem overlap sharing), so absorb the REAL state into the
+                    // snapshot instead of diffing — otherwise we ping-pong the remote paint straight back
+                    // to its sender. A block born from a remote apply must NEVER fall into the first-sight
+                    // branch below and be treated as a fresh local edit.
                     if (ZoneEcho.IsMarked(e))
                     {
                         ZoneSync.Snapshot[e] = cur;
                         continue;
+                    }
+
+                    if (firstSight)
+                    {
+                        // FIX: the correct baseline for a block we've never snapshotted is "fully Unzoned"
+                        // (every cell index 0) — a block is born without zoning; any zone found on it is a
+                        // player edit. The OLD code cached whatever the cells currently look like as the
+                        // baseline, so a block that arrives ALREADY PAINTED the first time this system sees
+                        // it (e.g. spawned from a road edit, or painted in the same batch the block itself
+                        // was created) never diffed against anything and its paint was silently swallowed
+                        // forever — exactly the "single zone block not detected" drift. Diffing against an
+                        // all-zero baseline instead makes the already-painted cells show up as a diff on
+                        // this very first pass, so they ship immediately. (The echo guard above already
+                        // excluded blocks born from a remote apply, so this only fires for genuine local
+                        // paint / local block regeneration.)
+                        prev = new ushort[n];
                     }
 
                     List<int> changedIdx = null;

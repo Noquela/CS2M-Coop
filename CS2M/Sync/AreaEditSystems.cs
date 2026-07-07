@@ -348,34 +348,60 @@ namespace CS2M.Sync
             }
         }
 
-        /// <summary>Nearest ancestor up the owner chain with a Transform+PrefabRef (a building, or a farm's
-        /// "Agriculture Area Placeholder"). This is the STABLE address for a work-area edit — it doesn't move
-        /// when the polygon is resized. Entity.Null if none within 5 links.</summary>
+        /// <summary>Nearest ancestor up the owner chain that IS the actual building (has Building +
+        /// Transform + PrefabRef), preferred over any intermediate Transform+PrefabRef-carrying object
+        /// (e.g. a farm's "Agriculture Area Placeholder" that sits between the field-Area and its
+        /// building). BUG FIX (area-form-diverges): the old version returned the FIRST Transform+PrefabRef
+        /// ancestor it met — for a farm field that's the placeholder, not the building — and the
+        /// placeholder is a derived sub-object that never gets a <see cref="CS2M_SyncId"/> (it's
+        /// deliberately excluded from placement sync, see PlacementDetectorSystem.DetectExtensions, to
+        /// avoid duplicating it). Shipping OwnerSyncId=0 for the placeholder forced the receiver's
+        /// ResolveOwner into a fragile ~3 m proximity guess, which silently resolved to the wrong anchor
+        /// LEVEL (the building) while the receiver's own FindAnchorApply (unchanged) still returned the
+        /// placeholder for its owned area — a level mismatch that made the "same anchor" comparison in
+        /// ApplyOne always fail, so the host's shape was never written onto the client's manually-placed
+        /// field (it fell through to CREATE a second, duplicate area instead). Walking through to the
+        /// BUILDING gives both sides an anchor that (a) always carries a CS2M_SyncId (buildings register
+        /// one on placement — PlacementDetectorSystem/RemotePlacementApplySystem) and (b) is reached
+        /// identically by both FindAnchor (sender) and FindAnchorApply (receiver), since a placeholder's
+        /// own Owner already points at the same building. Falls back to the OLD behavior (nearest
+        /// Transform+PrefabRef, whatever it is) when no Building is found within the walk, for any
+        /// non-building-owned anchor this code may still need to cover. Entity.Null if nothing at all
+        /// within 5 links.</summary>
         private Entity FindAnchor(Entity owner)
         {
             Entity e = owner;
+            Entity fallback = Entity.Null;
             for (int guard = 0; e != Entity.Null && guard < 5; guard++)
             {
                 if (!EntityManager.Exists(e))
                 {
-                    return Entity.Null;
+                    break;
                 }
 
                 if (EntityManager.HasComponent<Game.Objects.Transform>(e)
                     && EntityManager.HasComponent<PrefabRef>(e))
                 {
-                    return e;
+                    if (EntityManager.HasComponent<Game.Buildings.Building>(e))
+                    {
+                        return e; // the actual building — stable, SyncId-bearing anchor
+                    }
+
+                    if (fallback == Entity.Null)
+                    {
+                        fallback = e; // remember the nearest Transform+PrefabRef in case no Building is found
+                    }
                 }
 
                 if (!EntityManager.HasComponent<Owner>(e))
                 {
-                    return Entity.Null;
+                    break;
                 }
 
                 e = EntityManager.GetComponentData<Owner>(e).m_Owner;
             }
 
-            return Entity.Null;
+            return fallback;
         }
 
         private void DetectStandalone()
@@ -939,32 +965,45 @@ namespace CS2M.Sync
             CS2M.Log.Info($"[Area] APPLIED-DEF standalone create name={cmd.PrefabName} nodes={cmd.Xs.Length}");
         }
 
-        /// <summary>Same walk as the detector's FindAnchor: nearest ancestor with Transform+PrefabRef.</summary>
+        /// <summary>MUST mirror the detector's FindAnchor byte-for-byte: prefer the actual building over
+        /// any intermediate Transform+PrefabRef anchor (e.g. a farm's placeholder), falling back to the
+        /// nearest Transform+PrefabRef ancestor when no Building is in the chain. Both sides need to land
+        /// on the SAME anchor level for the "is this area's anchor == the resolved owner" comparison in
+        /// ApplyOne to ever succeed — see FindAnchor's doc comment for the bug this fixes.</summary>
         private Entity FindAnchorApply(Entity owner)
         {
             Entity e = owner;
+            Entity fallback = Entity.Null;
             for (int guard = 0; e != Entity.Null && guard < 5; guard++)
             {
                 if (!EntityManager.Exists(e))
                 {
-                    return Entity.Null;
+                    break;
                 }
 
                 if (EntityManager.HasComponent<Game.Objects.Transform>(e)
                     && EntityManager.HasComponent<PrefabRef>(e))
                 {
-                    return e;
+                    if (EntityManager.HasComponent<Game.Buildings.Building>(e))
+                    {
+                        return e;
+                    }
+
+                    if (fallback == Entity.Null)
+                    {
+                        fallback = e;
+                    }
                 }
 
                 if (!EntityManager.HasComponent<Owner>(e))
                 {
-                    return Entity.Null;
+                    break;
                 }
 
                 e = EntityManager.GetComponentData<Owner>(e).m_Owner;
             }
 
-            return Entity.Null;
+            return fallback;
         }
 
         private Entity ResolveOwner(AreaEditCommand cmd)
