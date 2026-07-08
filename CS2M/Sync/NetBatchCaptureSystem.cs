@@ -15,10 +15,13 @@ using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
-    /// <summary>Global toggle for the AtomicBatch net path. OFF by default (env <c>CS2M_ATOMIC=1</c>) so the
-    /// proven NetDetector→NetPlaceApply reconstruct path stays the default until the batch path is validated
-    /// on the 2-sim. When ON, <see cref="NetBatchCaptureSystem"/> is the only net sender and the legacy
-    /// NetDetectorSystem + NetEditDetectorSystem early-return.</summary>
+    /// <summary>Global toggle for the AtomicBatch net path. ON BY DEFAULT since v66 (07/07 night 2-sim:
+    /// with the batch path on, the roads/nodes radar stayed SILENT for the entire session — the first
+    /// run ever with zero road drift — while the legacy reconstruct path split junctions up to 48 m
+    /// apart on the receiver and poisoned every derived layer downstream). Set env <c>CS2M_ATOMIC=0</c>
+    /// to fall back to the legacy NetDetector→NetPlaceApply reconstruct path. When ON,
+    /// <see cref="NetBatchCaptureSystem"/> is the only net sender and the legacy NetDetectorSystem +
+    /// NetEditDetectorSystem early-return.</summary>
     public static class AtomicBatch
     {
         private static int _state = -1;
@@ -29,7 +32,7 @@ namespace CS2M.Sync
             {
                 if (_state < 0)
                 {
-                    _state = System.Environment.GetEnvironmentVariable("CS2M_ATOMIC") == "1" ? 1 : 0;
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_ATOMIC") == "0" ? 0 : 1;
                 }
 
                 return _state == 1;

@@ -31,8 +31,14 @@ namespace CS2M
 
     public static class Log
     {
+        // v66 FIELD FIX (07/07 night, TWO client crashes with the same stack): ShowsErrorsInUI makes
+        // Colossal's logger pop the in-game error dialog for Warn+/Error — and when the Warn fires from
+        // inside a simulation phase (NetBatchApplySystem.SnapBoundaryNode via ModificationSystem) or
+        // mid-LoadGame, the dialog path re-enters the logger (UnityLogger:Warn → PostProcessFormat →
+        // Warn…) and hard-crashes the process. Warnings belong in the log file; the mod has its own
+        // chat/badge for anything the player must see.
         public static ILog Logger { get; } = LogManager.GetLogger(Mod.Name)
-            .SetShowsErrorsInUI(true)
+            .SetShowsErrorsInUI(false)
             .SetEffectiveness(Level.Info)
             .SetLogStackTrace(false);
 

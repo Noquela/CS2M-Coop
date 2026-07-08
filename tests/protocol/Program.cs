@@ -458,6 +458,11 @@ namespace CS2MTests
     // v63: BuildOrders added — the game's cell-overlap contest tiebreaks on Game.Zones.BuildOrder.m_Order
     // (decomp CellOverlapJobs.cs:582), which comes from a per-machine local counter
     // (GenerateEdgesSystem.cs:1556-1558), so it must round-trip like every other per-block array here.
+    // v64: EdgeStart/EndXs/Zs added — fallback edge identity (node XZ positions) for a split-born node
+    // that never got a CS2M_NodeSyncId; see the mod's doc-comment for the +-4 m match tolerance rationale.
+    // v65: CellStatePool added — masked Game.Zones.Cell.m_State per cell (same alignment as
+    // CellZonePool), the novel wire type here being ushort[] flags data (a shape already proven by
+    // TerrainPatchCommand.Data below, but this is the first COMMAND-LEVEL array of it).
     public class ZoneBlockAuthorityCommand : CommandBase
     {
         public ulong[] EdgeStartIds { get; set; }
@@ -475,7 +480,13 @@ namespace CS2MTests
         public int[] CellsCount { get; set; }
         public string[] ZonePool { get; set; }
         public int[] CellZonePool { get; set; }
+        public ushort[] CellStatePool { get; set; }
         public uint[] BuildOrders { get; set; }
+        public float[] EdgeStartXs { get; set; }
+        public float[] EdgeStartZs { get; set; }
+        public float[] EdgeEndXs { get; set; }
+        public float[] EdgeEndZs { get; set; }
+        public bool[] GroupComplete { get; set; } // v66 "host owns the grid": true = shipped as a COMPLETE group
     }
 
     public static class Program
@@ -555,10 +566,14 @@ namespace CS2MTests
             RoundTrip(opts, new TerrainPatchCommand { X = 2048, Y = 1024, W = 3, H = 2, Data = new ushort[] { 0, 1, 32767, 65535, 42, 7 } }, c => c.X == 2048 && c.W == 3 && c.Data.Length == 6 && c.Data[2] == 32767 && c.Data[3] == 65535);
 
             // --- v63 ZoneBlockAuthority.BuildOrders (cell-overlap contest tiebreak, decomp CellOverlapJobs.cs:582) ---
+            // --- v64 adds EdgeStart/EndXs/Zs (split-junction position fallback identity) ---
+            // --- v65 adds CellStatePool (masked Cell.m_State — Blocked=1/Visible=8/etc., same alignment as CellZonePool) ---
+            // --- v66 adds GroupComplete (bool[] — true = block belongs to a group the host shipped WHOLE, so
+            //         the client reconciles the SET: heal/create/delete). Novel per-block bool[] on this command. ---
             RoundTrip(opts, new ZoneBlockAuthorityCommand
             {
-                EdgeStartIds = new[] { 11UL, 11UL },
-                EdgeEndIds = new[] { 12UL, 12UL },
+                EdgeStartIds = new[] { 11UL, 0UL },
+                EdgeEndIds = new[] { 12UL, 0UL },
                 Sides = new sbyte[] { 1, -1 },
                 Ordinals = new[] { 0, 0 },
                 PosX = new[] { 100f, 105f }, PosY = new[] { 478f, 478f }, PosZ = new[] { -50f, -55f },
@@ -567,9 +582,17 @@ namespace CS2MTests
                 CellsOffset = new[] { 0, 24 }, CellsCount = new[] { 24, 15 },
                 ZonePool = new[] { "", "EU Residential Low" },
                 CellZonePool = Enumerable.Repeat(1, 39).ToArray(),
+                CellStatePool = Enumerable.Range(0, 39).Select(i => i % 2 == 0 ? (ushort) 9 : (ushort) 0x204).ToArray(),
                 BuildOrders = new[] { 42u, 4294967295u },
+                EdgeStartXs = new[] { 90f, 200f }, EdgeStartZs = new[] { -60f, -70f },
+                EdgeEndXs = new[] { 130f, 240f }, EdgeEndZs = new[] { -40f, -30f },
+                GroupComplete = new[] { true, false },
             }, c => c.BuildOrders.Length == 2 && c.BuildOrders[0] == 42u && c.BuildOrders[1] == 4294967295u
-                    && c.EdgeStartIds[1] == 11UL && c.SizeX[1] == 3);
+                    && c.EdgeStartIds[1] == 0UL && c.SizeX[1] == 3
+                    && c.EdgeStartXs.Length == 2 && Math.Abs(c.EdgeStartXs[1] - 200f) < 0.01f
+                    && Math.Abs(c.EdgeEndZs[0] - (-40f)) < 0.01f
+                    && c.CellStatePool.Length == 39 && c.CellStatePool[0] == 9 && c.CellStatePool[1] == 0x204
+                    && c.GroupComplete.Length == 2 && c.GroupComplete[0] && !c.GroupComplete[1]);
 
             // --- v50 commands ---
             RoundTrip(opts, new MapPingCommand { X = -321.5f, Y = 480f, Z = 1204.25f, Username = "Bruno" }, c => c.Username == "Bruno" && Math.Abs(c.Z - 1204.25f) < 0.01f);

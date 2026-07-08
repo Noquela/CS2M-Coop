@@ -438,6 +438,7 @@ namespace CS2M.Networking
             Sync.RemoteZoneBlockQueue.Clear();
             Sync.ZoneSync.Clear();
             Sync.ZoneEcho.Clear();
+            Sync.ZoneFlagAssert.Clear();
             // Drop any Updated re-stamps queued for next frame (DeferredUpdateMarker.cs) so a
             // reconnect doesn't carry over stale entity handles from the previous session.
             Sync.DeferredUpdated.Clear();

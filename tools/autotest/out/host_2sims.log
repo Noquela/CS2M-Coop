@@ -1,4 +1,35 @@
-21:28:09.107 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=False log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
-21:28:25.971 [Auto] loadingComplete purpose=LoadGame mode=Game
-21:28:25.972 [Auto] city loaded -> arming StartServer
-21:28:27.989 [Auto] StartServer on :1111 status=PLAYING
+00:25:00.243 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
+00:25:16.320 [Auto] loadingComplete purpose=LoadGame mode=Game
+00:25:16.322 [Auto] city loaded -> arming StartServer
+00:25:17.594 [Auto] StartServer on :1111 status=PLAYING
+00:26:10.384 [Auto] HOST client connected (peers=1); test begins in 600f
+00:26:21.595 [Auto] TEST object SEND kind=tree name=EU_PoplarTree01 syncId=8820570350065549313
+00:26:28.014 [Auto] TEST object SEND kind=building name=RuinsCastle01 syncId=8820570350065549314
+00:26:30.888 [Auto] TEST net SEND name=ExtradosedBridge01 syncId=8820570350065549315
+00:26:30.897 [Auto] TEST replay INJECT road name=ExtradosedBridge01 A=(-4071,-1263) B=(-4183,-1395)
+00:26:38.693 [Auto] TEST delete SEND syncId=8820570350065549313
+00:26:45.924 [Auto] TEST zone SEND block=(3411,-3646) name='Office Low'
+00:26:54.876 [Auto] TEST water SEND pos=(4101,1644)
+00:27:03.984 [Auto] TEST move SEND syncId=8820570350065549314 to=(4026,1569)
+00:27:13.013 [Auto] TEST district SEND name=District Area center=(3751,1294)
+00:27:21.921 [Auto] TEST upgrade SEND edge=55676
+00:27:30.912 [Auto] TEST terrain SEND pos=(4201,1244)
+00:27:40.168 [Auto] TEST policy SEND name=Taxi Starting Fee
+00:27:49.366 [Auto] TEST tile SEND center=(-6856,-1870)
+00:27:58.554 [Auto] TEST devtree SEND node=PostSortingFacilityNode
+00:28:08.154 [Auto] TEST route SEND prefab=Bus Line id=8820570350065549320
+00:28:17.235 [Auto] TEST fire SEND syncId=8820570350065549314
+00:28:26.322 [Auto] TEST junction-stress SEND X-cross 4 arms drifting-centre (HasNodes) at (130,-3902)
+00:28:38.674 [Auto] TEST junction-arm-delete SEND north arm of stress-X at (130,-3902)
+00:28:47.856 [Auto] TEST moved-junction SEND M=(-720,-3852) + 3rd road to M+5m (8m fallback) cross-machine
+00:29:00.237 [Auto] TEST node-upgrade SEND TrafficLights at (130,-3902)
+00:29:12.074 [Auto] TEST fee SEND resource=1 -> 99,7
+00:29:21.151 [Auto] TEST water-move SEND create (30,-4002)
+00:29:30.145 [Auto] TEST water-move SEND move ->(100,-3932)
+00:29:39.321 [Auto] TEST district-reshape SEND create (380,-3652)
+00:29:48.313 [Auto] TEST district-reshape SEND reshape ->+-120 (StateHash checks 1 district, no dup)
+00:30:00.050 [Auto] TEST city-name SEND "CoopCity-10" (client [Rename] APPLIED city name = proof)
+00:30:08.617 [Auto] TEST line-visibility SEND hide number=88 (StateHash RouteHash checks convergence)
+00:30:18.141 [Auto] TEST tax SEND main=12 (StateHash TaxHash checks convergence)
+00:30:27.005 [Auto] TEST net-batch2 SEND ids=8820570350065549328/8820570350065549329 prefab=ExtradosedBridge01
+00:30:39.276 [Auto] scripted test DONE (over the wire). Check CLIENT log VERIFY lines.

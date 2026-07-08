@@ -1,0 +1,65 @@
+﻿STATEDIFF — localizador de divergência (Fase 0b)
+  HOST   : C:\Users\Bruno\AppData\LocalLow\Colossal Order\Cities Skylines II\Logs\CS2M.log
+  CLIENT : C:\Sandbox\Bruno\CS2Coop\user\current\AppData\LocalLow\Colossal Order\Cities Skylines II\Logs\CS2M.log
+
+=== NODES  (posicao x/z : grau (junção vs ponta-morta)) ===
+  (sem dump NodeDump em um dos lados — rode com CS2M_NODEDUMP=1 e provoque a ação)
+
+=== EDGES  (par de extremidades a-b) ===
+  (sem dump EdgeDump em um dos lados — rode com CS2M_NODEDUMP=1 e provoque a ação)
+
+=== AREAS  (centro cx/cz : nós : owned) ===
+  HOST count=530   CLIENT count=530   delta=+0
+  - FALTANDO no client:  137/145:n4:o1
+  + FANTASMA no client:  161/34:n4:o1
+
+=== ZONES  (bloco x/z : WxH[:oORDEM] = células run-length por NOME[~FLAGS] de zona) ===
+  HOST count=228   CLIENT count=224   delta=+4
+  . growable-only @ 143/-214 (Occupied/Overridden divergem — emergente, esperado)
+  ~ FORMA DIFERE @ 164/-332:  host=164/-332:10x6:o1020188642=2*EU_Residential_Low~8|6*EU_Residential_Low~28|4*EU_Residential_Low~8|6*EU_Residential_Low~28|4*EU_Residential_Low~8|6*EU_Residential_Low~28|2*EU_Residential_Low~8|2*Unzoned~1|6*EU_Residential_Low~28|2*EU_Residential_Low~8|6*Unzoned~1|2*EU_Residential_Low~28|2*EU_Residential_Low~8|7*Unzoned~1|1*Unzoned~21|1*Unzoned~1|1*EU_Residential_Low~1  client=164/-332:10x6:o1020188642=2*EU_Residential_Low~8|6*EU_Residential_Low~28|4*EU_Residential_Low~8|6*EU_Residential_Low~28|4*EU_Residential_Low~8|6*EU_Residential_Low~28|2*EU_Residential_Low~8|2*Unzoned~1|6*EU_Residential_Low~28|2*EU_Residential_Low~8|6*Unzoned~1|2*EU_Residential_Low~28|2*EU_Residential_Low~8|7*Unzoned~1|2*Unzoned~21|1*EU_Residential_Low~21
+  - FALTANDO no client:  -18/-490:7x6:o3315407219=42*Unzoned~8
+  - FALTANDO no client:  -20/-426:7x6:o3316187174=42*Unzoned~8
+  - FALTANDO no client:  140/-422:7x6:o1028902127=4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8
+  - FALTANDO no client:  142/-486:7x6:o1027818107=6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A
+  - FALTANDO no client:  168/-273:8x6:o1018156757=1*Unzoned~A|7*Unzoned~8|1*Unzoned~A|7*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~1|1*Unzoned~A|1*Unzoned~8|14*Unzoned~1|1*Unzoned~21|7*Unzoned~1
+  - FALTANDO no client:  189/-321:7x6:o1010924012=32*Unzoned~8|5*Unzoned~1|5*Unzoned~21
+  - FALTANDO no client:  196/-421:7x6:o1055872997=42*Unzoned~8
+  - FALTANDO no client:  198/-485:7x6:o1055790782=42*Unzoned~8
+  - FALTANDO no client:  204/-196:8x6:o1053234722=48*Unzoned~8
+  - FALTANDO no client:  213/-376:8x6:o1050828302=1*Unzoned~1|7*EU_Residential_Low~28|1*Unzoned~1|7*EU_Residential_Low~28|3*Unzoned~1|5*EU_Residential_Low~28|3*Unzoned~1|5*EU_Residential_Low~28|3*Unzoned~1|5*EU_Residential_Low~28|3*Unzoned~1|4*EU_Residential_Low~28|1*Unzoned~1
+  - FALTANDO no client:  228/-251:7x6:o1044478172=6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A|6*Unzoned~8|1*Unzoned~A
+  - FALTANDO no client:  239/-434:8x6:o1040346977=48*Unzoned~1
+  - FALTANDO no client:  249/-299:8x6:o1036936577=48*Unzoned~8
+  - FALTANDO no client:  252/-419:7x6:o1035348392=3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1|3*Unzoned~8|4*Unzoned~1
+  - FALTANDO no client:  254/-483:7x6:o1034260892=42*Unzoned~8
+  - FALTANDO no client:  275/-357:8x6:o1075737707=48*Unzoned~8
+  - FALTANDO no client:  36/-425:7x6:o971298992=42*Unzoned~8
+  - FALTANDO no client:  38/-489:7x6:o970408982=42*Unzoned~8
+  - FALTANDO no client:  92/-423:7x6:o998623952=42*Unzoned~8
+  - FALTANDO no client:  94/-487:7x6:o997543412=42*Unzoned~8
+  + FANTASMA no client:  -4/-490:10x6:o3310053239=60*EU_Residential_Low~8
+  + FANTASMA no client:  -6/-426:10x6:o3310833194=60*EU_Residential_Low~8
+  + FANTASMA no client:  158/-422:10x6:o1022263592=3*Unzoned~1|7*EU_Residential_Low~8|3*Unzoned~1|7*EU_Residential_Low~8|3*Unzoned~1|7*EU_Residential_Low~8|3*Unzoned~1|7*EU_Residential_Low~8|3*Unzoned~1|7*EU_Residential_Low~8|3*Unzoned~1|7*EU_Residential_Low~8
+  + FANTASMA no client:  160/-486:10x6:o1021283972=60*EU_Residential_Low~8
+  + FANTASMA no client:  166/-267:8x6:o1018934972=22*EU_Residential_Low~8|2*Unzoned~1|2*EU_Residential_Low~8|22*Unzoned~1
+  + FANTASMA no client:  191/-326:7x6:o1010796992=1*EU_Residential_Low~28|6*EU_Residential_Low~8|1*EU_Residential_Low~28|6*EU_Residential_Low~8|1*EU_Residential_Low~28|6*EU_Residential_Low~8|1*EU_Residential_Low~28|6*EU_Residential_Low~8|1*EU_Residential_Low~28|4*EU_Residential_Low~8|4*Unzoned~1|2*Unzoned~21|1*Unzoned~1|2*Unzoned~21
+  + FANTASMA no client:  204/-194:7x6:o1054700672=42*EU_Residential_Low~8
+  + FANTASMA no client:  214/-377:7x6:o1049278832=1*Unzoned~21|6*EU_Residential_Low~28|1*Unzoned~21|6*EU_Residential_Low~28|1*Unzoned~1|2*Unzoned~28|4*EU_Residential_Low~28|3*Unzoned~1|4*EU_Residential_Low~28|3*Unzoned~1|4*EU_Residential_Low~28|3*Unzoned~1|2*EU_Residential_Low~28|1*EU_Residential_Low~21|1*EU_Residential_Low~1
+  + FANTASMA no client:  226/-245:7x6:o1044810512=42*EU_Residential_Low~8
+  + FANTASMA no client:  238/-420:10x6:o1040705852=8*EU_Residential_Low~8|2*Unzoned~1|8*EU_Residential_Low~8|2*Unzoned~1|6*EU_Residential_Low~8|4*Unzoned~1|6*EU_Residential_Low~8|4*Unzoned~1|6*EU_Residential_Low~8|4*Unzoned~1|6*EU_Residential_Low~8|4*Unzoned~1
+  + FANTASMA no client:  238/-432:8x6:o1040718902=48*Unzoned~1
+  + FANTASMA no client:  240/-484:10x6:o1039611392=60*EU_Residential_Low~8
+  + FANTASMA no client:  252/-304:8x6:o1036575092=48*EU_Residential_Low~8
+  + FANTASMA no client:  276/-359:7x6:o1074203897=42*EU_Residential_Low~8
+  + FANTASMA no client:  74/-424:10x6:o1005161567=60*EU_Residential_Low~8
+  + FANTASMA no client:  76/-488:10x6:o1004957987=60*EU_Residential_Low~8
+
+=== BUILDINGS  (posicao x/z : nome do prefab) ===
+  (sem dump BldgDump em um dos lados — rode com CS2M_NODEDUMP=1 e provoque a ação)
+
+--- RESUMO ---
+  nodes: sem dados
+  edges: sem dados
+  areas: DIVERGE  <-- alvo localizado acima
+  zones: DIVERGE  <-- alvo localizado acima
+  buildings: sem dados

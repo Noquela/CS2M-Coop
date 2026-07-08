@@ -295,6 +295,15 @@ namespace CS2M
             // warning elsewhere in this file).
             updateSystem.UpdateAt<ZoneOrderTiebreakSystem>(SystemUpdatePhase.Modification4B);
 
+            // ZoneFlagAssertSystem (gated CS2M_ZONEFLAGS, ON by default since 2026-07-07, ANDed with
+            // CS2M_ZONEAUTH): client-only continuous re-assert of the STABLE Cell.m_State bits (Blocked/
+            // Visible/etc.) that ZoneBlockAuthorityApplySystem.Heal seeds once but the game's own
+            // overlap-contest hysteresis can re-diverge afterward without any new command ever arriving.
+            // ModificationEnd (same slot as every other detector-style sweep in this file) — it only reads/
+            // patches Cell buffers in place and deliberately never stamps Updated, so phase ordering
+            // relative to the Mod1-4 consumers doesn't matter here.
+            updateSystem.UpdateAt<ZoneFlagAssertSystem>(SystemUpdatePhase.ModificationEnd);
+
             // Pause the sim for everyone while a player is joining (+ chat notice).
             updateSystem.UpdateAt<JoinPauseSystem>(SystemUpdatePhase.Rendering);
 

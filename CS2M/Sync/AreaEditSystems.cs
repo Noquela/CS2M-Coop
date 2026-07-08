@@ -68,6 +68,16 @@ namespace CS2M.Sync
         // first sighting at world-load needs no sync. A first-sight field AFTER warmup is a farm placed this
         // session whose field spawned divergently → the host ships its shape.
         private const int WarmupScans = 4;
+        // v61 AREA-FIX (fazenda-plantada-em-sessao-nunca-sincroniza, 2-sim 07/07): a session-born work
+        // area's owner/placeholder can still be mid-spawn on the exact scan it is first sighted, so
+        // FindAnchor/prefab lookup can transiently fail. The OLD code baselined WorkAreaHash BEFORE
+        // knowing whether the send would succeed, so a failed send there was adopted as "known" forever
+        // and the lot's initial shape never shipped (2-sim: zero [Area] traffic all session, client kept
+        // its own divergent placement-template shape). Track per-area retry attempts so an unresolved
+        // anchor is retried on the NEXT ~1 Hz scan instead of being silently accepted as baselined, with
+        // a bounded give-up so a genuinely orphaned area (owner destroyed mid-spawn) doesn't retry forever.
+        private readonly Dictionary<Entity, int> _pendingAnchorScans = new Dictionary<Entity, int>();
+        private const int AnchorPendingScanLimit = 30;
         private EntityQuery _workAreas;
 
         protected override void OnCreate()
@@ -304,8 +314,10 @@ namespace CS2M.Sync
 
         /// <summary>v51: ~1 Hz polygon-hash diff over owned areas — the only reliable signal for a
         /// player RESHAPING a work area (vanilla marks the entity Updated, never Applied). First
-        /// sight is a silent baseline; the apply system updates the shared hash so a remotely
-        /// applied rewrite is never bounced back.</summary>
+        /// sight is normally a silent baseline; a first-sight field seen AFTER warmup (a lot BORN
+        /// this session — see the v61 AREA-FIX block below) instead gets its initial shape SHIPPED,
+        /// since it never goes through the Applied-tag create loop above. The apply system updates
+        /// the shared hash so a remotely applied rewrite is never bounced back.</summary>
         private void ScanWorkAreaEdits(bool isServer)
         {
             _scanPasses++;
@@ -322,7 +334,6 @@ namespace CS2M.Sync
 
                     int hash = WorkAreaHash.Compute(nodes);
                     bool firstSight = !WorkAreaHash.TryGet(area, out int known);
-                    WorkAreaHash.Set(area, hash);
 
                     // Known area, no polygon change → nothing to ship.
                     if (!firstSight && known == hash)
@@ -344,6 +355,9 @@ namespace CS2M.Sync
                     // ship from either side, guarded by WorkAreaHash echo) needs a 2-sim to confirm no ping-pong.
                     if (!isServer)
                     {
+                        // Client-only bookkeeping: baseline immediately (it never sends) so a LATER real
+                        // change on this area is detected as a change, not re-treated as a first sight.
+                        WorkAreaHash.Set(area, hash);
                         continue;
                     }
 
@@ -355,6 +369,7 @@ namespace CS2M.Sync
                     // firstSight gate below) because v58 AREA-FIX needs it to check CS2M_RemotePlaced.
                     Entity anchor = FindAnchor(EntityManager.GetComponentData<Owner>(area).m_Owner);
 
+                    bool isSessionBornFirstSight = false;
                     if (firstSight)
                     {
                         // First-sight fields at WORLD-LOAD are identical on both PCs (loaded from the same
@@ -382,8 +397,27 @@ namespace CS2M.Sync
                             && EntityManager.HasComponent<CS2M_RemotePlaced>(anchor);
                         if (_scanPasses <= WarmupScans || ownerIsRemotePlaced)
                         {
+                            WorkAreaHash.Set(area, hash);
+                            _pendingAnchorScans.Remove(area);
                             continue;
                         }
+
+                        // v61 AREA-FIX (fazenda-plantada-em-sessao-nunca-sincroniza, 2-sim 07/07): past
+                        // warmup and the anchor isn't in the RemotePlacement race window above → this lot
+                        // was derived by the HOST's OWN AreaSpawnSystem this session (loop (1) above never
+                        // catches it: a spawned field gains Created, never Applied). This scanner is the
+                        // ONLY path that can ever ship such a lot's INITIAL shape, so — unlike the plain
+                        // known-edit case below — it must actively SEND here, not just baseline. The actual
+                        // send is the SAME command-building code the known-edit path uses further down
+                        // (shared, not duplicated); isSessionBornFirstSight only decides whether/when we're
+                        // allowed to call WorkAreaHash.Set (see the anchor-unresolved branch just below).
+                        isSessionBornFirstSight = true;
+                    }
+                    else
+                    {
+                        // Known area with a real polygon change (host-authoritative reshape) — baseline
+                        // immediately, same as before, so we never re-send the same shape twice.
+                        WorkAreaHash.Set(area, hash);
                     }
 
                     if (anchor == Entity.Null
@@ -392,6 +426,26 @@ namespace CS2M.Sync
                         || !_prefabSystem.TryGetPrefab(EntityManager.GetComponentData<PrefabRef>(anchor).m_Prefab,
                             out PrefabBase ownerPrefab) || ownerPrefab == null)
                     {
+                        if (isSessionBornFirstSight)
+                        {
+                            // v61 AREA-FIX: the anchor/prefab isn't resolvable YET (owner/placeholder still
+                            // mid-spawn) — do NOT baseline, or this lot's initial shape never ships (the bug
+                            // this fixes). Leave it OUT of WorkAreaHash so the next ~1 Hz scan sees firstSight
+                            // again and retries, up to a bounded number of attempts.
+                            _pendingAnchorScans.TryGetValue(area, out int attempts);
+                            attempts++;
+                            if (attempts >= AnchorPendingScanLimit)
+                            {
+                                WorkAreaHash.Set(area, hash);
+                                _pendingAnchorScans.Remove(area);
+                                CS2M.Log.Warn($"[Area] WARN giving up first-sight anchor resolution after {attempts} scans, baselining without send entity={area.Index}");
+                            }
+                            else
+                            {
+                                _pendingAnchorScans[area] = attempts;
+                            }
+                        }
+
                         continue;
                     }
 
@@ -429,7 +483,19 @@ namespace CS2M.Sync
                         BuildingSyncId = anchorBuildingSyncId,
                         SubAreaIndex = subAreaIndex,
                     });
-                    CS2M.Log.Info($"[Area] DETECT+SEND edit name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length} anchorId={anchorId} (polygon diff)");
+
+                    if (isSessionBornFirstSight)
+                    {
+                        // v61 AREA-FIX: only baseline NOW, after the send actually happened — see the doc
+                        // comment above for why baselining any earlier reproduced the "never ships" bug.
+                        WorkAreaHash.Set(area, hash);
+                        _pendingAnchorScans.Remove(area);
+                        CS2M.Log.Info($"[Area] DETECT+SEND first-sight (session-born lot) name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length} anchorId={anchorId}");
+                    }
+                    else
+                    {
+                        CS2M.Log.Info($"[Area] DETECT+SEND edit name={prefab.name} owner={ownerPrefab.name} nodes={nodes.Length} anchorId={anchorId} (polygon diff)");
+                    }
                 }
             }
             finally
@@ -1034,6 +1100,21 @@ namespace CS2M.Sync
                     EntityManager.AddComponent<CS2M_RemotePlaced>(target); // echo guard
                 }
 
+                // v65.1 FIELD FIX (the "rewrite applies but nothing changes" farm bug): a placement-born
+                // field is a SLAVE sub-area, and GeometrySystem regenerates a Slave's polygon FROM THE
+                // OWNER'S TEMPLATE whenever it is Updated (decomp Areas/GeometrySystem.cs:95-98 →
+                // GenerateSlaveArea :160-166 does nodes.Clear() + rebuild) — so our node write below was
+                // wiped by the very Updated stamp that publishes it. The host's lot (AreaSpawnSystem-born)
+                // is NOT Slave. Promote the client's copy to a free-standing area so the authoritative
+                // polygon actually sticks.
+                Game.Areas.Area areaData = EntityManager.GetComponentData<Game.Areas.Area>(target);
+                if ((areaData.m_Flags & Game.Areas.AreaFlags.Slave) != 0)
+                {
+                    areaData.m_Flags &= ~Game.Areas.AreaFlags.Slave;
+                    EntityManager.SetComponentData(target, areaData);
+                    CS2M.Log.Info($"[Area] UNSLAVE entity={target.Index} (host-authoritative polygon must not be template-regenerated)");
+                }
+
                 if (!EntityManager.HasComponent<Updated>(target))
                 {
                     EntityManager.AddComponent<Updated>(target);
@@ -1382,8 +1463,24 @@ namespace CS2M.Sync
                 None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
             });
 
+            // BUG FIX (2-sim 07/07, "fazenda casou a 90 m"): this used to be a genuinely UNBOUNDED
+            // nearest-match search — same prefab name + "owns an Extractor field" was treated as
+            // proof enough, on the theory that a field can sit arbitrarily far from its OWNER once
+            // resized (see the old comment this replaces). That reasoning ignored saves with MORE
+            // THAN ONE farm of the same work type (identical placeholder prefab, e.g. multiple
+            // "Agriculture Area Placeholder - Livestock" lots in Saegertown): with no distance cap,
+            // "nearest of all candidates on the WHOLE MAP" is not the same claim as "the same farm" —
+            // it silently accepts whichever OTHER farm's placeholder happens to be closest to hintPos,
+            // even 90 m away, and rewrites that farm's field instead (host center (87,-9) landed on a
+            // field the client reported at (73,79)). A wrong rewrite is worse than none: the radar
+            // still flags a mismatch afterwards and the host just resends, whereas a bad apply silently
+            // corrupts an unrelated farm. Bound the tiebreak to AnchorBuildingSearchRadius — the same
+            // radius FindAnchor/FindAnchorApply already rely on for "a placeholder sits within its own
+            // building's footprint" — and refuse to guess past it.
             Entity best = Entity.Null;
-            float bestDSq = float.MaxValue;
+            float bestDSq = AnchorBuildingSearchRadius * AnchorBuildingSearchRadius;
+            Entity nearestAny = Entity.Null;
+            float nearestAnyDSq = float.MaxValue;
             NativeArray<Entity> ents = anchorCandidates.ToEntityArray(Allocator.Temp);
             try
             {
@@ -1395,11 +1492,8 @@ namespace CS2M.Sync
                         continue;
                     }
 
-                    // Type filter: must actually own an Extractor-tagged area. This is what makes an
-                    // UNBOUNDED search safe — a field can end up arbitrarily far from its building
-                    // once resized (its owner sits at the field's own centroid, see the field-owning
-                    // placeholder's discussion in AreaEditDetectorSystem.FindAnchor), so no fixed
-                    // radius is reliable, but "same prefab name AND owns an Extractor field" is.
+                    // Type filter: must actually own an Extractor-tagged area — narrows the field-name
+                    // match down to plausible owners before the (now bounded) distance check below.
                     if (!OwnsExtractorArea(cand))
                     {
                         continue;
@@ -1409,6 +1503,12 @@ namespace CS2M.Sync
                     float dx = candPos.x - hintPos.x;
                     float dz = candPos.z - hintPos.z;
                     float d = dx * dx + dz * dz;
+                    if (d < nearestAnyDSq)
+                    {
+                        nearestAnyDSq = d;
+                        nearestAny = cand;
+                    }
+
                     if (d < bestDSq)
                     {
                         bestDSq = d;
@@ -1427,6 +1527,15 @@ namespace CS2M.Sync
                 resolvedIsDirectOwner = true;
                 CS2M.Log.Info($"[Area] ANCHOR-RESOLVE id={cmd.OwnerAnchorId} name={cmd.OwnerAnchorPrefabName} "
                     + $"entity={best.Index} (one-time, now cached)");
+            }
+            else if (nearestAny != Entity.Null)
+            {
+                // A same-prefab, same-type candidate exists but sits outside the plausible radius —
+                // almost certainly a DIFFERENT farm. Skip rather than rewrite the wrong one; the caller
+                // falls back to the tighter legacy ResolveOwner (3-5 m), and if that also fails the
+                // command is parked/retried, then dropped — never mis-applied.
+                CS2M.Log.Info($"[Area] SKIP rewrite anchor-too-far name={cmd.OwnerAnchorPrefabName} "
+                    + $"dist={math.sqrt(nearestAnyDSq):F0} limit={AnchorBuildingSearchRadius:F0}");
             }
 
             return best;

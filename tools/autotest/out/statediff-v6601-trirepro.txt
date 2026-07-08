@@ -1,0 +1,27 @@
+﻿STATEDIFF — localizador de divergência (Fase 0b)
+  HOST   : C:\Users\Bruno\AppData\LocalLow\Colossal Order\Cities Skylines II\Logs\CS2M.log
+  CLIENT : C:\Sandbox\Bruno\CS2Coop\user\current\AppData\LocalLow\Colossal Order\Cities Skylines II\Logs\CS2M.log
+
+=== NODES  (posicao x/z : grau (junção vs ponta-morta)) ===
+  (sem dump NodeDump em um dos lados — rode com CS2M_NODEDUMP=1 e provoque a ação)
+
+=== EDGES  (par de extremidades a-b) ===
+  (sem dump EdgeDump em um dos lados — rode com CS2M_NODEDUMP=1 e provoque a ação)
+
+=== AREAS  (centro cx/cz : nós : owned) ===
+  HOST count=529   CLIENT count=529   delta=+0
+  [OK] IDENTICO - nenhuma entidade diverge neste subsistema
+
+=== ZONES  (bloco x/z : WxH[:oORDEM] = células run-length por NOME[~FLAGS] de zona) ===
+  HOST count=244   CLIENT count=244   delta=+0
+  [OK] IDENTICO - nenhuma entidade diverge neste subsistema
+
+=== BUILDINGS  (posicao x/z : nome do prefab) ===
+  (sem dump BldgDump em um dos lados — rode com CS2M_NODEDUMP=1 e provoque a ação)
+
+--- RESUMO ---
+  nodes: sem dados
+  edges: sem dados
+  areas: IDÊNTICO
+  zones: IDÊNTICO
+  buildings: sem dados
