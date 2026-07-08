@@ -212,6 +212,7 @@ namespace CS2M.Sync
             var outCellsOffset = new List<int>();
             var outCellsCount = new List<int>();
             var outCellZonePool = new List<int>();
+            var outBuildOrders = new List<uint>();
             var zonePool = new List<string>();
             var zonePoolIndex = new Dictionary<string, int>();
             int sent = 0;
@@ -263,7 +264,7 @@ namespace CS2M.Sync
 
                 sent = EmitGroup(plusSide, startId, endId, sent, outStartIds, outEndIds, outSides, outOrdinals,
                     outPosX, outPosY, outPosZ, outDirX, outDirZ, outSizeX, outSizeY, outCellsOffset, outCellsCount,
-                    outCellZonePool, zonePool, zonePoolIndex);
+                    outCellZonePool, outBuildOrders, zonePool, zonePoolIndex);
                 if (sent >= MaxBlocksPerCommand)
                 {
                     continue;
@@ -271,7 +272,7 @@ namespace CS2M.Sync
 
                 sent = EmitGroup(minusSide, startId, endId, sent, outStartIds, outEndIds, outSides, outOrdinals,
                     outPosX, outPosY, outPosZ, outDirX, outDirZ, outSizeX, outSizeY, outCellsOffset, outCellsCount,
-                    outCellZonePool, zonePool, zonePoolIndex);
+                    outCellZonePool, outBuildOrders, zonePool, zonePoolIndex);
             }
 
             if (sent == 0)
@@ -296,6 +297,7 @@ namespace CS2M.Sync
                 CellsCount = outCellsCount.ToArray(),
                 ZonePool = zonePool.ToArray(),
                 CellZonePool = outCellZonePool.ToArray(),
+                BuildOrders = outBuildOrders.ToArray(),
             };
 
             Command.SendToAll?.Invoke(cmd);
@@ -318,7 +320,7 @@ namespace CS2M.Sync
             List<ulong> outStartIds, List<ulong> outEndIds, List<sbyte> outSides, List<int> outOrdinals,
             List<float> outPosX, List<float> outPosY, List<float> outPosZ, List<float> outDirX, List<float> outDirZ,
             List<int> outSizeX, List<int> outSizeY, List<int> outCellsOffset, List<int> outCellsCount,
-            List<int> outCellZonePool, List<string> zonePool, Dictionary<string, int> zonePoolIndex)
+            List<int> outCellZonePool, List<uint> outBuildOrders, List<string> zonePool, Dictionary<string, int> zonePoolIndex)
         {
             for (int ordinal = 0; ordinal < ordered.Count; ordinal++)
             {
@@ -333,8 +335,16 @@ namespace CS2M.Sync
                     continue;
                 }
 
+                // v63 (flags issue): the game's overlap-contest tiebreak (CellOverlapJobs.cs:582) picks the
+                // block with the higher Game.Zones.BuildOrder.m_Order — a per-machine local counter
+                // (GenerateEdgesSystem.cs:1556-1558) that two synced machines can still disagree on. Ship
+                // it so the client can adopt the host's order and tiebreak the same way.
+                uint buildOrder = EntityManager.HasComponent<Game.Zones.BuildOrder>(meta.Entity)
+                    ? EntityManager.GetComponentData<Game.Zones.BuildOrder>(meta.Entity).m_Order
+                    : 0u;
+
                 DynamicBuffer<Cell> cells = EntityManager.GetBuffer<Cell>(meta.Entity, true);
-                long sig = ComputeSignature(meta.Block, cells);
+                long sig = ComputeSignature(meta.Block, cells, buildOrder);
                 if (_lastSig.TryGetValue(meta.Entity, out long prevSig) && prevSig == sig)
                 {
                     continue; // unchanged since last send
@@ -368,6 +378,7 @@ namespace CS2M.Sync
                 outSizeY.Add(meta.Block.m_Size.y);
                 outCellsOffset.Add(offset);
                 outCellsCount.Add(n);
+                outBuildOrders.Add(buildOrder);
 
                 _lastSig[meta.Entity] = sig;
                 sent++;
@@ -376,9 +387,11 @@ namespace CS2M.Sync
             return sent;
         }
 
-        /// <summary>Cheap dirty-tracking hash: size + quantized position (0.1 m) + every cell's zone index.
-        /// Not cryptographic — only needs to change whenever the shipped state changes.</summary>
-        private static long ComputeSignature(Block b, DynamicBuffer<Cell> cells)
+        /// <summary>Cheap dirty-tracking hash: size + quantized position (0.1 m) + every cell's zone index
+        /// + BuildOrder (v63 — a change in tiebreak order alone, with geometry/cells unchanged, must still
+        /// re-trigger a send or the client never learns the new order). Not cryptographic — only needs to
+        /// change whenever the shipped state changes.</summary>
+        private static long ComputeSignature(Block b, DynamicBuffer<Cell> cells, uint buildOrder)
         {
             unchecked
             {
@@ -392,6 +405,8 @@ namespace CS2M.Sync
                 {
                     h = h * 16777619 + cells[i].m_Zone.m_Index;
                 }
+
+                h = h * 16777619 + buildOrder;
 
                 return h;
             }
@@ -650,7 +665,15 @@ namespace CS2M.Sync
             bool posMatches = math.distance(localBlock.m_Position,
                 new float3(cmd.PosX[idx], cmd.PosY[idx], cmd.PosZ[idx])) <= 0.05f;
 
-            if (sizeMatches && cellsMatch && posMatches)
+            // v63 (flags issue): BuildOrder is the FINAL cell-overlap tiebreak (decomp CellOverlapJobs.cs:582),
+            // so a divergent order alone (geometry/cells otherwise converged) still needs a heal or the two
+            // machines keep picking different winners at every overlap. Older senders omit BuildOrders
+            // entirely (null/short array) — treat that as "nothing to adopt" so old-vs-new peers stay idempotent.
+            bool orderMatches = cmd.BuildOrders == null || idx >= cmd.BuildOrders.Length
+                || (EntityManager.HasComponent<Game.Zones.BuildOrder>(target)
+                    && EntityManager.GetComponentData<Game.Zones.BuildOrder>(target).m_Order == cmd.BuildOrders[idx]);
+
+            if (sizeMatches && cellsMatch && posMatches && orderMatches)
             {
                 return; // already converged — silent skip (idempotent)
             }
@@ -687,6 +710,23 @@ namespace CS2M.Sync
                 m_Direction = new float2(cmd.DirX[idx], cmd.DirZ[idx]),
                 m_Size = new int2(sizeX, sizeY),
             });
+
+            // 1b) Authoritative BuildOrder (v63): adopt the host's cell-overlap tiebreak value (decomp
+            // CellOverlapJobs.cs:582 — higher m_Order wins the contest; the per-machine counter that
+            // produces it is GenerateEdgesSystem.cs:1556-1558) so the local recompute breaks ties the same
+            // way the host does. Guarded — older senders omit BuildOrders, skip silently.
+            if (cmd.BuildOrders != null && idx < cmd.BuildOrders.Length)
+            {
+                var buildOrder = new Game.Zones.BuildOrder { m_Order = cmd.BuildOrders[idx] };
+                if (EntityManager.HasComponent<Game.Zones.BuildOrder>(target))
+                {
+                    EntityManager.SetComponentData(target, buildOrder);
+                }
+                else
+                {
+                    EntityManager.AddComponentData(target, buildOrder);
+                }
+            }
 
             // 2) Ask the game to re-simulate/re-render the block. STRUCTURAL CHANGE FIRST (moves the
             // entity to another chunk), same lesson as ZonePaintApplySystem.ApplyOne: any DynamicBuffer

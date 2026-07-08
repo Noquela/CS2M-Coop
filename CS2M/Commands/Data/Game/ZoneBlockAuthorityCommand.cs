@@ -44,5 +44,14 @@ namespace CS2M.Commands.Data.Game
 
         // Flattened cell zones for every block in this command; value = index into ZonePool.
         public int[] CellZonePool { get; set; }
+
+        // v63 (flags issue): Game.Zones.BuildOrder.m_Order of the block, the FINAL tiebreak the game's own
+        // cell-overlap contest uses between overlapping blocks (decomp CellOverlapJobs.cs:582 — the higher
+        // order wins). It comes from a per-machine local counter (GenerateEdgesSystem.cs:1556-1558) so two
+        // machines with identical geometry can still tiebreak differently and end up with different
+        // Visible/Blocked flags on the same cell. Shipping it lets the client adopt the host's order so
+        // its local recompute breaks the tie the same way. Optional (null on old senders — receiver treats
+        // missing/short as "no order to adopt").
+        public uint[] BuildOrders { get; set; }
     }
 }

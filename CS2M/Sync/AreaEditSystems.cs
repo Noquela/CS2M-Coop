@@ -227,6 +227,18 @@ namespace CS2M.Sync
                         continue;
                     }
 
+                    // AUTHORITY (derive-once, same rule as ScanWorkAreaEdits below): _appliedAreas is scoped
+                    // to Extractor-tagged fields only (farm/forestry/ore/oil/fish work areas — see the
+                    // query's doc comment), i.e. lots each PC's AreaSpawnSystem derives with its OWN local
+                    // RNG. Before AreaSpawnSuppressSystem defaulted to ON, both host and client independently
+                    // spawned-then-shipped their own just-created shape here and raced each other. With the
+                    // client's AreaSpawnSystem now suppressed by default, the host is the only machine still
+                    // deriving these fields, so it must be the only one sending the freshly-created shape.
+                    if (!isServer)
+                    {
+                        continue;
+                    }
+
                     // Anchor up the owner chain to a Transform (building, or a farm's placeholder) — same
                     // stable address used by the resize scanner, so a farm FIELD (placeholder-owned) syncs.
                     Entity owner = FindAnchor(EntityManager.GetComponentData<Owner>(area).m_Owner);

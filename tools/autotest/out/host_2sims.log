@@ -1,6 +1,4 @@
-13:51:54.999 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
-13:52:09.712 [Auto] loadingComplete purpose=LoadGame mode=Game
-13:52:09.713 [Auto] city loaded -> arming StartServer
-13:52:11.035 [Auto] StartServer on :1111 status=PLAYING
-13:53:22.476 [Auto] HOST client connected (peers=1); test begins in 600f
-13:53:23.019 [Auto] CLIENTFARM host idle (test=4 drives the CLIENT side only — waiting for the client's farm to arrive as a normal remote ObjectPlaceCommand)
+21:28:09.107 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=False log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
+21:28:25.971 [Auto] loadingComplete purpose=LoadGame mode=Game
+21:28:25.972 [Auto] city loaded -> arming StartServer
+21:28:27.989 [Auto] StartServer on :1111 status=PLAYING

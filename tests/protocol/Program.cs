@@ -454,6 +454,30 @@ namespace CS2MTests
         public float[] BoundaryPosZ { get; set; }
     }
 
+    // ZoneBlockAuthority (byte-for-byte copy of the mod's POCO — CS2M/Commands/Data/Game/ZoneBlockAuthorityCommand.cs).
+    // v63: BuildOrders added — the game's cell-overlap contest tiebreaks on Game.Zones.BuildOrder.m_Order
+    // (decomp CellOverlapJobs.cs:582), which comes from a per-machine local counter
+    // (GenerateEdgesSystem.cs:1556-1558), so it must round-trip like every other per-block array here.
+    public class ZoneBlockAuthorityCommand : CommandBase
+    {
+        public ulong[] EdgeStartIds { get; set; }
+        public ulong[] EdgeEndIds { get; set; }
+        public sbyte[] Sides { get; set; }
+        public int[] Ordinals { get; set; }
+        public float[] PosX { get; set; }
+        public float[] PosY { get; set; }
+        public float[] PosZ { get; set; }
+        public float[] DirX { get; set; }
+        public float[] DirZ { get; set; }
+        public int[] SizeX { get; set; }
+        public int[] SizeY { get; set; }
+        public int[] CellsOffset { get; set; }
+        public int[] CellsCount { get; set; }
+        public string[] ZonePool { get; set; }
+        public int[] CellZonePool { get; set; }
+        public uint[] BuildOrders { get; set; }
+    }
+
     public static class Program
     {
         // Copy of the mod's MessagePackExtensions.BetterGraphOf (same walker → same wire format).
@@ -529,6 +553,23 @@ namespace CS2MTests
             RoundTrip(opts, new HealRequestCommand { Domain = "water" }, c => c.Domain == "water" && c.TerrainHeights == null);
             RoundTrip(opts, new WaterHealCommand { PosX = new[] { 1f, 2f }, PosY = new[] { 5f, 6f }, PosZ = new[] { 9f, 10f }, Radius = new[] { 20f, 30f }, Height = new[] { 5f, 6f }, Multiplier = new[] { 1f, 0.5f }, Polluted = new[] { 0f, 0.1f }, ConstantDepth = new[] { 0, 1 }, SyncIds = new[] { 0UL, 0xFFFFFF0000000001UL } }, c => c.PosX.Length == 2 && c.Radius[1] == 30f && c.ConstantDepth[1] == 1 && c.SyncIds[1] == 0xFFFFFF0000000001UL);
             RoundTrip(opts, new TerrainPatchCommand { X = 2048, Y = 1024, W = 3, H = 2, Data = new ushort[] { 0, 1, 32767, 65535, 42, 7 } }, c => c.X == 2048 && c.W == 3 && c.Data.Length == 6 && c.Data[2] == 32767 && c.Data[3] == 65535);
+
+            // --- v63 ZoneBlockAuthority.BuildOrders (cell-overlap contest tiebreak, decomp CellOverlapJobs.cs:582) ---
+            RoundTrip(opts, new ZoneBlockAuthorityCommand
+            {
+                EdgeStartIds = new[] { 11UL, 11UL },
+                EdgeEndIds = new[] { 12UL, 12UL },
+                Sides = new sbyte[] { 1, -1 },
+                Ordinals = new[] { 0, 0 },
+                PosX = new[] { 100f, 105f }, PosY = new[] { 478f, 478f }, PosZ = new[] { -50f, -55f },
+                DirX = new[] { 0f, 0f }, DirZ = new[] { 1f, -1f },
+                SizeX = new[] { 4, 3 }, SizeY = new[] { 6, 5 },
+                CellsOffset = new[] { 0, 24 }, CellsCount = new[] { 24, 15 },
+                ZonePool = new[] { "", "EU Residential Low" },
+                CellZonePool = Enumerable.Repeat(1, 39).ToArray(),
+                BuildOrders = new[] { 42u, 4294967295u },
+            }, c => c.BuildOrders.Length == 2 && c.BuildOrders[0] == 42u && c.BuildOrders[1] == 4294967295u
+                    && c.EdgeStartIds[1] == 11UL && c.SizeX[1] == 3);
 
             // --- v50 commands ---
             RoundTrip(opts, new MapPingCommand { X = -321.5f, Y = 480f, Z = 1204.25f, Username = "Bruno" }, c => c.Username == "Bruno" && Math.Abs(c.Z - 1204.25f) < 0.01f);
