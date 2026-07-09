@@ -69,6 +69,77 @@ namespace CS2M.Sync
         // OnUpdate (same slot as the _pendingDefinitions cleanup above), once the edge is live.
         private readonly List<PendingOrderFix> _pendingOrderFixes = new List<PendingOrderFix>();
 
+        // Nodes that RebuildAfterDelete found orphaned (0 live connected edges) — their Deleted is
+        // DEFERRED one frame instead of applied inside the apply frame. Deleting a node in the SAME frame
+        // its junction is restructured opens a recycle window that BlockSystem.UpdateBlocksJob@Mod4 can
+        // walk (crash #4). Drained at the TOP of OnUpdate (same slot as _pendingDefinitions), once
+        // ReferencesSystem has revalidated the buffers: still-orphaned → Deleted, re-armed → keep.
+        private readonly List<Entity> _pendingOrphanNodes = new List<Entity>();
+
+        // FIX A — DEFERRED POSITION CORRECTOR. A node's position is DERIVED, not authored: NodeAlignSystem
+        // re-centres node.m_Position from the SET of connected arms every time the node is marked Updated
+        // (decomp Game/Net/NodeAlignSystem.cs:132 and :168). On the receiver, a boundary node picks up a
+        // new arm from this batch and NodeAlign re-centres it from a DIFFERENT connected set than the
+        // builder had at capture time → the node drifts metres from the builder's settled coordinate that
+        // the batch actually carries (NodePos*/BoundaryPos*, captured POST-align). Blocks/lanes/zone cells
+        // then derive off the wrong node coord and the radars hash-diff. This corrector runs AFTER the
+        // native pipeline has settled (Age>=3) and nudges each node back to its wire-authoritative position
+        // — small drifts via MoveNodeWithCurves (NodeAlign converges once both arm sets match), a large
+        // relocation via detach-move-reattach (replaces the old permanent BOUND-SKIP-LARGE give-up).
+        private readonly List<PendingPosFix> _pendingPosFixes = new List<PendingPosFix>();
+
+        // Arms snapshotted by a large-drift relocation (DetachAndRelocate), re-emitted as vanilla edge
+        // definitions on the NEXT drain — never the same frame as the deletes, so GenerateEdges'
+        // ConnectionExists can't see the moribund arm still in the buffer and silently drop the definition
+        // (I6). Mirrors _pendingDefinitions' one-frame-later contract.
+        private readonly List<PendingReattach> _pendingReattach = new List<PendingReattach>();
+
+        /// <summary>A node whose local (NodeAlign-derived) position must be reconciled to the builder's
+        /// wire-authoritative <see cref="WantPos"/>. <see cref="Age"/> gates the settle delay (>=3 frames)
+        /// AND caps the unresolved-id retry (drop at 120); <see cref="Tries"/> caps the small-drift nudge
+        /// (give up after 3, graph stays consistent); <see cref="Relocated"/> marks that a large-drift
+        /// detach-move-reattach already fired for this id, so a second >10 m reading gives up instead of
+        /// re-detaching (no relocation loop).</summary>
+        private struct PendingPosFix
+        {
+            public ulong Id;
+            public float3 WantPos;
+            public int Age;
+            public int Tries;
+            public bool Relocated;
+        }
+
+        /// <summary>One arm snapshotted before a large-drift relocation deleted it, carrying exactly what
+        /// <see cref="EmitEdgeCourse"/> transports (prefab, seed, elevation, Upgraded) plus the already
+        /// 2/3-1/3-shifted bezier so the re-emit needs no recomputation. The moved node is one endpoint
+        /// (<see cref="ThisIsStart"/>); <see cref="OtherNode"/> is the intact opposite endpoint.</summary>
+        private struct ReattachArm
+        {
+            public Entity Prefab;
+            public string PrefabName;
+            public Bezier4x3 Bezier;
+            public bool ThisIsStart;
+            public ulong ThisNodeId;
+            public ulong OtherNodeId;
+            public Entity OtherNode;
+            public int Seed;
+            public bool HasElev;
+            public float2 Elev;
+            public bool HasUpgraded;
+            public uint UpgG;
+            public uint UpgL;
+            public uint UpgR;
+        }
+
+        /// <summary>A relocated node's snapshotted arms, held one frame so the re-emit happens AFTER the
+        /// deletes have been consumed (I6).</summary>
+        private struct PendingReattach
+        {
+            public ulong NodeId;
+            public Entity Node;
+            public List<ReattachArm> Arms;
+        }
+
         /// <summary>One edge's wire-authoritative BuildOrder, queued until the edge it names exists.</summary>
         private struct PendingOrderFix
         {
@@ -140,15 +211,20 @@ namespace CS2M.Sync
 
             _pendingDefinitions.Clear();
 
-            // BuildOrder corrector: the edges queued last frame (EmitEdgeCourse) now exist (GenerateEdges
-            // consumed their definitions before this OnUpdate ran again) — resolve by node-pair identity
-            // and stamp the WIRE m_Start/m_End over the receiver's local-counter value. This re-derives
-            // BlockSystem@Mod4's zone blocks with the SAME cell-overlap priority (Zones.BuildOrder folds
-            // Game.Net.BuildOrder, see CellOverlapJobs.CheckPriority) both machines used to build the edge,
-            // instead of each PC's own process-local GenerateEdgesSystem counter (decomp
-            // GenerateEdgesSystem.cs:2093) — the root cause of the visibility split. Runs before the
-            // PLAYING gate, same as the _pendingDefinitions cleanup above, so a fix in flight never leaks
-            // past a disconnect.
+            // BuildOrder corrector (SILENT WRITE): the edges queued last frame (EmitEdgeCourse) now exist
+            // (GenerateEdges consumed their definitions before this OnUpdate ran again) — resolve by
+            // node-pair identity and stamp the WIRE m_Start/m_End over the receiver's local-counter value
+            // IN SILENCE. This converges FUTURE derivations to the SAME cell-overlap priority both machines
+            // used (Zones.BuildOrder folds Game.Net.BuildOrder, see CellOverlapJobs.CheckPriority) instead
+            // of each PC's own process-local GenerateEdgesSystem counter (decomp GenerateEdgesSystem.cs:2093)
+            // — the root cause of the visibility split. It does NOT mark anything Updated/BatchesUpdated:
+            // NEVER re-trigger a native block derive on a freshly-restructured junction. Two native dumps
+            // (08/07 23:21 and 23:49) proved BlockSystem@Mod4 (UpdateBlocksJob) null-derefs in the frame of
+            // that re-trigger EVEN with every quiescence guard passing clean — re-deriving is unsafe by
+            // nature here. The CURRENT blocks converge instead via the host-authoritative same-size ZoneAuth
+            // heal (ZoneBlockAuthoritySystems), which reconciles existing blocks' content/order; this silent
+            // write only converges derivations yet to come. Runs before the PLAYING gate, same as the
+            // _pendingDefinitions cleanup above, so a fix in flight never leaks past a disconnect.
             for (int i = _pendingOrderFixes.Count - 1; i >= 0; i--)
             {
                 PendingOrderFix fix = _pendingOrderFixes[i];
@@ -159,18 +235,20 @@ namespace CS2M.Sync
                         Game.Net.BuildOrder localOrder = EntityManager.GetComponentData<Game.Net.BuildOrder>(fixEdge);
                         if (localOrder.m_Start != fix.OrderStart || localOrder.m_End != fix.OrderEnd)
                         {
+                            // Silent write ONLY — stamp the wire-authoritative order and nothing else. No
+                            // Updated/BatchesUpdated on the edge or its endpoint nodes: re-triggering the
+                            // native block derive on a freshly-restructured junction crashes BlockSystem@Mod4
+                            // (see block comment above). Future derivations read this converged order; the
+                            // current blocks converge via the same-size ZoneAuth heal.
                             EntityManager.SetComponentData(fixEdge, new Game.Net.BuildOrder
                             {
                                 m_Start = fix.OrderStart,
                                 m_End = fix.OrderEnd,
                             });
-                            if (!EntityManager.HasComponent<Updated>(fixEdge))
-                            {
-                                EntityManager.AddComponent<Updated>(fixEdge);
-                            }
 
-                            CS2M.Log.Info($"[Batch] ORDER-FIX edge={fixEdge.Index} " +
-                                          $"order={localOrder.m_Start}-{localOrder.m_End}->{fix.OrderStart}-{fix.OrderEnd}");
+                            CS2M.Log.Info($"[Batch] ORDER-FIX-SILENT edge={fixEdge.Index} " +
+                                          $"order={localOrder.m_Start}-{localOrder.m_End}->{fix.OrderStart}-{fix.OrderEnd} " +
+                                          "(no re-derive; converge via ZoneAuth heal)");
                         }
                     }
 
@@ -190,6 +268,183 @@ namespace CS2M.Sync
                         _pendingOrderFixes[i] = fix;
                     }
                 }
+            }
+
+            // Orphan-node deletes deferred from a previous frame's apply (RebuildAfterDelete). One frame
+            // has now passed, so ReferencesSystem has revalidated the junction's buffers and the recycle
+            // window BlockSystem@Mod4 could have walked is closed (crash #4). Delete the node only if it is
+            // STILL orphaned (0 live connected edges); if it re-gained a live arm in the meantime, keep it
+            // and just re-derive. Runs before the PLAYING gate like the cleanups above so nothing leaks.
+            for (int i = _pendingOrphanNodes.Count - 1; i >= 0; i--)
+            {
+                Entity node = _pendingOrphanNodes[i];
+                _pendingOrphanNodes.RemoveAt(i);
+
+                if (!EntityManager.Exists(node) || EntityManager.HasComponent<Deleted>(node))
+                {
+                    continue;
+                }
+
+                int liveArms = 0;
+                if (EntityManager.HasBuffer<ConnectedEdge>(node))
+                {
+                    DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(node, true);
+                    for (int j = 0; j < ce.Length; j++)
+                    {
+                        Entity e = ce[j].m_Edge;
+                        if (EntityManager.Exists(e) && !EntityManager.HasComponent<Deleted>(e))
+                        {
+                            liveArms++;
+                        }
+                    }
+                }
+
+                if (liveArms == 0)
+                {
+                    EntityManager.AddComponent<Deleted>(node);
+                    CS2M.Log.Info($"[Batch] ORPHAN-DEL deferred node={node.Index}");
+                }
+                else
+                {
+                    MarkUpdated(node);
+                    CS2M.Log.Info($"[Batch] ORPHAN-KEEP node={node.Index} live={liveArms}");
+                }
+            }
+
+            // FIX A step 3d — REATTACH the arms a large-drift relocation snapshotted last frame. The
+            // deletes it queued have now been consumed by GenerateEdges/CleanupSystem (a full frame has
+            // passed), so re-emitting each arm as a vanilla CreationDefinition+NetCourse is safe: no
+            // moribund arm lingers in the node's ConnectedEdge buffer for GenerateEdges' ConnectionExists
+            // to trip over (I6). Runs BEFORE the pos-fix drain below so entries that drain just added this
+            // frame wait until NEXT frame (they are appended after this loop finishes). Definitions land in
+            // _pendingDefinitions and are destroyed at the top of the following OnUpdate like every other
+            // emitted definition.
+            for (int i = _pendingReattach.Count - 1; i >= 0; i--)
+            {
+                PendingReattach r = _pendingReattach[i];
+                _pendingReattach.RemoveAt(i);
+
+                if (!EntityManager.Exists(r.Node) || EntityManager.HasComponent<Deleted>(r.Node))
+                {
+                    CS2M.Log.Info($"[Batch] POS-REATTACH-SKIP id={r.NodeId} (node gone)");
+                    continue;
+                }
+
+                int emitted = 0;
+                foreach (ReattachArm arm in r.Arms)
+                {
+                    if (arm.Prefab == Entity.Null || arm.PrefabName == null
+                        || arm.OtherNode == Entity.Null || !EntityManager.Exists(arm.OtherNode)
+                        || EntityManager.HasComponent<Deleted>(arm.OtherNode))
+                    {
+                        continue;
+                    }
+
+                    Entity startNode = arm.ThisIsStart ? r.Node : arm.OtherNode;
+                    Entity endNode = arm.ThisIsStart ? arm.OtherNode : r.Node;
+                    if (startNode == endNode)
+                    {
+                        continue; // never fabricate a self-loop
+                    }
+
+                    EmitReattachCourse(arm, startNode, endNode);
+                    emitted++;
+                }
+
+                CS2M.Log.Info($"[Batch] POS-REATTACH id={r.NodeId} arms={emitted}");
+            }
+
+            // FIX A steps 2-3 — DEFERRED POSITION CORRECTOR. Nudge each queued node back to the builder's
+            // wire-authoritative coordinate once the native pipeline has settled (Age>=3). See the field
+            // comment on _pendingPosFixes for the "why". Runs here (before the PLAYING gate, same slot as
+            // the other drains) so a fix in flight never leaks past a disconnect.
+            for (int i = _pendingPosFixes.Count - 1; i >= 0; i--)
+            {
+                PendingPosFix pf = _pendingPosFixes[i];
+
+                if (!CS2M_NodeSyncIds.TryResolve(EntityManager, pf.Id, out Entity node))
+                {
+                    // Id not resolvable yet (a sibling batch may still be creating it) — age up to a cap
+                    // then drop rather than retry forever.
+                    pf.Age++;
+                    if (pf.Age >= 120)
+                    {
+                        CS2M.Log.Info($"[Batch] POS-DROP id={pf.Id} (unresolved {pf.Age}f)");
+                        _pendingPosFixes.RemoveAt(i);
+                    }
+                    else
+                    {
+                        _pendingPosFixes[i] = pf;
+                    }
+
+                    continue;
+                }
+
+                // Let GenerateEdges/NodeAlign/Geometry settle before measuring drift — the derive runs over
+                // this batch's set across the next couple of frames; measuring too early would chase a
+                // position that is still moving.
+                if (pf.Age < 3)
+                {
+                    pf.Age++;
+                    _pendingPosFixes[i] = pf;
+                    continue;
+                }
+
+                float3 localPos = EntityManager.GetComponentData<Node>(node).m_Position;
+                float drift = math.distance(localPos, pf.WantPos);
+
+                if (drift <= 0.25f)
+                {
+                    // Inside the radar's quantum — converged.
+                    _pendingPosFixes.RemoveAt(i);
+                    continue;
+                }
+
+                if (drift <= 10f)
+                {
+                    // Small drift: drag the node (and its curves, I4) to the authoritative coord. NodeAlign
+                    // may re-centre again next frame, but once both PCs' connected arm sets match it is
+                    // deterministic and converges — so re-check on the next drain (Tries++) instead of
+                    // removing. Cap at 3 attempts; a residual sub-metre wobble is harmless and the graph is
+                    // consistent, so give up cleanly rather than churn forever.
+                    NetGraphSafety.MoveNodeWithCurves(EntityManager, node, pf.WantPos);
+                    pf.Tries++;
+                    CS2M.Log.Info($"[Batch] POS-FIX id={pf.Id} drift={drift:F2} try={pf.Tries}");
+                    if (pf.Tries >= 3)
+                    {
+                        CS2M.Log.Info($"[Batch] POS-GIVEUP id={pf.Id} drift={drift:F2} (>3 tries, graph consistent)");
+                        _pendingPosFixes.RemoveAt(i);
+                    }
+                    else
+                    {
+                        _pendingPosFixes[i] = pf;
+                    }
+
+                    continue;
+                }
+
+                // Large drift (>10 m): the builder relocated this junction while drawing the batch (e.g. an
+                // edge split fused two junctions). Teleporting a connected node this far corrupts the graph
+                // and crashes the game's Burst net pass (the old BOUND-SKIP-LARGE gave up here and left a
+                // permanent 44-74 m divergence). DETACH the arms, move the bare node, and re-emit the arms
+                // next frame — the receiver's own safe del+create path.
+                if (pf.Relocated)
+                {
+                    // Already relocated once and STILL >10 m off — do not detach again (loop guard). The
+                    // graph is consistent; accept the residual.
+                    CS2M.Log.Info($"[Batch] POS-GIVEUP id={pf.Id} drift={drift:F2} (post-reloc, no re-detach)");
+                    _pendingPosFixes.RemoveAt(i);
+                    continue;
+                }
+
+                int arms = DetachAndRelocate(node, pf.Id, pf.WantPos);
+                CS2M.Log.Info($"[Batch] POS-RELOC id={pf.Id} drift={drift:F2} arms={arms}");
+                // Re-arm the fix so any residual drift after the reattach settles is caught by the small-
+                // drift nudge above; Relocated blocks a second detach.
+                pf.Relocated = true;
+                pf.Age = 0;
+                pf.Tries = 0;
+                _pendingPosFixes[i] = pf;
             }
 
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
@@ -395,6 +650,26 @@ namespace CS2M.Sync
                 }
             }
 
+            // WIRE POSITION MAP (id -> builder's settled coord for that node), from the SAME wire fields the
+            // pos-corrector trusts. EmitEdgeCourse cross-checks each edge endpoint's bezier point against the
+            // wire position of the node id it names: a mismatch is the "folded id" signal (see the FOLD GUARD
+            // in EmitEdgeCourse / EndpointFoldTolerance). Built here so both new-node and boundary coords are
+            // present before any edge is emitted.
+            var wirePos = new Dictionary<ulong, float3>();
+            for (int i = 0; i < nodeCount; i++)
+            {
+                wirePos[cmd.NodeIds[i]] = new float3(cmd.NodePosX[i], cmd.NodePosY[i], cmd.NodePosZ[i]);
+            }
+
+            if (boundaryHasPos)
+            {
+                for (int bi = 0; bi < cmd.BoundaryNodeIds.Length; bi++)
+                {
+                    wirePos[cmd.BoundaryNodeIds[bi]] =
+                        new float3(cmd.BoundaryPosX[bi], cmd.BoundaryPosY[bi], cmd.BoundaryPosZ[bi]);
+                }
+            }
+
             // (3) Create new EDGES, linking (new|boundary) nodes by identity.
             int edgeCount = cmd.EdgeStartNodeIds != null ? cmd.EdgeStartNodeIds.Length : 0;
             int createdEdges = 0;
@@ -447,7 +722,7 @@ namespace CS2M.Sync
                 }
 
                 // Vanilla path: emit a Permanent definition (GenerateEdges builds the REAL edge this frame).
-                if (EmitEdgeCourse(cmd, i, bezier, s, en))
+                if (EmitEdgeCourse(cmd, i, bezier, s, en, wirePos))
                 {
                     createdEdges++;
                     if (boundarySet.Contains(cmd.EdgeStartNodeIds[i])) { boundaryTouched.Add(s); }
@@ -473,8 +748,274 @@ namespace CS2M.Sync
                 }
             }
 
+            // FIX A step 1 — queue EVERY node this batch touched (new + boundary) for the deferred position
+            // corrector. The batch carries the builder's settled, post-NodeAlign coordinate for each; the
+            // corrector reconciles the receiver's own NodeAlign-derived position to it once the native
+            // pipeline has settled (see _pendingPosFixes). Only ids we actually resolved this frame are
+            // enqueued (an unresolved id would just age out).
+            for (int i = 0; i < nodeCount; i++)
+            {
+                if (idToEntity.ContainsKey(cmd.NodeIds[i]))
+                {
+                    EnqueuePosFix(cmd.NodeIds[i],
+                        new float3(cmd.NodePosX[i], cmd.NodePosY[i], cmd.NodePosZ[i]));
+                }
+            }
+
+            if (boundaryHasPos)
+            {
+                for (int bi = 0; bi < cmd.BoundaryNodeIds.Length; bi++)
+                {
+                    if (idToEntity.ContainsKey(cmd.BoundaryNodeIds[bi]))
+                    {
+                        EnqueuePosFix(cmd.BoundaryNodeIds[bi],
+                            new float3(cmd.BoundaryPosX[bi], cmd.BoundaryPosY[bi], cmd.BoundaryPosZ[bi]));
+                    }
+                }
+            }
+
             CS2M.Log.Info($"[Batch] APPLIED nodes={createdNodes} edges={createdEdges} dels={appliedDels}");
             return true;
+        }
+
+        /// <summary>Queue a node id for the deferred position corrector, refreshing the target of an
+        /// existing entry rather than duplicating it (a later batch that touches the same node ships the
+        /// newer settled coord; re-arming Age/Tries lets it re-converge).</summary>
+        private void EnqueuePosFix(ulong id, float3 wantPos)
+        {
+            if (id == 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _pendingPosFixes.Count; i++)
+            {
+                if (_pendingPosFixes[i].Id == id)
+                {
+                    _pendingPosFixes[i] = new PendingPosFix { Id = id, WantPos = wantPos, Age = 0, Tries = 0 };
+                    return;
+                }
+            }
+
+            _pendingPosFixes.Add(new PendingPosFix { Id = id, WantPos = wantPos, Age = 0, Tries = 0 });
+        }
+
+        /// <summary>FIX A step 3 (large drift) — DETACH-MOVE. Snapshot every live arm of <paramref name="node"/>
+        /// (prefab/seed/elevation/Upgraded + a bezier already 2/3-1/3-shifted to <paramref name="wantPos"/>),
+        /// mark each arm <see cref="Deleted"/> (+<see cref="CS2M_RemoteDeleted"/> so the capture never echoes
+        /// the delete; components kept for I8), then move the now-detaching node directly to
+        /// <paramref name="wantPos"/>. Direct <see cref="SetComponentData"/> is safe (I4): the arms are
+        /// Deleted, so by end-of-frame the node is degree-0 and the native pass never runs its curves against
+        /// the moved node. The re-emit is deferred to the next drain (<see cref="_pendingReattach"/>, step 3d).
+        /// Returns the number of arms snapshotted. Deliberately does NOT route through RebuildAfterDelete: that
+        /// would queue THIS node for an orphan-delete (it is momentarily degree-0), destroying the very node we
+        /// are relocating.</summary>
+        private int DetachAndRelocate(Entity node, ulong nodeId, float3 wantPos)
+        {
+            Node cur = EntityManager.GetComponentData<Node>(node);
+            float3 delta = wantPos - cur.m_Position;
+
+            var snap = new List<ReattachArm>();
+            if (EntityManager.HasBuffer<ConnectedEdge>(node))
+            {
+                // Snapshot the arm entities before any structural change (AddComponent<Deleted> below moves
+                // chunks and would invalidate a live buffer handle mid-iteration).
+                DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(node, true);
+                var armEdges = new Entity[ce.Length];
+                for (int i = 0; i < ce.Length; i++)
+                {
+                    armEdges[i] = ce[i].m_Edge;
+                }
+
+                foreach (Entity edge in armEdges)
+                {
+                    if (edge == Entity.Null || !EntityManager.Exists(edge)
+                        || EntityManager.HasComponent<Deleted>(edge)
+                        || !EntityManager.HasComponent<Edge>(edge) || !EntityManager.HasComponent<Curve>(edge)
+                        || !EntityManager.HasComponent<PrefabRef>(edge))
+                    {
+                        continue;
+                    }
+
+                    Edge ed = EntityManager.GetComponentData<Edge>(edge);
+                    bool isStart = ed.m_Start == node;
+                    bool isEnd = ed.m_End == node;
+                    if (!isStart && !isEnd)
+                    {
+                        continue; // stale buffer entry — this edge no longer names this node
+                    }
+
+                    if (isStart && isEnd)
+                    {
+                        // Degenerate self-loop (both endpoints are this node). Never re-emit it (that would
+                        // fabricate a self-loop), but it MUST be deleted before the move — leaving its curve
+                        // pinned to the old coord while the node moves would violate I4. Delete, don't snap.
+                        if (!EntityManager.HasComponent<CS2M_RemoteDeleted>(edge))
+                        {
+                            EntityManager.AddComponent<CS2M_RemoteDeleted>(edge);
+                        }
+
+                        if (!EntityManager.HasComponent<Deleted>(edge))
+                        {
+                            EntityManager.AddComponent<Deleted>(edge);
+                        }
+
+                        continue;
+                    }
+
+                    Entity other = isStart ? ed.m_End : ed.m_Start;
+                    if (other == Entity.Null || !EntityManager.Exists(other) || other == node)
+                    {
+                        continue;
+                    }
+
+                    Entity prefab = EntityManager.GetComponentData<PrefabRef>(edge).m_Prefab;
+                    if (!_prefabSystem.TryGetPrefab(new PrefabRef(prefab), out PrefabBase pb) || pb == null)
+                    {
+                        continue; // can't name it → can't echo-guard or rebuild it; leave it alone
+                    }
+
+                    // Shift the bezier the same way MoveNodeWithCurves/NetGraphSafety does: the moved
+                    // endpoint takes the full shift, its near control point 2/3, the far one 1/3.
+                    Bezier4x3 bez = EntityManager.GetComponentData<Curve>(edge).m_Bezier;
+                    if (isStart)
+                    {
+                        bez.a = wantPos;
+                        bez.b += delta * (2f / 3f);
+                        bez.c += delta * (1f / 3f);
+                    }
+                    else
+                    {
+                        bez.d = wantPos;
+                        bez.c += delta * (2f / 3f);
+                        bez.b += delta * (1f / 3f);
+                    }
+
+                    var arm = new ReattachArm
+                    {
+                        Prefab = prefab,
+                        PrefabName = pb.name,
+                        Bezier = bez,
+                        ThisIsStart = isStart,
+                        ThisNodeId = nodeId,
+                        OtherNodeId = EntityManager.HasComponent<CS2M_NodeSyncId>(other)
+                            ? EntityManager.GetComponentData<CS2M_NodeSyncId>(other).m_Id : 0UL,
+                        OtherNode = other,
+                        Seed = EntityManager.HasComponent<PseudoRandomSeed>(edge)
+                            ? EntityManager.GetComponentData<PseudoRandomSeed>(edge).m_Seed : 0,
+                    };
+
+                    if (EntityManager.HasComponent<Game.Net.Elevation>(edge))
+                    {
+                        arm.HasElev = true;
+                        arm.Elev = EntityManager.GetComponentData<Game.Net.Elevation>(edge).m_Elevation;
+                    }
+
+                    if (EntityManager.HasComponent<Upgraded>(edge))
+                    {
+                        CompositionFlags f = EntityManager.GetComponentData<Upgraded>(edge).m_Flags;
+                        arm.HasUpgraded = true;
+                        arm.UpgG = (uint) f.m_General;
+                        arm.UpgL = (uint) f.m_Left;
+                        arm.UpgR = (uint) f.m_Right;
+                    }
+
+                    snap.Add(arm);
+
+                    // Delete the arm (keep components — I8; tag so the capture skips the echo).
+                    if (!EntityManager.HasComponent<CS2M_RemoteDeleted>(edge))
+                    {
+                        EntityManager.AddComponent<CS2M_RemoteDeleted>(edge);
+                    }
+
+                    if (!EntityManager.HasComponent<Deleted>(edge))
+                    {
+                        EntityManager.AddComponent<Deleted>(edge);
+                    }
+
+                    // The opposite endpoint loses (then regains) an arm — re-derive its junction. It keeps
+                    // its other arms, so it never orphans here.
+                    MarkUpdated(other);
+                }
+            }
+
+            // Move the bare node (arms Deleted → degree-0 by end of frame; direct set does not violate I4).
+            EntityManager.SetComponentData(node, new Node { m_Position = wantPos, m_Rotation = cur.m_Rotation });
+            MarkUpdated(node);
+
+            _pendingReattach.Add(new PendingReattach { NodeId = nodeId, Node = node, Arms = snap });
+            return snap.Count;
+        }
+
+        /// <summary>FIX A step 3d — re-emit one snapshotted arm as a vanilla <c>CreationDefinition</c>+
+        /// <c>NetCourse</c>, an exact mirror of <see cref="EmitEdgeCourse"/> (echo-guard, Permanent
+        /// definition, deferred Upgraded via <see cref="RemoteNetUpgradeQueue"/>) but driven from a
+        /// <see cref="ReattachArm"/> snapshot instead of a wire command. The bezier is already shifted, so
+        /// GenerateEdges rebuilds the REAL edge touching the relocated node at its authoritative coord.</summary>
+        private void EmitReattachCourse(ReattachArm arm, Entity startNode, Entity endNode)
+        {
+            Bezier4x3 bezier = arm.Bezier;
+
+            // Echo guard (same as EmitEdgeCourse): the rebuilt edge is born Applied+Created WITHOUT
+            // CS2M_RemotePlaced, so mark its seg hash first or NetBatchCaptureSystem would re-broadcast it.
+            RemoteNetEcho.Mark(RemoteNetEcho.SegHash(bezier.a, bezier.d, arm.PrefabName));
+
+            float2 elev = arm.HasElev ? arm.Elev : float2.zero;
+
+            NetCourse course = default;
+            course.m_Curve = bezier;
+            course.m_Length = MathUtils.Length(bezier);
+            course.m_FixedIndex = -1;
+
+            course.m_StartPosition.m_Position = bezier.a;
+            course.m_StartPosition.m_Rotation = NetUtils.GetNodeRotation(MathUtils.StartTangent(bezier));
+            course.m_StartPosition.m_CourseDelta = 0f;
+            course.m_StartPosition.m_Elevation = elev;
+            course.m_StartPosition.m_ParentMesh = -1;
+            course.m_StartPosition.m_Flags = CoursePosFlags.IsFirst;
+            course.m_StartPosition.m_Entity = startNode;
+
+            course.m_EndPosition.m_Position = bezier.d;
+            course.m_EndPosition.m_Rotation = NetUtils.GetNodeRotation(MathUtils.EndTangent(bezier));
+            course.m_EndPosition.m_CourseDelta = 1f;
+            course.m_EndPosition.m_Elevation = elev;
+            course.m_EndPosition.m_ParentMesh = -1;
+            course.m_EndPosition.m_Flags = CoursePosFlags.IsLast;
+            course.m_EndPosition.m_Entity = endNode;
+
+            // Both endpoints pinned by entity (Permanent → GenerateEdges.TryGetNode uses m_Entity directly,
+            // decomp GenerateEdgesSystem.cs:1228; never position-resolves, so no fusion). Logged once per arm.
+            CS2M.Log.Info($"[Batch] REATTACH-PIN start={startNode.Index} end={endNode.Index} name={arm.PrefabName}");
+
+            Entity def = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(def, new CreationDefinition
+            {
+                m_Prefab = arm.Prefab,
+                m_RandomSeed = arm.Seed,
+                m_Flags = CreationFlags.Permanent,
+            });
+            EntityManager.AddComponentData(def, course);
+            EntityManager.AddComponent<Updated>(def);
+            _pendingDefinitions.Add(def);
+
+            // Upgraded flags: re-applied by identity via the existing net-edit pipeline (same as
+            // EmitEdgeCourse), not carried on the definition.
+            if (arm.HasUpgraded)
+            {
+                ulong startId = arm.ThisIsStart ? arm.ThisNodeId : arm.OtherNodeId;
+                ulong endId = arm.ThisIsStart ? arm.OtherNodeId : arm.ThisNodeId;
+                RemoteNetUpgradeQueue.Enqueue(new NetUpgradeCommand
+                {
+                    StartNodeId = startId,
+                    EndNodeId = endId,
+                    General = arm.UpgG,
+                    Left = arm.UpgL,
+                    Right = arm.UpgR,
+                    StartX = bezier.a.x, StartY = bezier.a.y, StartZ = bezier.a.z,
+                    EndX = bezier.d.x, EndY = bezier.d.y, EndZ = bezier.d.z,
+                    IsNode = false,
+                });
+            }
         }
 
         /// <summary>Align a resolved boundary node to the builder's settled position when the two have
@@ -496,6 +1037,28 @@ namespace CS2M.Sync
         // <=0.25 m noise floor already accounts for, but tight enough that it won't misfire on two actually
         // distinct junctions that happen to be near each other.
         private const float SnapMergeSearchRadius = 2f;
+
+        // FOLD GUARD (EmitEdgeCourse) — max horizontal gap allowed between an edge's captured bezier endpoint
+        // and the WIRE-authoritative position of the node id that endpoint names. In a consistent batch these
+        // are EQUAL: the builder captures curve.d == node.m_Position (net invariant I4 — a curve endpoint
+        // always meets its node) and BoundaryPos/NodePos from that same node in the same snapshot, so the two
+        // wire values coincide to float noise. A large gap means EITHER (fold-real) the id resolved to a
+        // DIFFERENT physical node than the edge geometrically ends at — the builder folded/split this id onto
+        // another node mid-draw (proven live 09/07 00:41:47: id ...817 named A@252/-446 but the edge from ...824
+        // ended at B@259/-447, 7 m away; soldering the 4th arm onto A fused A+B into one junction → ~15 zone
+        // blocks diverged) — OR (stale-curve) the id is CORRECT but the captured curve is old, snapped before
+        // the builder's NodeAlign settled the junction (proven live 09/07 01:13: id ...371 gap=10.6 m, but the
+        // builder had a SINGLE degree-3 node at the wire pos — the earlier "mint a node at bezierEnd" cure grew
+        // a phantom degree-1 node and DIVERGED). ReanchorFoldedEndpoint disambiguates the two and cures each
+        // correctly. 4 m sits far above the ~0 consistent-case gap, so it fires ONLY on genuine wire
+        // self-inconsistency, never on junction re-centre (BOUND-SNAP already reconciled the node first).
+        private const float EndpointFoldTolerance = 4f;
+
+        // FOLD GUARD disambiguator — search radius (m, xz) for a REAL node at the edge's bezier endpoint. A hit
+        // means the builder genuinely has a distinct node there (fold-real → attach); a miss means the curve is
+        // merely stale (stale-curve → trust the id, do NOT mint). Tight (2 m) so it only adopts a node that truly
+        // coincides with the endpoint, never an unrelated neighbour a few metres off.
+        private const float FoldNodeMatchRadius = 2f;
 
         private void SnapBoundaryNode(Entity node, ulong id, float3 wantPos)
         {
@@ -531,50 +1094,28 @@ namespace CS2M.Sync
 
             if (dist > SnapMergeDistance)
             {
-                // No survivor at the destination — fall through to the move (today's behaviour), but this
-                // is far enough that it deserves a loud flag: either a legitimately big junction settle, or
-                // a merge this receiver failed to detect (e.g. the survivor hasn't arrived/resolved yet).
-                CS2M.Log.Warn($"[Batch] BOUND-SNAP-LARGE id={id} moved={dist:F1}m " +
+                // v66.6 CRASH FIX (same root cause as NetPlaceApplySystem.HealNodePosition, proven from a
+                // native full dump: c0000005 null-deref in a game Burst net job after a large node move).
+                // Teleporting a node that already has connected edges by a large distance corrupts the road
+                // graph and the game's GenerateEdges/NodeAlign Burst pass null-derefs → whole process abort.
+                // No survivor to merge onto here, so DO NOT move — skip and accept the local position.
+                CS2M.Log.Info($"[Batch] BOUND-SKIP-LARGE id={id} drift={dist:F1}m " +
                               $"({cur.m_Position.x:F1},{cur.m_Position.z:F1})->({wantPos.x:F1},{wantPos.z:F1}) " +
-                              "no nearby registered node to merge onto — moving the node itself");
+                              "— refusing to teleport a connected node (would corrupt the graph → Burst crash)");
+                return;
             }
 
             float3 oldPos = cur.m_Position;
 
-            // 1) Authoritative position — plain SetComponentData, no structural change yet.
-            EntityManager.SetComponentData(node, new Node
-            {
-                m_Position = wantPos,
-                m_Rotation = cur.m_Rotation,
-            });
-
-            // 2) Structural change on the NODE itself — do this before touching any of its buffers.
-            if (!EntityManager.HasComponent<Updated>(node))
-            {
-                EntityManager.AddComponent<Updated>(node);
-            }
-
-            // 3) Mark every connected edge Updated too, so GenerateEdges refits curve/mesh/blocks from the
-            // now-aligned node instead of leaving them pinned to the old endpoint. Buffer handle taken
-            // AFTER the node's own structural change above; edge ids are copied out before mutating any of
-            // them, since AddComponent on edge[0] must not be allowed to invalidate our read of edge[1..].
-            if (EntityManager.HasBuffer<ConnectedEdge>(node))
-            {
-                DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(node, true);
-                var edges = new Entity[ce.Length];
-                for (int i = 0; i < ce.Length; i++)
-                {
-                    edges[i] = ce[i].m_Edge;
-                }
-
-                foreach (Entity edge in edges)
-                {
-                    if (EntityManager.Exists(edge) && !EntityManager.HasComponent<Updated>(edge))
-                    {
-                        EntityManager.AddComponent<Updated>(edge);
-                    }
-                }
-            }
+            // I4 FIX: move the node AND drag its connected edge curves with it atomically. The old code
+            // set the Node position and marked the connected edges Updated but left each edge's
+            // m_Bezier.a/.d pinned to the OLD coordinate — and marking an edge Updated does NOT re-fit its
+            // curve (GenerateEdgesSystem.UpdateNodeConnections), so GenerateEdges/NodeAlign then ran over a
+            // graph whose curve endpoints no longer met their node (I4 violated) and null-deref'd inside
+            // Burst. Only sub-SnapMergeDistance drifts reach here (BOUND-SKIP-LARGE/BOUND-MERGE handled the
+            // rest above), a plausible junction settle — exactly what MoveNodeWithCurves is safe to apply.
+            // This runs BEFORE (3) emits the new edges' definitions, so GenerateEdges sees an aligned node.
+            NetGraphSafety.MoveNodeWithCurves(EntityManager, node, wantPos);
 
             CS2M.Log.Info($"[Batch] BOUND-SNAP id={id} moved={dist:F1}m " +
                           $"({oldPos.x:F1},{oldPos.z:F1})->({wantPos.x:F1},{wantPos.z:F1})");
@@ -641,12 +1182,39 @@ namespace CS2M.Sync
         /// created/resolved node entities by <c>m_Entity</c>; GenerateNodes@Mod1/GenerateEdges@Mod2 then build
         /// the REAL edge THIS frame (curve terrain-fit, composition, geometry, lanes, zone blocks, mesh) — the
         /// derivation the direct-archetype edge never got. Returns true when a definition was emitted.</summary>
-        private bool EmitEdgeCourse(NetBatchCommand cmd, int i, Bezier4x3 bezier, Entity startNode, Entity endNode)
+        private bool EmitEdgeCourse(NetBatchCommand cmd, int i, Bezier4x3 bezier, Entity startNode, Entity endNode,
+            Dictionary<ulong, float3> wirePos)
         {
             // Prefab is pre-validated by ValidateAllPrefabs (incl. m_EdgeArchetype.Valid — kept as the
             // "is this a real net?" proxy even though the definition path no longer uses the archetype).
-            if (!ResolveNetPrefab(cmd.EdgePrefabTypes[i], cmd.EdgePrefabNames[i], out Entity netPrefab, out _))
+            if (!ResolveNetPrefab(cmd.EdgePrefabTypes[i], cmd.EdgePrefabNames[i], out Entity netPrefab, out NetData netData))
             {
+                return false;
+            }
+
+            // FOLD GUARD — the edge's bezier endpoint (== node position on the builder, invariant I4) can
+            // disagree with the wire position of the id it names, and that gap has TWO opposite root causes that
+            // demand OPPOSITE cures (see ReanchorFoldedEndpoint for the full case split and the 00:41 fold-real
+            // vs 01:13 stale-curve evidence): either the builder folded the id onto a DIFFERENT physical node
+            // mid-draw (attach the arm to that distinct node — else it fuses two junctions), or the captured
+            // curve is simply STALE (the id is correct — trust it and pin the emitted endpoint onto the node's
+            // wire position, letting GenerateEdge re-pin the curve). Passed by ref so the stale-curve branch can
+            // fix this course's chord in place before the NetCourse below is built.
+            startNode = ReanchorFoldedEndpoint(cmd.EdgeStartNodeIds[i], startNode, ref bezier, true, wirePos);
+            endNode = ReanchorFoldedEndpoint(cmd.EdgeEndNodeIds[i], endNode, ref bezier, false, wirePos);
+            if (startNode == endNode)
+            {
+                // Re-anchoring must never collapse an edge to a self-loop (defense in depth).
+                CS2M.Log.Info($"[Batch] SKIP edge {i} degenerate after fold re-anchor (start==end entity={startNode.Index})");
+                return false;
+            }
+
+            // Idempotency after re-anchor: a re-anchored endpoint has no wire id, so the id-keyed dup check the
+            // caller ran can't see the resulting edge. Skip if this exact node pair is already connected (a
+            // re-delivered fold edge — FindReanchorNode reused the prior node, so this pair now matches).
+            if (EdgeAlreadyBuilt(startNode, endNode))
+            {
+                CS2M.Log.Info($"[Batch] SKIP dup edge {i} (already live between resolved node pair)");
                 return false;
             }
 
@@ -748,6 +1316,183 @@ namespace CS2M.Sync
                 $"[Batch] EMIT-DEF edge {i} name={cmd.EdgePrefabNames[i]} len={course.m_Length:F1} " +
                 $"startNode={startNode.Index} endNode={endNode.Index} upg={cmd.EdgeHasUpgraded[i]}");
             return true;
+        }
+
+        /// <summary>FOLD GUARD worker. When the wire position of <paramref name="endpointId"/> disagrees with the
+        /// edge's endpoint (<c>bezier.a</c> if <paramref name="isStart"/>, else <c>bezier.d</c>) by more than
+        /// <see cref="EndpointFoldTolerance"/>, ONE of two very different things happened on the builder — and
+        /// they need OPPOSITE cures (proven live: 09/07 00:41 fold-real vs 01:13 stale-curve):
+        ///
+        ///   FOLD-REAL — the builder handed this id to a DIFFERENT physical node mid-draw (edge split / node
+        ///   re-use) and the edge geometrically ends at that OTHER node. <paramref name="resolved"/> is the WRONG
+        ///   node to attach this arm to (attaching FUSES two junctions the builder keeps apart). Signature: a REAL
+        ///   node actually sits at the bezier endpoint. Cure: attach the arm to THAT node.
+        ///
+        ///   STALE-CURVE — the id is CORRECT but the captured curve is OLD: the wire snapshot caught the bezier
+        ///   before the builder's NodeAlign settled the junction, so the endpoint still points at where the curve
+        ///   used to reach (01:13: id ...371 gap=10.6m, wire=(462.6,-227.0), bezierEnd=(453.6,-232.6); the
+        ///   builder had ONE degree-3 node at the wire pos, the diagonal joined it cleanly — minting at bezierEnd
+        ///   created a phantom degree-1 node and DIVERGED). Signature: NO node sits at the bezier endpoint. Cure:
+        ///   TRUST the id — return <paramref name="resolved"/> and pin the emitted bezier endpoint onto the
+        ///   node's wire position (2/3–1/3 control-point falloff, same rule as <see cref="NetGraphSafety"/>) so
+        ///   the NetCourse/EdgeGeometry is not born with an inconsistent chord before GenerateEdge pins the curve
+        ///   to the node itself (decomp GenerateEdgesSystem.cs:1319/1347).
+        ///
+        /// Disambiguated by looking for a real node within <see cref="FoldNodeMatchRadius"/> of the bezier
+        /// endpoint: (a) another node of THIS batch (its wire position, resolved via the id map), (b) a live local
+        /// node already carrying a CS2M_NodeSyncId, (c) a fresh re-anchor node minted by a prior delivery. Found →
+        /// FOLD-REAL, attach to it. None → STALE-CURVE, trust + pin. Returns <paramref name="resolved"/> unchanged
+        /// in the normal (consistent-wire) case. Horizontal (xz) distance only — the y gap is terrain height.</summary>
+        private Entity ReanchorFoldedEndpoint(ulong endpointId, Entity resolved, ref Bezier4x3 bezier, bool isStart,
+            Dictionary<ulong, float3> wirePos)
+        {
+            if (!wirePos.TryGetValue(endpointId, out float3 wp))
+            {
+                return resolved; // no wire coord for this id → nothing to cross-check against
+            }
+
+            float3 bezierEnd = isStart ? bezier.a : bezier.d;
+            float gap = math.distance(new float2(wp.x, wp.z), new float2(bezierEnd.x, bezierEnd.z));
+            if (gap <= EndpointFoldTolerance)
+            {
+                return resolved; // consistent wire — the arm truly ends at this node
+            }
+
+            // (a) another node of THIS batch sitting at the endpoint: scan the wire positions (NodeIds +
+            // BoundaryNodeIds) and resolve the match through the id map. The wire coord is the builder's
+            // authoritative settled position, so it names the split node even if the entity hasn't been touched.
+            Entity attach = Entity.Null;
+            float bestSq = FoldNodeMatchRadius * FoldNodeMatchRadius;
+            foreach (KeyValuePair<ulong, float3> kv in wirePos)
+            {
+                if (kv.Key == endpointId)
+                {
+                    continue;
+                }
+
+                float d = math.distancesq(new float2(kv.Value.x, kv.Value.z), new float2(bezierEnd.x, bezierEnd.z));
+                if (d < bestSq
+                    && CS2M_NodeSyncIds.TryResolve(EntityManager, kv.Key, out Entity cand)
+                    && cand != Entity.Null && cand != resolved)
+                {
+                    bestSq = d;
+                    attach = cand;
+                }
+            }
+
+            // (b) a live local node already carrying a CS2M_NodeSyncId (an existing junction the split lands on).
+            if (attach == Entity.Null
+                && CS2M_NodeSyncIds.TryFindNearbyRegistered(EntityManager, bezierEnd, FoldNodeMatchRadius, resolved, out Entity reg))
+            {
+                attach = reg;
+            }
+
+            // (c) a bare fresh node a PRIOR delivery of this same fold edge already minted (re-delivery-safe;
+            // combined with the EdgeAlreadyBuilt skip in EmitEdgeCourse).
+            if (attach == Entity.Null && FindReanchorNode(bezierEnd, resolved, out Entity reuse))
+            {
+                attach = reuse;
+            }
+
+            if (attach != Entity.Null)
+            {
+                // FOLD-REAL: the builder really has a distinct node here. Attach the arm to it instead of the
+                // stale neighbour; GenerateEdge pins the curve to that node this frame.
+                CS2M.Log.Info($"[Batch] FOLD-SPLIT id={endpointId} gap={gap:F1}m " +
+                              $"wire=({wp.x:F1},{wp.z:F1}) bezierEnd=({bezierEnd.x:F1},{bezierEnd.z:F1}) " +
+                              $"stale={resolved.Index}->node={attach.Index} " +
+                              "(id folded on builder — arm re-anchored to the distinct node, not fused onto the neighbour)");
+                return attach;
+            }
+
+            // STALE-CURVE: no real node at the bezier endpoint → the id is right, the captured curve is old.
+            // Do NOT mint (that is exactly what created the 01:13 phantom). Trust the identity and pin the
+            // emitted endpoint onto the node's wire position so the course/geometry meets the node from frame 0;
+            // the engine re-pins the curve to the node regardless.
+            float3 delta = wp - bezierEnd;
+            if (isStart)
+            {
+                bezier.a = wp;
+                bezier.b += delta * (2f / 3f);
+                bezier.c += delta * (1f / 3f);
+            }
+            else
+            {
+                bezier.d = wp;
+                bezier.c += delta * (2f / 3f);
+                bezier.b += delta * (1f / 3f);
+            }
+
+            CS2M.Log.Info($"[Batch] FOLD-TRUST id={endpointId} gap={gap:F1}m " +
+                          $"wire=({wp.x:F1},{wp.z:F1}) bezierEnd=({bezierEnd.x:F1},{bezierEnd.z:F1}) " +
+                          "(stale wire curve — trusting node identity; engine will pin curve)");
+            return resolved;
+        }
+
+        /// <summary>Find a bare re-anchor node (CS2M_RemotePlaced, no CS2M_NodeSyncId, not <paramref name="exclude"/>)
+        /// sitting within 0.5 m of <paramref name="pos"/> — a fold-split node a prior delivery of the same edge
+        /// already minted. Exact-scale (0.5 m) so it never adopts an unrelated junction, only its own twin.</summary>
+        private bool FindReanchorNode(float3 pos, Entity exclude, out Entity node)
+        {
+            node = Entity.Null;
+            float best = 0.25f; // 0.5 m squared
+            Unity.Collections.NativeArray<Entity> arr = _liveNodes.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                foreach (Entity n in arr)
+                {
+                    if (n == exclude
+                        || !EntityManager.HasComponent<CS2M_RemotePlaced>(n)
+                        || EntityManager.HasComponent<CS2M_NodeSyncId>(n))
+                    {
+                        continue;
+                    }
+
+                    float d = math.distancesq(EntityManager.GetComponentData<Node>(n).m_Position, pos);
+                    if (d < best)
+                    {
+                        best = d;
+                        node = n;
+                    }
+                }
+            }
+            finally
+            {
+                arr.Dispose();
+            }
+
+            return node != Entity.Null;
+        }
+
+        /// <summary>True when a LIVE edge already directly connects <paramref name="a"/> and <paramref name="b"/>
+        /// (either orientation). Entity-addressed twin of <see cref="FindEdgeById"/> — the fold path re-anchors
+        /// an endpoint onto a node with NO wire id, so FindEdgeById (id-keyed) can't see the resulting edge on a
+        /// re-delivery; this catches the duplicate before a second edge is soldered onto the same node pair.</summary>
+        private bool EdgeAlreadyBuilt(Entity a, Entity b)
+        {
+            if (a == Entity.Null || b == Entity.Null || a == b || !EntityManager.HasBuffer<ConnectedEdge>(a))
+            {
+                return false;
+            }
+
+            DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(a, true);
+            for (int i = 0; i < ce.Length; i++)
+            {
+                Entity e = ce[i].m_Edge;
+                if (!EntityManager.Exists(e) || EntityManager.HasComponent<Deleted>(e)
+                    || !EntityManager.HasComponent<Edge>(e))
+                {
+                    continue;
+                }
+
+                Edge ed = EntityManager.GetComponentData<Edge>(e);
+                if ((ed.m_Start == a && ed.m_End == b) || (ed.m_Start == b && ed.m_End == a))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Delete the edge the split removed, addressed by node-pair identity FIRST, falling back to
@@ -1156,7 +1901,14 @@ namespace CS2M.Sync
 
             if (live == 0)
             {
-                EntityManager.AddComponent<Deleted>(node);
+                // DEFER the orphan delete one frame (crash #4): AddComponent<Deleted> on a node in the
+                // SAME frame its junction is being restructured recycles the node while BlockSystem@Mod4
+                // may still walk a sibling edge's ConnectedEdge that references it. Drained at the top of
+                // the next OnUpdate, which re-checks orphan status before committing the delete.
+                if (!_pendingOrphanNodes.Contains(node))
+                {
+                    _pendingOrphanNodes.Add(node);
+                }
             }
             else
             {

@@ -70,6 +70,18 @@ namespace CS2M.Sync
     /// one or removed a ghost, so a set-divergence never converged). Separate gate so the create/delete
     /// half can be killed independently and fall back to the v65 heal-only behaviour, but every consumer ANDs
     /// it with <see cref="ZoneAuthority.Enabled"/> too. Set env <c>CS2M_ZONESET=0</c> to disable.</summary>
+    /// <summary>v66.4: OFF BY DEFAULT (env <c>CS2M_ZONESET=1</c> to opt in). The v66 set-reconcile that
+    /// CREATES a clone block (<c>EntityManager.Instantiate</c>) and DELETES a phantom
+    /// (<c>AddComponent&lt;Deleted&gt;</c>) is fundamentally incompatible with the game's spatial index:
+    /// zone blocks live in a <c>NativeQuadTree</c> maintained ONLY by the vanilla BlockSystem/SearchSystem,
+    /// and creating/destroying blocks outside that path desyncs the tree — the game's own Burst job then
+    /// throws "Item not found (NativeQuadTree.Update)" and ABORTS the process (proven in the field: the
+    /// crash log fires on the exact frame a [ZoneAuth] CREATE/DELETE runs; every v66.x crash traced here,
+    /// v65 heal-only never crashed). With this OFF, TryApplyGroup falls back to the v65 per-block HEAL,
+    /// which only mutates EXISTING blocks (SetComponentData Block/Cell) and is QuadTree-safe. A genuine
+    /// SET divergence (host block COUNT ≠ client, from a non-deterministic junction) is then left to the
+    /// radar rather than "fixed" by a crash — the real fix is deterministic junction geometry, not
+    /// out-of-band block create/delete.</summary>
     public static class ZoneSetReconcile
     {
         private static int _state = -1;
@@ -80,7 +92,15 @@ namespace CS2M.Sync
             {
                 if (_state < 0)
                 {
-                    _state = System.Environment.GetEnvironmentVariable("CS2M_ZONESET") == "0" ? 0 : 1;
+                    // v66.7: OFF by default (env CS2M_ZONESET=1 to opt in). Creating/deleting/resizing
+                    // zone blocks OUT-OF-BAND from the game's BlockSystem corrupts multiple Burst-consumed
+                    // structures — proven by native dumps: NativeQuadTree "Item not found", and a null-deref
+                    // geometry job on resized blocks. Each fix reveals another face. The stable, convergent
+                    // path is instead: AtomicBatch makes the ROAD identical on both PCs, so the game derives
+                    // the SAME block set locally on each side, and the safe same-size HEAL (zone indices +
+                    // flags + BuildOrder + sub-metre position, never a resize/create/delete) reconciles the
+                    // CONTENT. That converges without ever mutating block geometry ourselves.
+                    _state = System.Environment.GetEnvironmentVariable("CS2M_ZONESET") == "1" ? 1 : 0;
                 }
 
                 return _state == 1;
@@ -740,14 +760,29 @@ namespace CS2M.Sync
 
             ZoneSync.EnsureBuilt(EntityManager, _prefabSystem);
 
-            // Drain at most one command per frame from the network queue.
-            if (RemoteZoneBlockQueue.TryDequeue(out ZoneBlockAuthorityCommand cmd))
+            // [Guard] (lei 9 — v66.2 FIELD FIX): the v66 set-reconcile does STRUCTURAL changes on the
+            // client (Instantiate a clone block, AddComponent<Deleted> a phantom). Any exception that
+            // escaped here killed SystemBase.Update → ModificationSystem → the whole PROCESS — exactly
+            // the "sincou a primeira rua, crashou na segunda" client crash Bruno hit (second road split
+            // an edge, its zone group reconciled with a create/delete, something threw, no [Guard] to
+            // catch it). Every other apply in the mod already wraps its work like this. Log the full
+            // exception (this is ALSO how we finally capture the native/managed cause) and survive; the
+            // next sweep re-reconciles the group.
+            try
             {
-                SplitAndApply(cmd);
-            }
+                // Drain at most one command per frame from the network queue.
+                if (RemoteZoneBlockQueue.TryDequeue(out ZoneBlockAuthorityCommand cmd))
+                {
+                    SplitAndApply(cmd);
+                }
 
-            // Plus at most one retry slot per frame (unresolved edges from earlier commands).
-            RetryOne();
+                // Plus at most one retry slot per frame (unresolved edges from earlier commands).
+                RetryOne();
+            }
+            catch (System.Exception ex)
+            {
+                CS2M.Log.Info($"[Guard] zone reconcile failed (survived): {ex}");
+            }
         }
 
         /// <summary>Splits a command's flat block entries by owning edge identity and attempts each
@@ -817,6 +852,24 @@ namespace CS2M.Sync
             if (!EntityManager.HasBuffer<SubBlock>(edge))
             {
                 return; // road exists but has no generated zone blocks yet — nothing to heal this pass
+            }
+
+            // v66.2 FIELD FIX: never RECONCILE (create/delete blocks) on an edge the game's BlockSystem is
+            // still deriving THIS frame — the edge just arrived from a road batch (the "second road" split)
+            // and its SubBlock set is mid-flight. Instantiating/Deleting zone blocks into that half-built
+            // set is the structural conflict behind the client crash. The host already defers a settling
+            // group on its side (EmitGroup settlingEdges); mirror it here. Re-queue and let the edge settle
+            // (Updated/Created gone) before we touch its grid. Heal-only (v65) path is position-tolerant and
+            // safe, so this defer only guards the structural reconcile.
+            if (ZoneSetReconcile.Enabled && GroupIsComplete(cmd, indices)
+                && (EntityManager.HasComponent<Updated>(edge) || EntityManager.HasComponent<Created>(edge)))
+            {
+                if (attempt < MaxRetryAttempts)
+                {
+                    _retryQueue.Enqueue(new PendingGroup { Cmd = cmd, StartId = startId, EndId = endId, Indices = indices, Attempts = attempt + 1 });
+                }
+
+                return;
             }
 
             DynamicBuffer<SubBlock> subBlocks = EntityManager.GetBuffer<SubBlock>(edge, true);
@@ -1160,8 +1213,12 @@ namespace CS2M.Sync
                 EntityManager.AddComponent<Updated>(clone);
             }
 
-            // Same Modification5 dead-zone re-stamp Heal uses (DeferredUpdateMarker.cs docs the chain).
-            DeferredUpdated.Enqueue(clone);
+            // v66.5 CRASH FIX: re-stamp CREATED (not just Updated) next frame — SearchSystem@Mod5 runs
+            // BEFORE this applier@Mod5, so it never sees the clone's Created this frame; a plain Updated
+            // re-stamp then drives it into SearchSystem's Update branch on a block never Added → Burst
+            // "Item not found (NativeQuadTree.Update)" → process crash. DeferredCreated re-stamps Created
+            // so SearchSystem ADDs it next frame instead. See DeferredCreated's doc for the full chain.
+            DeferredCreated.Enqueue(clone);
 
             // Authoritative cells — fresh buffer AFTER the structural AddComponents above (handle safety, same
             // lesson as Heal). Height left for CellCheckSystem to recompute; flags seeded with the host's.
@@ -1538,10 +1595,31 @@ namespace CS2M.Sync
                 }
             }
 
+            // v66.6 CRASH FIX (proven from a native dump: c0000005 null-deref in game Burst job
+            // c9b7ca65, client crashed on a frame full of "HEAL block NxM->N'xM'" size changes).
+            // RESIZING a zone block (m_Size + ResizeUninitialized of the Cell buffer) OUT-OF-BAND from
+            // the game's BlockSystem corrupts the state a Burst geometry job consumes → whole-process
+            // abort (same class as the node-teleport crash). A different local block SIZE is a symptom
+            // of a divergent junction (the road derived a different block layout here), NOT something we
+            // can force by rewriting geometry — only the game may resize a block. So: if the size does
+            // not match, DO NOT heal this block (no resize, no position/size rewrite). We still heal
+            // same-size blocks (zone indices + flags + BuildOrder + sub-metre position), which is the
+            // safe, non-structural cure. Divergent-size blocks are left to the radar; the real fix is
+            // deterministic junction geometry so blocks derive identically in the first place.
+            if (!sizeMatches)
+            {
+                CS2M.Log.Info($"[ZoneAuth] SKIP resize block=({cmd.PosX[idx]:F0},{cmd.PosZ[idx]:F0}) " +
+                              $"local={localBlock.m_Size.x}x{localBlock.m_Size.y} host={sizeX}x{sizeY} " +
+                              "— refusing to resize a zone block out-of-band (would corrupt Burst geometry → crash)");
+                return;
+            }
+
             int oldW = localBlock.m_Size.x;
             int oldH = localBlock.m_Size.y;
 
             // 1) Authoritative Block geometry (no structural change — safe before AddComponent below).
+            // Size is guaranteed == local here (guard above), so this is a position/direction nudge only,
+            // never a resize.
             EntityManager.SetComponentData(target, new Block
             {
                 m_Position = new float3(cmd.PosX[idx], cmd.PosY[idx], cmd.PosZ[idx]),

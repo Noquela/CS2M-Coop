@@ -205,6 +205,17 @@ namespace CS2M.Sync
                 Entity aStart = ResolveNode(cmd.StartNodeId, bezier.a);
                 Entity aEnd = ResolveNode(cmd.EndNodeId, bezier.d);
 
+                // T3 "never apply half" (crash #3 fix): if the resolved node sits farther than
+                // NodeHealMergeDist (10 m) from the authoritative endpoint coord, DO NOT reuse it. Reusing a
+                // far node makes EmitCourse pin this edge's curve endpoint (at the authoritative pos) onto a
+                // node metres away — an I4 violation the game's Burst net jobs null-deref on (the "node with
+                // 24 m drift stayed put but the state marched on" crash). Freeing the endpoint to Null makes
+                // GenerateNodes mint a FRESH node AT the authoritative pos: the local graph then diverges
+                // from the host's topology but stays internally CONSISTENT (curve endpoint == node), and the
+                // divergence shows up on the radar to be healed later — better than a hard crash.
+                aStart = RejectFarNode(aStart, cmd.StartNodeId, bezier.a, "start");
+                aEnd = RejectFarNode(aEnd, cmd.EndNodeId, bezier.d, "end");
+
                 // Degenerate guard: a short piece must never collapse BOTH ends onto one node (that would
                 // build a looping/zero-span edge and lose a node).
                 if (aStart != Entity.Null && aStart == aEnd)
@@ -675,6 +686,15 @@ namespace CS2M.Sync
                 if (NodeHeal.Enabled)
                 {
                     HealNodePosition(byId, id, pos);
+
+                    // HealNodePosition may have Remapped this id onto a DIFFERENT node (HEAL-MERGE) — re-
+                    // resolve so we return the node the id now names, not the pre-merge (far) one. Without
+                    // this the merge survivor was computed and then thrown away, and the caller kept using
+                    // the stale far node (an I4 hazard the T3 far-guard would otherwise have to clean up).
+                    if (CS2M_NodeSyncIds.TryResolve(EntityManager, id, out Entity afterHeal))
+                    {
+                        byId = afterHeal;
+                    }
                 }
 
                 return byId;
@@ -696,6 +716,33 @@ namespace CS2M.Sync
                 _pendingNodeStamps.Add(new PendingStamp { Id = id, Pos = pos, Age = 0 });
             }
 
+            return Entity.Null;
+        }
+
+        /// <summary>T3 "never apply half": returns <paramref name="node"/> only if it sits within
+        /// <see cref="NodeHealMergeDist"/> of the authoritative endpoint coord <paramref name="authPos"/>;
+        /// otherwise returns <see cref="Entity.Null"/> (so GenerateNodes mints a fresh node AT authPos) and
+        /// logs <c>NODE-FAR-NEWNODE</c>. Reusing a far node would pin this edge's curve endpoint (authPos)
+        /// onto a node metres away — an I4 violation the game's Burst net jobs crash on. A brand-new node has
+        /// no edges, so it can never trigger I6 (a duplicate live connection) — only the reuse-both-ends case
+        /// can, and that is already caught upstream by <see cref="EdgeExists"/> / OVERDRAW-GUARD.</summary>
+        private Entity RejectFarNode(Entity node, ulong id, float3 authPos, string which)
+        {
+            if (node == Entity.Null || !EntityManager.Exists(node) || !EntityManager.HasComponent<Node>(node))
+            {
+                return Entity.Null;
+            }
+
+            float3 p = EntityManager.GetComponentData<Node>(node).m_Position;
+            float distSq = math.distancesq(p, authPos);
+            if (distSq <= NodeHealMergeDist * NodeHealMergeDist)
+            {
+                return node;
+            }
+
+            CS2M.Log.Info($"[Net] NODE-FAR-NEWNODE {which} id={id} drift={math.sqrt(distSq):F1}m " +
+                          $"node=({p.x:F1},{p.z:F1}) auth=({authPos.x:F1},{authPos.z:F1}) " +
+                          "— refusing to reuse a far node (would violate I4 → Burst crash); minting a fresh one");
             return Entity.Null;
         }
 
@@ -747,42 +794,35 @@ namespace CS2M.Sync
 
             float3 oldPos = cur.m_Position;
 
+            // v66.6 CRASH FIX (proven from a native full dump: c0000005 null-deref inside a game Burst
+            // net job, stack rooted at this method after a "HEAL-LARGE moved=40m"). Teleporting a node
+            // that ALREADY has connected edges by a large distance leaves the road graph geometrically
+            // inconsistent; the game's GenerateEdges/NodeAlign Burst pass then dereferences null and
+            // ABORTS the whole process (the "receiver of the road crashes" bug, in every config —
+            // this is the legacy path, independent of AtomicBatch/zone-reconcile). A real junction
+            // settle is sub-metre; a 40 m "heal" is not a settle, it is corruption. If we get here with
+            // a large drift and NO survivor to merge onto, DO NOT move — skip and accept the local
+            // position (the radar will still flag it; a later real edit reconciles it). Only sub-merge-
+            // distance drifts (plausible settle) are safe to snap.
             if (distSq > NodeHealMergeDist * NodeHealMergeDist)
             {
-                CS2M.Log.Warn($"[Net] HEAL-LARGE id={id} moved={math.sqrt(distSq):F1}m " +
+                CS2M.Log.Info($"[Net] HEAL-SKIP-LARGE id={id} drift={math.sqrt(distSq):F1}m " +
                               $"({oldPos.x:F1},{oldPos.z:F1})->({wantPos.x:F1},{wantPos.z:F1}) " +
-                              "no nearby registered node to merge onto — moving the node itself");
+                              "— refusing to teleport a connected node (would corrupt the graph → Burst crash)");
+                return;
             }
 
-            EntityManager.SetComponentData(node, new Node { m_Position = wantPos, m_Rotation = cur.m_Rotation });
-            MarkUpdated(node);
-
-            if (EntityManager.HasBuffer<ConnectedEdge>(node))
-            {
-                DynamicBuffer<ConnectedEdge> ce = EntityManager.GetBuffer<ConnectedEdge>(node, true);
-                var edges = new Entity[ce.Length];
-                for (int i = 0; i < ce.Length; i++)
-                {
-                    edges[i] = ce[i].m_Edge;
-                }
-
-                foreach (Entity edge in edges)
-                {
-                    if (EntityManager.Exists(edge) && !EntityManager.HasComponent<Deleted>(edge))
-                    {
-                        MarkUpdated(edge);
-                    }
-                }
-            }
+            // I4 FIX: move the node AND drag its connected edge curves with it in one consistent step.
+            // The old code here set the Node position and marked the edges Updated but left every edge's
+            // m_Bezier.a/.d on the OLD coordinate — marking Updated does NOT re-fit the curve
+            // (GenerateEdgesSystem.UpdateNodeConnections), so the graph was left violating I4 (curve
+            // endpoint != node position) and the game's Burst net jobs null-deref on it. Only sub-merge-
+            // distance drifts reach here (HEAL-SKIP-LARGE handled the rest above), so this is a small,
+            // plausible settle — exactly what MoveNodeWithCurves is safe to apply.
+            NetGraphSafety.MoveNodeWithCurves(EntityManager, node, wantPos);
 
             CS2M.Log.Info($"[Net] HEAL-SNAP id={id} moved={math.sqrt(distSq):F1}m " +
                           $"({oldPos.x:F1},{oldPos.z:F1})->({wantPos.x:F1},{wantPos.z:F1})");
-        }
-
-        private void MarkUpdated(Entity e)
-        {
-            if (!EntityManager.HasComponent<Updated>(e)) { EntityManager.AddComponent<Updated>(e); }
-            if (!EntityManager.HasComponent<BatchesUpdated>(e)) { EntityManager.AddComponent<BatchesUpdated>(e); }
         }
 
         /// <summary>Stamp the id onto each node GenerateNodes built from last frame's Null-ended courses.

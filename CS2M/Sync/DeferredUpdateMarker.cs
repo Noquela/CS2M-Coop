@@ -69,4 +69,61 @@ namespace CS2M.Sync
             }
         }
     }
+
+    /// <summary>
+    ///     v66.5 CRASH FIX — the companion to <see cref="DeferredUpdated"/> for BLOCKS WE CREATE
+    ///     (ZoneBlockAuthorityApplySystem.CreateBlock's clone). Root cause, proven from the decomp phase
+    ///     order: Game.Zones.SearchSystem runs at Modification5 (SystemOrder.cs:199) and maintains the
+    ///     block NativeQuadTree — it ADDs a block only while the block carries <c>Created</c>, otherwise
+    ///     it <c>Update</c>s it, and Update THROWS "Item not found" (a Burst job → aborts the whole
+    ///     process) if the block was never in the tree. Our applier is also at Modification5 but runs
+    ///     AFTER SearchSystem, so a clone we Instantiate this frame is never seen with <c>Created</c>;
+    ///     Cleanup then strips <c>Created</c>, and a plain <c>DeferredUpdated</c> re-stamp next frame gives
+    ///     the clone <c>Updated</c> WITHOUT <c>Created</c> → SearchSystem takes the Update branch on a
+    ///     block it never Added → crash (the "receiver of the road crashes" bug). Fix: re-stamp
+    ///     <c>Created</c> (+<c>Updated</c>) at the START of the next frame, so when SearchSystem runs at
+    ///     Modification5 that frame it sees <c>Created</c> and ADDs the clone to the tree. One-shot: the
+    ///     block is enqueued once at creation and drained once; from then on it lives in the tree and
+    ///     normal <c>DeferredUpdated</c>/Update is safe.
+    /// </summary>
+    public static class DeferredCreated
+    {
+        private static readonly ConcurrentQueue<Entity> Pending = new ConcurrentQueue<Entity>();
+
+        public static void Enqueue(Entity e) => Pending.Enqueue(e);
+
+        public static void Clear()
+        {
+            while (Pending.TryDequeue(out _)) { }
+        }
+
+        internal static bool TryDequeue(out Entity e) => Pending.TryDequeue(out e);
+    }
+
+    /// <summary>Drains <see cref="DeferredCreated"/> at the start of every frame (UpdateBefore
+    /// Modification1), re-stamping <c>Created</c>+<c>Updated</c> so Game.Zones.SearchSystem ADDs the
+    /// clone to the block quadtree this frame instead of faulting on an Update of an unknown item.</summary>
+    public partial class DeferredCreatedSystem : GameSystemBase
+    {
+        protected override void OnUpdate()
+        {
+            while (DeferredCreated.TryDequeue(out Entity e))
+            {
+                if (!EntityManager.Exists(e) || EntityManager.HasComponent<Deleted>(e))
+                {
+                    continue;
+                }
+
+                if (!EntityManager.HasComponent<Created>(e))
+                {
+                    EntityManager.AddComponent<Created>(e);
+                }
+
+                if (!EntityManager.HasComponent<Updated>(e))
+                {
+                    EntityManager.AddComponent<Updated>(e);
+                }
+            }
+        }
+    }
 }

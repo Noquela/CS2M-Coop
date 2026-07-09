@@ -88,20 +88,33 @@ namespace CS2M.Sync
             // v51 FIELD FIX: editing an existing work area only marks it Updated — never Applied —
             // so the Applied-based query below NEVER saw real edits ("my farm field doesn't show up
             // until /resync"). Poll owned areas at ~1 Hz and diff their polygon hash instead.
-            // SCOPE (fix 04/07): only RESOURCE FIELDS (Game.Areas.Extractor = farm/forestry/ore/oil/fish
-            // fields — the work area the PLAYER draws). Was matching EVERY owned area, which shipped 90+
-            // cosmetic Surface/Space sub-areas (Grass/Sand/Walking/Hangaround/Park) per building — those are
-            // regenerated locally by the SUBAREAS handler when the owner syncs, so re-shipping them just
-            // caused unmatchable rewrites/deletes on the client (the "farm didn't sync" mess Bruno saw).
+            // SCOPE (fix 04/07): only RESOURCE work areas — the field the PLAYER draws. Was matching EVERY
+            // owned area, which shipped 90+ cosmetic Surface/Space sub-areas (Grass/Sand/Walking/Hangaround/
+            // Park) per building — those are regenerated locally by the SUBAREAS handler when the owner
+            // syncs, so re-shipping them just caused unmatchable rewrites/deletes on the client (the "farm
+            // didn't sync" mess Bruno saw).
+            //
+            // v68 AREA-FIX (fazenda-do-CLIENT-nunca-carimba, 2-sim 09/07 00:37): scope was hard-coded to
+            // Game.Areas.Extractor ONLY. But the two area types AreaSpawnSystem grows objects into are
+            // Extractor OR Storage (decomp AreaSpawnSystem.cs:151-153; ExtractorArea.cs:34 adds Extractor,
+            // StorageArea.cs:24 adds Storage) — a livestock/pasture or storage-yard field can be Storage-only
+            // and was INVISIBLE to this query, so its polygon never shipped (docs/game-map/dossiers/area.md:
+            // 250-255 flagged this exact gap; AreaSubObjectSystems.cs:122-126 already scopes its sub-object
+            // scan to Any{Extractor,Storage} — this mirrors it). Surface/Space cosmetic sub-areas carry
+            // NEITHER, so they stay excluded (the v51 concern above still holds).
             _workAreas = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
                 {
                     ComponentType.ReadOnly<Game.Areas.Area>(),
                     ComponentType.ReadOnly<Game.Areas.Node>(),
-                    ComponentType.ReadOnly<Game.Areas.Extractor>(),
                     ComponentType.ReadOnly<Owner>(),
                     ComponentType.ReadOnly<PrefabRef>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.Extractor>(),
+                    ComponentType.ReadOnly<Game.Areas.Storage>(),
                 },
                 None = new[]
                 {
@@ -111,17 +124,22 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Game.Areas.MapTile>(),
                 },
             });
-            // Same scope as _workAreas: only resource FIELDS (Extractor), never cosmetic Surface/Space.
+            // Same scope as _workAreas: resource work areas only (Extractor OR Storage — see v68 note
+            // above), never cosmetic Surface/Space.
             _appliedAreas = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
                 {
                     ComponentType.ReadOnly<Game.Areas.Area>(),
                     ComponentType.ReadOnly<Game.Areas.Node>(),
-                    ComponentType.ReadOnly<Game.Areas.Extractor>(),
                     ComponentType.ReadOnly<Owner>(),
                     ComponentType.ReadOnly<PrefabRef>(),
                     ComponentType.ReadOnly<Applied>(),
+                },
+                Any = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.Extractor>(),
+                    ComponentType.ReadOnly<Game.Areas.Storage>(),
                 },
                 None = new[]
                 {
@@ -208,7 +226,22 @@ namespace CS2M.Sync
                 },
             });
 
-            RequireAnyForUpdate(_appliedAreas, _appliedStandalone, _deletedAreas);
+            // v68 AREA-FIX (ROOT CAUSE of "fazenda-do-CLIENT-nunca-carimba", 2-sim 09/07 00:37): the
+            // ~1 Hz polygon-diff scanner (ScanWorkAreaEdits, driven by _scanCounter ticking every OnUpdate)
+            // is the ONLY path that ships a SESSION-BORN field's initial shape — a field a CLIENT placed is
+            // created ON THE HOST via a CreationDefinition (RemotePlacementApplySystem.CreateSubAreas), so
+            // it gains Created (never Applied) and carries CS2M_RemotePlaced → it is NEVER in _appliedAreas
+            // and can only heal through this scanner. BUT the scanner's own query (_workAreas) was NOT in
+            // RequireAnyForUpdate — only the three TRANSIENT queries were (Applied/standalone/Deleted are
+            // 1-frame tags, empty in steady state). So once world-load churn subsided, OnUpdate was gated
+            // OFF entirely: _scanCounter froze, the scanner never ran, and the field never shipped — exactly
+            // the observed symptom (ZERO [Area] DETECT+SEND and ZERO give-up warnings over ~3 min, because
+            // the whole OnUpdate body, warnings included, never executed). _workAreas is persistently
+            // non-empty whenever any farm/extractor/storage field exists, so listing it here keeps OnUpdate
+            // alive every frame; the ~1 Hz throttle still lives in _scanCounter, and idle cost is tiny
+            // (the create loop iterates the usually-empty _appliedAreas; standalone/deleted early-out on
+            // IsEmptyIgnoreFilter).
+            RequireAnyForUpdate(_appliedAreas, _appliedStandalone, _deletedAreas, _workAreas);
             CS2M.Log.Info("[Area] AreaEditDetectorSystem created");
         }
 
@@ -322,6 +355,14 @@ namespace CS2M.Sync
         {
             _scanPasses++;
             NativeArray<Entity> areas = _workAreas.ToEntityArray(Allocator.Temp);
+            // DIAGNOSTIC (v68, discrete — ~1/min): the scanner ran but the Extractor/Storage query holds
+            // no field. If a farm is visible in a BldgDump while this keeps firing, the field's area is
+            // neither Extractor nor Storage (a scope gap beyond v68) — the one signal that would prove it.
+            if (isServer && areas.Length == 0 && _scanPasses % 60 == 0)
+            {
+                CS2M.Log.Info("[Area] scan: zero work areas in query (no Extractor/Storage field present)");
+            }
+
             try
             {
                 foreach (Entity area in areas)
@@ -377,25 +418,17 @@ namespace CS2M.Sync
                         // HOST placed THIS session, whose field spawned with a shape the client can't match
                         // → ship the baseline so the client rewrites to the host's exact polygon.
                         //
-                        // v58 AREA-FIX (campo-de-fazenda-diverge-CLIENT-plantou, 2-sim 07/07): that rule is
-                        // wrong for a field whose anchor carries CS2M_RemotePlaced — that anchor (the farm's
-                        // building/placeholder) was materialised by RemotePlacementApplySystem.ApplyOne
-                        // because a REMOTE player placed it, and the field itself was just spawned by
-                        // RemotePlacementApplySystem.CreateSubAreas using the PREFAB's fixed/default sub-area
-                        // geometry (not what the remote player actually drew). The SENDER's own
-                        // AreaEditDetectorSystem create-detect loop (the Applied-tag, non-isServer-gated
-                        // block above OnUpdate) already shipped — or is about to ship — the real polygon, and
-                        // AreaEditApplySystem.ApplyOne will rewrite THIS exact entity to match within a few
-                        // frames (see its park/retry queue). If THIS scan lands in that narrow window it would
-                        // firstSight-ship the still-default shape and stamp it over the polygon the other PC
-                        // just sent — a race that reproduces intermittently (confirmed: this exact session's
-                        // farm dodged it, an earlier session didn't — host/client node COUNTS matched at 4 but
-                        // shapes differed, host's centroid sitting close to the owner like a default shape
-                        // would). Baseline silently instead and let a LATER scan (which will observe the
-                        // post-rewrite hash) decide whether anything really changed.
-                        bool ownerIsRemotePlaced = anchor != Entity.Null
-                            && EntityManager.HasComponent<CS2M_RemotePlaced>(anchor);
-                        if (_scanPasses <= WarmupScans || ownerIsRemotePlaced)
+                        // v67 AREA-FIX (fazenda-do-CLIENT-nunca-estampa, 2-sim 09/07 00:14): the old v58 gate
+                        // also skipped fields whose anchor carries CS2M_RemotePlaced, assuming "the SENDER's
+                        // own detector already shipped the real polygon". That assumption went stale when the
+                        // create-detect loop became host-gated (the `if (!isServer) continue` above): a field
+                        // whose farm was placed by a CLIENT is remote-placed ON THE HOST, and the client is
+                        // forbidden from shipping — so NO machine ever shipped the polygon and the field could
+                        // never heal (session 00:09-00:18: zero [Area] DETECT for a client-placed livestock
+                        // farm). This scan only runs on the host (isServer gate above), the client can't race
+                        // us anymore, and the client-side apply stamps WorkAreaHash so nothing bounces —
+                        // therefore: warmup is the only remaining reason to stay silent.
+                        if (_scanPasses <= WarmupScans)
                         {
                             WorkAreaHash.Set(area, hash);
                             _pendingAnchorScans.Remove(area);
@@ -443,6 +476,16 @@ namespace CS2M.Sync
                             else
                             {
                                 _pendingAnchorScans[area] = attempts;
+                                // DIAGNOSTIC (v68, discrete): progress every 10 attempts so a stuck first-
+                                // sight anchor (H1: owner/placeholder never resolving) is visible BEFORE the
+                                // give-up above, instead of ~30 s of silence.
+                                if (attempts % 10 == 0)
+                                {
+                                    Entity rawOwner = EntityManager.HasComponent<Owner>(area)
+                                        ? EntityManager.GetComponentData<Owner>(area).m_Owner
+                                        : Entity.Null;
+                                    CS2M.Log.Info($"[Area] first-sight anchor still unresolved attempt={attempts}/{AnchorPendingScanLimit} entity={area.Index} rawOwner={rawOwner.Index} anchorResolved={anchor != Entity.Null}");
+                                }
                             }
                         }
 
@@ -801,11 +844,13 @@ namespace CS2M.Sync
                     if (EntityManager.HasComponent<Owner>(area))
                     {
                         // CONTRACT SCOPE (same rule as the create/edit queries): an owned area is only
-                        // synced when it is a resource FIELD (Extractor). Cosmetic sub-areas (Hangaround/
-                        // Walking/Grass…) are regenerated LOCALLY per machine — the sim swaps them while
-                        // the owner lives, and shipping that delete removed the OTHER PC's healthy local copy
-                        // (the areas(hash) drift Bruno hit on 05/07).
-                        if (!EntityManager.HasComponent<Game.Areas.Extractor>(area))
+                        // synced when it is a resource work area (Extractor OR Storage — v68, see the
+                        // _workAreas note in OnCreate). Cosmetic sub-areas (Hangaround/Walking/Grass…) are
+                        // regenerated LOCALLY per machine — the sim swaps them while the owner lives, and
+                        // shipping that delete removed the OTHER PC's healthy local copy (the areas(hash)
+                        // drift Bruno hit on 05/07).
+                        if (!EntityManager.HasComponent<Game.Areas.Extractor>(area)
+                            && !EntityManager.HasComponent<Game.Areas.Storage>(area))
                         {
                             continue;
                         }

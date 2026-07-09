@@ -257,6 +257,7 @@ namespace CS2M.Sync
         private TaxSystem _taxSystem;
         private CityServiceBudgetSystem _budgetSystem;
         private TerrainSystem _terrain;
+        private WaterSystem _water;
         private UpdateSystem _updateSystem;
 
         private EntityQuery _treeQuery;
@@ -390,6 +391,7 @@ namespace CS2M.Sync
             _taxSystem = World.GetOrCreateSystemManaged<TaxSystem>();
             _budgetSystem = World.GetOrCreateSystemManaged<CityServiceBudgetSystem>();
             _terrain = World.GetOrCreateSystemManaged<TerrainSystem>();
+            _water = World.GetOrCreateSystemManaged<WaterSystem>();
             _updateSystem = World.GetOrCreateSystemManaged<UpdateSystem>();
 
             _treeQuery = GetEntityQuery(new EntityQueryDesc
@@ -3801,13 +3803,17 @@ namespace CS2M.Sync
             {
                 var candidate = baseOrigin + new float3((k % 8) * quadrantStep, 0f, (k / 8) * quadrantStep);
                 var sceneCenter = candidate + new float3(150f, 0f, 200f);
-                if (IsQuadrantFree(sceneCenter, freeRadius))
+                if (!IsQuadrantFree(sceneCenter, freeRadius)) { continue; }
+                if (!IsQuadrantDry(candidate, sceneCenter))
                 {
-                    chosenOrigin = candidate;
-                    foundFree = true;
-                    L($"[Auto] TRIREPRO quadrant k={k} origem=({candidate.x:F0},{candidate.z:F0})");
-                    break;
+                    L($"[Auto] TRIREPRO quadrant k={k} REJECTED (water)");
+                    continue;
                 }
+
+                chosenOrigin = candidate;
+                foundFree = true;
+                L($"[Auto] TRIREPRO quadrant k={k} origem=({candidate.x:F0},{candidate.z:F0}) dry=true");
+                break;
             }
 
             if (!foundFree)
@@ -3856,6 +3862,35 @@ namespace CS2M.Sync
                 return true;
             }
             finally { ents.Dispose(); }
+        }
+
+        /// <summary>Dry-ground check for the same quadrant search: true iff water depth is negligible
+        /// (&lt;0.05m) at 5 sample points spanning the candidate scene — <paramref name="sceneCenter"/>
+        /// plus the 4 approximate corners of the footprint (<paramref name="candidate"/> and
+        /// candidate+(300,0,0)/(0,0,300)/(300,0,300)). Saegertown has a lake/sea near some of
+        /// TriRepro_Setup's quadrant offsets; <see cref="IsQuadrantFree"/> alone (road-proximity only)
+        /// happily walks a scene straight onto open water. Follows the same
+        /// GetSurfaceData(out deps)/deps.Complete() pattern the game itself uses to read water data on
+        /// the main thread (e.g. decomp CameraController.cs:369-370) before sampling with
+        /// WaterUtils.SampleDepth — test code, so completing the dependency inline is fine.</summary>
+        private bool IsQuadrantDry(float3 candidate, float3 sceneCenter)
+        {
+            var waterData = _water.GetSurfaceData(out var deps);
+            deps.Complete();
+            if (!waterData.isCreated) { return true; } // no water sim data loaded — don't block on it
+
+            float3 p0 = sceneCenter;
+            float3 p1 = candidate;
+            float3 p2 = candidate + new float3(300f, 0f, 0f);
+            float3 p3 = candidate + new float3(0f, 0f, 300f);
+            float3 p4 = candidate + new float3(300f, 0f, 300f);
+            const float wetDepth = 0.05f;
+
+            return WaterUtils.SampleDepth(ref waterData, p0) < wetDepth
+                && WaterUtils.SampleDepth(ref waterData, p1) < wetDepth
+                && WaterUtils.SampleDepth(ref waterData, p2) < wetDepth
+                && WaterUtils.SampleDepth(ref waterData, p3) < wetDepth
+                && WaterUtils.SampleDepth(ref waterData, p4) < wetDepth;
         }
 
         /// <summary>Step 1: tag the two dead-end nodes side 1 just built (by proximity — this is the
@@ -4109,8 +4144,12 @@ namespace CS2M.Sync
             // until a free spot is found.
             const float placeRadius = 150f;
             float3 candidate = _triOrigin + new float3(200f, 0f, -300f);
-            for (int k = 0; k < 8 && !IsQuadrantFree(candidate, placeRadius); k++)
+            for (int k = 0; k < 8 && !(IsQuadrantFree(candidate, placeRadius) && IsQuadrantDry(candidate, candidate)); k++)
             {
+                if (IsQuadrantFree(candidate, placeRadius))
+                {
+                    L($"[Auto] TRIREPRO PHASE6 quadrant k={k} REJECTED (water)");
+                }
                 candidate = _triOrigin + new float3(200f + (k % 4) * 180f, 0f, -300f - (k / 4) * 180f);
             }
 
@@ -4127,7 +4166,7 @@ namespace CS2M.Sync
                 RandomSeed = 5099,
             };
             L($"[Auto] TRIREPRO PHASE6 farm object INJECT name={cmd.PrefabName} " +
-              $"pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) syncId={cmd.SyncId}");
+              $"pos=({pos.x:F0},{pos.y:F0},{pos.z:F0}) syncId={cmd.SyncId} dry=true");
             Command.SendToAll?.Invoke(cmd);          // client builds the SAME farm over the wire
             RemotePlacementQueue.EnqueueObject(cmd); // host applies too, so BOTH sides spawn a field
 
@@ -5463,8 +5502,12 @@ namespace CS2M.Sync
 
             const float placeRadius = 150f;
             float3 candidate = anchor + new float3(1500f, 0f, -300f);
-            for (int k = 0; k < 8 && !IsQuadrantFree(candidate, placeRadius); k++)
+            for (int k = 0; k < 8 && !(IsQuadrantFree(candidate, placeRadius) && IsQuadrantDry(candidate, candidate)); k++)
             {
+                if (IsQuadrantFree(candidate, placeRadius))
+                {
+                    L($"[Auto] CLIENTFARM quadrant k={k} REJECTED (water)");
+                }
                 candidate = anchor + new float3(1500f + (k % 4) * 180f, 0f, -300f - (k / 4) * 180f);
             }
 

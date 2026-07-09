@@ -58,6 +58,10 @@ namespace CS2M.Sync
             { "ZoneBlockAuthorityCommand", SyncClass.HostAuthoritative },
             // ---- Areas (districts / farm fields / forestry / extraction lots / map tiles) -----------
             { "AreaEditCommand",        SyncClass.WorldContract },
+            // Crops/animals/resource piles the HOST's AreaSpawnSystem grows inside a work area (the client's
+            // is suppressed): a host-derived value mirrored to clients, never player-authored — same class
+            // as ZoneBlockAuthorityCommand. Still needs a handler (see AreaSubObjectHandler).
+            { "AreaSubObjectCommand",   SyncClass.HostAuthoritative },
             { "DistrictCommand",        SyncClass.WorldContract },
             { "ServiceDistrictCommand", SyncClass.WorldContract },
             { "TilePurchaseCommand",    SyncClass.WorldContract },

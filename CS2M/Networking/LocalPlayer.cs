@@ -442,6 +442,7 @@ namespace CS2M.Networking
             // Drop any Updated re-stamps queued for next frame (DeferredUpdateMarker.cs) so a
             // reconnect doesn't carry over stale entity handles from the previous session.
             Sync.DeferredUpdated.Clear();
+            Sync.DeferredCreated.Clear();
             Sync.RemoteJoinState.Clear();
 
             // Fork features: drop their queues + shared snapshots so a reconnect starts clean.

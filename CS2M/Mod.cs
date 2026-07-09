@@ -128,6 +128,13 @@ namespace CS2M
             // overload only — UpdateBefore<A,B> double-registers the anchor (v50 lesson below).
             updateSystem.UpdateBefore<Sync.DeferredUpdatedSystem>(SystemUpdatePhase.Modification1);
 
+            // v66.5 CRASH FIX: drains DeferredCreated at the START of every frame too, re-stamping
+            // Created on blocks ZoneBlockAuthorityApplySystem cloned last frame so Game.Zones.SearchSystem
+            // (Modification5) ADDs them to the block quadtree instead of faulting on an Update of an
+            // item it never saw created — the "receiver of the road crashes" native crash. Single-type
+            // overload, same rule as DeferredUpdatedSystem above.
+            updateSystem.UpdateBefore<Sync.DeferredCreatedSystem>(SystemUpdatePhase.Modification1);
+
             // Object placement sync (buildings/props/trees placed with the Object/Line tool).
             // Detector runs just before ModificationEnd (where Applied is visible, matching
             // Anarchy's AnarchyPlopSystem). The remote-apply system runs at Modification5,
@@ -335,6 +342,13 @@ namespace CS2M
             // Work-area edit sync (farm fields, mine dig zones — building-owned Areas).
             updateSystem.UpdateBefore<AreaEditDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<AreaEditApplySystem>(SystemUpdatePhase.Modification1);
+
+            // Area SUB-OBJECT sync (crops/animals/resource piles the host's AreaSpawnSystem grows inside
+            // Extractor/Storage fields — suppressed on the client, so the host mirrors them). Apply CREATES
+            // objects via CreationDefinition+ObjectDefinition consumed by GenerateObjectsSystem@Modification1,
+            // so it must run before Modification1 (same slot as the placement/area applies).
+            updateSystem.UpdateBefore<AreaSubObjectDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<AreaSubObjectApplySystem>(SystemUpdatePhase.Modification1);
 
             // Transport-line sync (create/re-route/color; delete rides DeleteCommand, schedule /
             // out-of-service / vehicle count / ticket price ride the policy sync, names ride the

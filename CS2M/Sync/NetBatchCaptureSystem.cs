@@ -15,11 +15,15 @@ using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
-    /// <summary>Global toggle for the AtomicBatch net path. ON BY DEFAULT since v66 (07/07 night 2-sim:
-    /// with the batch path on, the roads/nodes radar stayed SILENT for the entire session — the first
-    /// run ever with zero road drift — while the legacy reconstruct path split junctions up to 48 m
-    /// apart on the receiver and poisoned every derived layer downstream). Set env <c>CS2M_ATOMIC=0</c>
-    /// to fall back to the legacy NetDetector→NetPlaceApply reconstruct path. When ON,
+    /// <summary>Global toggle for the AtomicBatch net path. BACK TO OFF BY DEFAULT in v66.3 (env
+    /// <c>CS2M_ATOMIC=1</c> to opt in). It was flipped ON in v66 for zero road drift, but 2-sim field
+    /// testing showed it CRASHES THE RECEIVER (host or client — whoever did NOT draw the road) when a
+    /// batch materializes a complex junction (a degree-4 node + multiple deletes in one frame): the
+    /// game's own Burst net pipeline (GenerateEdges/NodeAlign) faults on the topology the batch apply
+    /// leaves mid-frame. It is a native crash — our per-batch try/catch can't catch it — so the fix is
+    /// to not use the path until the apply is made topology-safe. The legacy NetDetector→NetPlaceApply
+    /// reconstruct path is availability-proven (weeks of play, no crash); the v66 zone SET-reconcile
+    /// (host owns the grid) converges zones on top of it regardless of small junction drift. When ON,
     /// <see cref="NetBatchCaptureSystem"/> is the only net sender and the legacy NetDetectorSystem +
     /// NetEditDetectorSystem early-return.</summary>
     public static class AtomicBatch
@@ -32,6 +36,9 @@ namespace CS2M.Sync
             {
                 if (_state < 0)
                 {
+                    // v66.5: back ON by default. The receiver crash blamed on the batch was actually the
+                    // zone reconcile's block create/delete (NativeQuadTree), now fixed at the root; the
+                    // batch path gives zero road drift, which is what makes zone blocks derive identically.
                     _state = System.Environment.GetEnvironmentVariable("CS2M_ATOMIC") == "0" ? 0 : 1;
                 }
 

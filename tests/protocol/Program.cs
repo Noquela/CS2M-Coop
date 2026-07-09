@@ -196,6 +196,29 @@ namespace CS2MTests
         public float CenterZ { get; set; }
     }
 
+    public class AreaSubObjectCommand : CommandBase
+    {
+        public ulong OwnerAnchorId { get; set; }
+        public string OwnerAnchorPrefabName { get; set; }
+        public float OwnerX { get; set; }
+        public float OwnerY { get; set; }
+        public float OwnerZ { get; set; }
+        public ulong BuildingSyncId { get; set; }
+        public byte[] Ops { get; set; }
+        public ulong[] Ids { get; set; }
+        public string[] PrefabTypes { get; set; }
+        public string[] PrefabNames { get; set; }
+        public float[] PosX { get; set; }
+        public float[] PosY { get; set; }
+        public float[] PosZ { get; set; }
+        public float[] RotX { get; set; }
+        public float[] RotY { get; set; }
+        public float[] RotZ { get; set; }
+        public float[] RotW { get; set; }
+        public float[] Elevation { get; set; }
+        public int[] Seeds { get; set; }
+    }
+
     public class RouteCreateCommand : CommandBase
     {
         public ulong SyncId { get; set; }
@@ -602,6 +625,22 @@ namespace CS2MTests
             RoundTrip(opts, new LoanCommand { Amount = 250000 }, c => c.Amount == 250000);
             RoundTrip(opts, new RenameCommand { TargetKind = 1, Number = 3, TargetPrefabName = "Bus Line", Name = "Linha Centro" }, c => c.TargetKind == 1 && c.Name == "Linha Centro");
             RoundTrip(opts, new AreaEditCommand { OwnerPrefabName = "GrainFarm01", PrefabName = "Grain Field", Xs = new[] { 1f, 2f, 3f }, Ys = new[] { 0f, 0f, 0f }, Zs = new[] { 4f, 5f, 6f }, Els = new[] { -3.4e38f, 0f, 0f }, Delete = false, CenterX = 2f, CenterZ = 5f }, c => c.PrefabName == "Grain Field" && c.Xs.Length == 3 && c.CenterZ == 5f);
+
+            // Area sub-object batch: mixed create/delete ops as parallel primitive arrays (crops/piles).
+            RoundTrip(opts, new AreaSubObjectCommand
+            {
+                OwnerAnchorId = 0xABCDEF01UL, OwnerAnchorPrefabName = "Wheat Field", OwnerX = 87f, OwnerY = 478f, OwnerZ = -9f,
+                BuildingSyncId = 0x55UL,
+                Ops = new byte[] { 0, 0, 1 },
+                Ids = new[] { 100UL, 101UL, 102UL },
+                PrefabTypes = new[] { "StaticObjectPrefab", "StaticObjectPrefab", "StaticObjectPrefab" },
+                PrefabNames = new[] { "Wheat", "Wheat", "Wheat" },
+                PosX = new[] { 80f, 82f, 84f }, PosY = new[] { 478f, 478f, 478f }, PosZ = new[] { -5f, -6f, -7f },
+                RotX = new[] { 0f, 0f, 0f }, RotY = new[] { 0f, 0.7f, 0f }, RotZ = new[] { 0f, 0f, 0f }, RotW = new[] { 1f, 0.7f, 1f },
+                Elevation = new[] { 0f, 0f, 0f }, Seeds = new[] { 11, 22, 33 },
+            }, c => c.Ops.Length == 3 && c.Ops[2] == 1 && c.Ids[1] == 101UL && c.PrefabNames[0] == "Wheat"
+                    && Math.Abs(c.PosZ[2] - (-7f)) < 0.01f && c.OwnerAnchorId == 0xABCDEF01UL && c.BuildingSyncId == 0x55UL
+                    && Math.Abs(c.RotY[1] - 0.7f) < 0.01f && c.Seeds[2] == 33);
             RoundTrip(opts, new RouteCreateCommand { SyncId = 42UL, PrefabType = "TransportLinePrefab", PrefabName = "Bus Line", Complete = true, ColorR = 10, ColorG = 20, ColorB = 30, ColorA = 255, Number = 7, WpX = new[] { 1f, 2f, 3f }, WpY = new[] { 0f, 0f, 0f }, WpZ = new[] { 9f, 8f, 7f }, WpHasConn = new byte[] { 1, 0, 1 }, WpConnId = new ulong[] { 5UL, 0UL, 0UL }, WpConnX = new[] { 1f, 0f, 3f }, WpConnZ = new[] { 9f, 0f, 7f } }, c => c.Complete && c.Number == 7 && c.WpX.Length == 3 && c.WpHasConn[2] == 1 && c.WpConnId[0] == 5UL);
             RoundTrip(opts, new RouteColorCommand { SyncId = 42UL, PrefabName = "Bus Line", Number = 7, ColorR = 200, ColorG = 100, ColorB = 50, ColorA = 255 }, c => c.Number == 7 && c.ColorR == 200);
             RoundTrip(opts, new DeleteCommand { SyncId = 0UL, TargetKind = 1, PrefabName = "Bus Line", Number = 7 }, c => c.TargetKind == 1 && c.Number == 7);
