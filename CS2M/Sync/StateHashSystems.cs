@@ -1286,6 +1286,16 @@ namespace CS2M.Sync
                     // hash is blind to the divergence (AreaInContract filtering / polygon shape not
                     // fully folded) — same lesson as the flags-only zone split.
                     StateHash.DumpAreas(EntityManager, _areas, "CLIENT");
+                    // Nodes+edges too, UNCONDITIONALLY (not only under drift): when the NetSet reconcile
+                    // converges the network there is no drift, so the drift-gated dump below never fires
+                    // and statediff has no CLIENT side to pair — making a SUCCESSFUL convergence look like
+                    // "sem dados" instead of delta=0. Dump every sample under NODEDUMP so validation always
+                    // has both sides. (Same reasoning as blocks/areas above.)
+                    StateHash.DumpNodes(EntityManager, _nodes, "CLIENT");
+                    StateHash.DumpEdges(EntityManager, _edges, "CLIENT");
+                    // Buildings too (farm sub-structures grown inside a field): AreaSubObject sync converges
+                    // them without a buildings-hash drift, so pair both sides unconditionally for statediff.
+                    StateHash.DumpBuildings(EntityManager, _buildings, _prefabs, "CLIENT");
                 }
 
                 if (drifts.Count > 0)

@@ -28,7 +28,10 @@ namespace CS2M.Sync
                     _state = System.Environment.GetEnvironmentVariable("CS2M_AREAOBJ") == "0" ? 0 : 1;
                 }
 
-                return _state == 1;
+                // Stand down while the client grows its own field (CS2M_AREAGROW, option A): the host mirror
+                // and the local spawner would otherwise BOTH create crops (different RNG positions -> no
+                // adopt -> duplicates). The legacy path (CS2M_AREAGROW=0) keeps this mirror active.
+                return _state == 1 && !ExtractorGrowGate.Enabled;
             }
         }
     }
@@ -81,6 +84,7 @@ namespace CS2M.Sync
         private EntityQuery _workAreas;
         private int _scanCounter;
         private int _lastConnectedCount = 1;
+        private int _diagScans;
         private const int OpsPerCommand = 64;
 
         private struct SentSub
@@ -198,6 +202,11 @@ namespace CS2M.Sync
             // Per-area create batches keyed by area entity; deletes grouped by stored anchor id.
             var deletes = new Dictionary<ulong, OpBatch>();
 
+            // Discrete per-minute diagnostic (proves the pipeline sees content, and why any is dropped —
+            // e.g. all-buildings would read syncable=0/buildings=0 with the OLD code; now buildings flow).
+            int diagAreas = 0, diagSub = 0, diagSyncable = 0, diagBuildings = 0,
+                diagSkipSecondary = 0, diagSkipOther = 0;
+
             NativeArray<Entity> areas = _workAreas.ToEntityArray(Allocator.Temp);
             try
             {
@@ -209,15 +218,33 @@ namespace CS2M.Sync
                         continue;
                     }
 
+                    diagAreas++;
                     OpBatch creates = null;
                     DynamicBuffer<Game.Objects.SubObject> subs =
                         EntityManager.GetBuffer<Game.Objects.SubObject>(area, true);
+                    diagSub += subs.Length;
                     for (int i = 0; i < subs.Length; i++)
                     {
                         Entity sub = subs[i].m_SubObject;
                         if (!IsSyncableSubObject(sub))
                         {
+                            if (sub != Entity.Null && EntityManager.Exists(sub)
+                                && EntityManager.HasComponent<Game.Objects.Secondary>(sub))
+                            {
+                                diagSkipSecondary++;
+                            }
+                            else
+                            {
+                                diagSkipOther++;
+                            }
+
                             continue;
+                        }
+
+                        diagSyncable++;
+                        if (EntityManager.HasComponent<Game.Buildings.Building>(sub))
+                        {
+                            diagBuildings++;
                         }
 
                         current.Add(sub);
@@ -316,6 +343,18 @@ namespace CS2M.Sync
                     FlushDelete(kv.Value);
                 }
             }
+
+            // ~1 line/minute (Scan is ~1 Hz). Dense enough to root-cause an empty client field next
+            // session without guessing: areas matched, sub-objects enumerated, how many were syncable
+            // (and of those, buildings — the farm/livestock content), and why the rest were dropped.
+            if (++_diagScans >= 60)
+            {
+                _diagScans = 0;
+                CS2M.Log.Info(
+                    $"[AreaObj] scan areas={diagAreas} subObjects={diagSub} syncable={diagSyncable} " +
+                    $"buildings={diagBuildings} sent={_sent.Count} " +
+                    $"skip={{secondary:{diagSkipSecondary},other:{diagSkipOther}}}");
+            }
         }
 
         private void FlushCreate(OpBatch b)
@@ -330,8 +369,18 @@ namespace CS2M.Sync
             CS2M.Log.Info($"[AreaObj] SEND delete ops={b.Count} anchor={b.AnchorId} prefab={b.AnchorPrefab}");
         }
 
-        /// <summary>Only real ground objects grown by the sim: has Transform+PrefabRef, is a
-        /// Game.Objects.Object, not a building (buildings sync via placement), not Secondary/Temp/Deleted.</summary>
+        /// <summary>A real object grown by the sim inside this work area: has Object+Transform+PrefabRef,
+        /// is not a derived prefab sub-object (<see cref="Game.Objects.Secondary"/>), is not mid-placement /
+        /// player-authored (<see cref="Applied"/>), and is not Temp/Deleted.
+        /// <para>Buildings ARE included. A livestock/farm pasture grows its content as BUILDING sub-objects
+        /// (barns, sheds, silos): decomp AreaSpawnSystem.cs:233-263 selects a prefab from the AREA prefab's
+        /// SubObject buffer — which may carry <c>BuildingData</c> (:253/:270) — and SpawnObject (:566) owns
+        /// it to the AREA; GenerateObjectsSystem.cs:1225/1236 then materialises it with the building
+        /// archetype + <c>Owner(area)</c>. Being sim-grown it has NO placement sync, so the previous
+        /// <c>Building</c> exclusion left the client's fenced pasture empty (host logged ZERO SEND). It is
+        /// safe to include: everything here is a sub-object OWNED BY the area (never the farm building
+        /// itself, which OWNS the area), and PlacementDetectorSystem excludes <c>Owner</c> objects, so a
+        /// player building can never be an area sub-object.</para></summary>
         private bool IsSyncableSubObject(Entity sub)
         {
             return sub != Entity.Null
@@ -339,8 +388,8 @@ namespace CS2M.Sync
                    && EntityManager.HasComponent<Game.Objects.Object>(sub)
                    && EntityManager.HasComponent<Game.Objects.Transform>(sub)
                    && EntityManager.HasComponent<PrefabRef>(sub)
-                   && !EntityManager.HasComponent<Game.Buildings.Building>(sub)
                    && !EntityManager.HasComponent<Game.Objects.Secondary>(sub)
+                   && !EntityManager.HasComponent<Applied>(sub)
                    && !EntityManager.HasComponent<Temp>(sub)
                    && !EntityManager.HasComponent<Deleted>(sub);
         }

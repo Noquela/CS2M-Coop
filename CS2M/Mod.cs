@@ -111,6 +111,17 @@ namespace CS2M
             updateSystem.UpdateAt<PlayerCursorSystem>(SystemUpdatePhase.Rendering);
             // v55: live tool preview — see a friend drawing a road before they place it.
             updateSystem.UpdateAt<Sync.ToolPreviewSystem>(SystemUpdatePhase.Rendering);
+            // v67 NATIVE build preview (gated CS2M_PREVIEW, default ON): stream the LOCAL tool's in-progress
+            // ghost so every other PC re-materializes the SAME native ghost (real mesh/nodes/snapping) via the
+            // game's own Generate* pipeline — WITHOUT CreationFlags.Permanent and WITHOUT any apply, so it can
+            // never become a real build (stays Temp; receiver-managed lifecycle). Capture at Rendering (works
+            // while paused, same slot as ToolPreviewSystem); apply BEFORE Modification1 so GenerateObjects/
+            // Nodes/Edges consume the definitions this same frame (same slot as NetPlaceApplySystem/
+            // NetToolReplaySystem); tag AT Modification5 so it sees the ghosts Generate* just built this frame
+            // (same slot logic as NetToolReplayApplySystem). Single-type overloads only (double-register lesson).
+            updateSystem.UpdateAt<Sync.PreviewCaptureSystem>(SystemUpdatePhase.Rendering);
+            updateSystem.UpdateBefore<Sync.PreviewApplySystem>(SystemUpdatePhase.Modification1);
+            updateSystem.UpdateAt<Sync.PreviewTagSystem>(SystemUpdatePhase.Modification5);
             // v55: co-op sync-health badge (StateHash divergence -> user-facing trust signal).
             updateSystem.UpdateAt<Sync.SyncStatusSystem>(SystemUpdatePhase.Rendering);
             // v55: always-visible player panel (roster + color + latency).
@@ -237,6 +248,17 @@ namespace CS2M
             updateSystem.UpdateBefore<NetBatchCaptureSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<NetBatchApplySystem>(SystemUpdatePhase.Modification1);
 
+            // NetSet host-authoritative net-graph reconcile (gated CS2M_NETSET, default OFF): the host ships
+            // the settled authoritative node+edge SET of a dirty region; the client forces its own graph to
+            // match BY IDENTITY (heal/create/delete). The arête analogue of ZoneBlockAuthority ("host owns the
+            // grid" for zone blocks) — a CORRECTION LAYER over the incremental NetBatch sync, so the client
+            // apply is registered at the SAME Modification1 slot as (and intended to run after)
+            // NetBatchApplySystem: both feed GenerateNodes@Mod1/GenerateEdges@Mod2 this frame, and NetSet
+            // reconciles against state materialized on prior frames (order between the two isn't correctness-
+            // critical). Detector shares the ModificationEnd detector slot (geometry has settled by then).
+            updateSystem.UpdateBefore<NetSetAuthoritySystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<NetSetApplySystem>(SystemUpdatePhase.Modification1);
+
             // Host-authoritative node geometry (gated CS2M_NODEPIN=1): on the client, snap identified nodes
             // back to the host's coord so the <1 m junction drift (CS2 non-determinism) that breaks zone-block
             // matching converges. Same slot so GenerateNodes/Edges re-derive geometry from the pin this frame.
@@ -349,6 +371,23 @@ namespace CS2M
             // so it must run before Modification1 (same slot as the placement/area applies).
             updateSystem.UpdateBefore<AreaSubObjectDetectorSystem>(SystemUpdatePhase.ModificationEnd);
             updateSystem.UpdateBefore<AreaSubObjectApplySystem>(SystemUpdatePhase.Modification1);
+
+            // Area SURFACE sync (the tilled/plowed soil patch — a Game.Areas.Surface sub-area — the host's
+            // AreaSpawnSystem grows in Extractor/Storage fields; the client's spawner is suppressed, so the
+            // host mirrors it). Apply CREATES areas via CreationDefinition + Node polygon consumed by
+            // GenerateAreasSystem@Modification1, so it must run before Modification1 (same slot as the area/
+            // sub-object applies).
+            updateSystem.UpdateBefore<AreaSurfaceDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<AreaSurfaceApplySystem>(SystemUpdatePhase.Modification1);
+
+            // Extractor mirror (host-authoritative Game.Areas.Extractor — the DRIVER of a farm/forestry/ore
+            // field's tilled-soil size; decomp AreaSpawnSystem.cs:182-188). Host detects extraction state
+            // changes (~1 Hz, change-detect); client writes them onto its area + stamps Updated so its
+            // (un-suppressed, CS2M_AREAGROW) AreaSpawnSystem re-derives the field to the host's size. Apply
+            // runs before Modification1 so the Updated survives into the sim consumers this frame (same slot
+            // as the area/surface applies); detector shares the ModificationEnd detector slot.
+            updateSystem.UpdateBefore<ExtractorDetectorSystem>(SystemUpdatePhase.ModificationEnd);
+            updateSystem.UpdateBefore<ExtractorApplySystem>(SystemUpdatePhase.Modification1);
 
             // Transport-line sync (create/re-route/color; delete rides DeleteCommand, schedule /
             // out-of-service / vehicle count / ticket price ride the policy sync, names ride the

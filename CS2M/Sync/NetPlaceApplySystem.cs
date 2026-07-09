@@ -14,9 +14,10 @@ using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
-    /// <summary>Global toggle for node-position healing on the LEGACY (default) net path. OFF by default
-    /// (env <c>CS2M_NODEHEAL=1</c>) until validated on a 2-sim — see <see cref="NetPlaceApplySystem"/>.
-    /// HealNodePosition for the mechanism this unblocks.</summary>
+    /// <summary>Global toggle for node-position healing on the LEGACY (default) net path. ON by default
+    /// since 2026-07-07 — validated on a 2-sim (see <see cref="Enabled"/>). Env <c>CS2M_NODEHEAL=0</c>
+    /// disables it — see <see cref="NetPlaceApplySystem"/>.HealNodePosition for the mechanism this
+    /// unblocks.</summary>
     public static class NodeHeal
     {
         private static int _state = -1;

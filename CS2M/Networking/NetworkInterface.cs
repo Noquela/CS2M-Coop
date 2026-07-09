@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using Colossal;
 using CS2M.API.Commands;
 using CS2M.API.Networking;
@@ -95,6 +96,23 @@ namespace CS2M.Networking
 
         public void StopServer()
         {
+            // Tell every client we're shutting down BEFORE tearing the socket down, so they can tell
+            // this apart from a network drop and skip the v50 auto-reconnect cycle (24 tries × ~5s
+            // otherwise spent hammering a host that isn't coming back). This method is also the
+            // "leave" action for a client (same UI button for both roles) — LocalPlayer.SendToClients
+            // already no-ops unless we're the SERVER, but we still gate the block here so a leaving
+            // client doesn't pay the flush Thread.Sleep below for nothing.
+            if (LocalPlayer.PlayerType == PlayerType.SERVER)
+            {
+                LocalPlayer.SendToClients(new ServerStoppingCommand());
+
+                // SendToClients only queues the packet — LiteNetLib's background send thread (started
+                // by NetManager.Start(), not manual-poll mode) flushes queued sends to the wire on its
+                // own cadence. Give it a brief moment before Stop() tears the socket down under it,
+                // otherwise the notice can be lost in the same race it's meant to fix.
+                Thread.Sleep(150);
+            }
+
             // User-initiated stop/leave — must not trigger the auto-reconnect cycle.
             LocalPlayer.UserDisconnect();
         }

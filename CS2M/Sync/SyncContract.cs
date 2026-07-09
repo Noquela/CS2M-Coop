@@ -48,9 +48,17 @@ namespace CS2M.Sync
             // ---- Net (roads / rail / pipes / power / fences / quays) --------------------------------
             { "NetPlaceCommand",        SyncClass.WorldContract },
             { "NetBatchCommand",        SyncClass.WorldContract },
+            // Continuous settled-position stream for nodes an AtomicBatch already shipped (authored by the
+            // builder, same as NetBatchCommand). WorldContract: it mutates persistent geometry and needs a
+            // handler (NodePosUpdateHandler → NetBatchApplySystem).
+            { "NodePosUpdateCommand",   SyncClass.WorldContract },
             { "NetToolReplayCommand",   SyncClass.WorldContract },
             { "NetUpgradeCommand",      SyncClass.WorldContract },
             { "NetDeleteCommand",       SyncClass.WorldContract },
+            // Host mirrors the settled authoritative node+edge SET of a region so a client's incrementally-
+            // rebuilt junction converges by identity — a host-derived reconcile, not a player action, same
+            // class as ZoneBlockAuthorityCommand (needs a handler → NetSetHandler → NetSetApplySystem).
+            { "NetSetCommand",          SyncClass.HostAuthoritative },
             // ---- Zoning ----------------------------------------------------------------------------
             { "ZonePaintCommand",       SyncClass.WorldContract },
             // Host mirrors its own derived zone-Block geometry to heal client-side derivation drift — not
@@ -62,6 +70,17 @@ namespace CS2M.Sync
             // is suppressed): a host-derived value mirrored to clients, never player-authored — same class
             // as ZoneBlockAuthorityCommand. Still needs a handler (see AreaSubObjectHandler).
             { "AreaSubObjectCommand",   SyncClass.HostAuthoritative },
+            // The tilled/plowed soil (a Game.Areas.Surface sub-area) the HOST's AreaSpawnSystem grows inside a
+            // work area — sim-derived off per-process RNG (client's spawner suppressed), so a host-derived
+            // value mirrored to clients, never player-authored. Same class as AreaSubObjectCommand; needs a
+            // handler (see AreaSurfaceHandler).
+            { "AreaSurfaceCommand",     SyncClass.HostAuthoritative },
+            // The Game.Areas.Extractor component (farm/forestry/ore extraction state) the HOST simulates —
+            // the DRIVER of a field's tilled-soil/crop coverage size (decomp AreaSpawnSystem.cs:182-188). The
+            // sim runs per-machine, so the host mirrors its authoritative Extractor and the client's field
+            // grows to that size. A host-derived value mirrored to clients, never player-authored — same
+            // class as AreaSurfaceCommand; needs a handler (see ExtractorSyncHandler).
+            { "ExtractorSyncCommand",   SyncClass.HostAuthoritative },
             { "DistrictCommand",        SyncClass.WorldContract },
             { "ServiceDistrictCommand", SyncClass.WorldContract },
             { "TilePurchaseCommand",    SyncClass.WorldContract },
@@ -108,8 +127,15 @@ namespace CS2M.Sync
             { "PreconditionsErrorCommand",  SyncClass.Infra }, // : PreconditionsDataCommand
             { "WorldTransferCommand",       SyncClass.Infra },
             { "ResyncCommand",              SyncClass.Infra },
+            // Host -> clients: session is stopping (host closing / leaving). Handshake-adjacent
+            // notice only — no persistent world state — so it suppresses the client's v50
+            // auto-reconnect cycle instead of applying anything.
+            { "ServerStoppingCommand",      SyncClass.Infra },
             { "StateHashCommand",           SyncClass.Infra },
             { "ToolPreviewCommand",         SyncClass.Infra }, // other player's placement ghost — cosmetic overlay
+            // v67: other player's LIVE native build ghost (road/building preview). Ephemeral relay — creates
+            // only Game.Tools.Temp entities (never Permanent, never applied), so no persistent world state.
+            { "PreviewCommand",             SyncClass.Infra },
             // v60 auto-heal: the request carries no world state (Infra); the two answers are host-owned
             // mirrors of authoritative slices, same class as ZoneBlockAuthorityCommand.
             { "HealRequestCommand",         SyncClass.Infra },
@@ -122,7 +148,7 @@ namespace CS2M.Sync
         /// (no world state) so they map to an empty set. A construction tool with no mapping is a violation.</summary>
         public static readonly Dictionary<string, string[]> ToolCoverage = new Dictionary<string, string[]>
         {
-            { "NetToolSystem",       new[] { "NetPlaceCommand", "NetBatchCommand", "NetToolReplayCommand", "NetUpgradeCommand", "NetDeleteCommand" } },
+            { "NetToolSystem",       new[] { "NetPlaceCommand", "NetBatchCommand", "NodePosUpdateCommand", "NetToolReplayCommand", "NetUpgradeCommand", "NetDeleteCommand" } },
             { "ZoneToolSystem",      new[] { "ZonePaintCommand" } },
             { "AreaToolSystem",      new[] { "AreaEditCommand", "DistrictCommand", "TilePurchaseCommand" } },
             { "ObjectToolSystem",    new[] { "ObjectPlaceCommand", "MoveCommand" } },

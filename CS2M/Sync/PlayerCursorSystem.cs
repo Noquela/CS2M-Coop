@@ -6,9 +6,12 @@ using CS2M.API.Networking;
 using CS2M.Commands.Data.Game;
 using CS2M.Networking;
 using CS2M.UI;
+using Colossal.Mathematics;
 using Game;
 using Game.Common;
+using Game.Input;
 using Game.Rendering;
+using Game.Simulation;
 using Game.Tools;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -43,6 +46,8 @@ namespace CS2M.Sync
         private ToolRaycastSystem _raycast;
         private OverlayRenderSystem _overlay;
         private UISystem _uiSystem;
+        private CameraUpdateSystem _cameraUpdateSystem;
+        private TerrainSystem _terrainSystem;
         private int _frame;
         private int _logFrame;
 
@@ -57,6 +62,19 @@ namespace CS2M.Sync
         private bool _sentValid; // last state we actually sent (send one "hide" on valid→invalid)
         private int _lastLabelCount;
 
+        // v71: the raycast drops out for a frame or two while the mouse moves fast or no tool is
+        // active, which used to hide the remote cursor instantly → it flickered/disappeared. Debounce:
+        // hold the last VALID position and keep sending it for a tolerance window; only send the "hide"
+        // packet after the raycast has been invalid for this many consecutive sends (~0.5 s at 20 Hz).
+        // v73: ToolRaycastSystem.GetRaycastResult only has data while a tool is actively requesting a
+        // raycast — the DefaultTool (mouse idling, no tool active) never asks for one, so the primary
+        // path was invalid ~100% of idle time. SendLocalCursor now falls back to our own terrain
+        // raycast (same recipe as Game.Debug.TerrainRaycastDebugSystem) whenever the primary misses,
+        // so `valid` is true almost always; this debounce is now a second line of defense for the
+        // rare frame where even the fallback raycast misses (e.g. mouse over UI or camera not ready).
+        private int _invalidSends;
+        private const int HideAfterInvalidSends = 10;
+
         // v50: last valid local cursor world position — /ping pings this spot.
         public static float3 LastLocalCursorPos;
         public static bool LastLocalCursorValid;
@@ -67,6 +85,8 @@ namespace CS2M.Sync
             _raycast = World.GetOrCreateSystemManaged<ToolRaycastSystem>();
             _overlay = World.GetOrCreateSystemManaged<OverlayRenderSystem>();
             _uiSystem = World.GetOrCreateSystemManaged<UISystem>();
+            _cameraUpdateSystem = World.GetOrCreateSystemManaged<CameraUpdateSystem>();
+            _terrainSystem = World.GetOrCreateSystemManaged<TerrainSystem>();
             CS2M.Log.Info("[Cursor] PlayerCursorSystem created");
         }
 
@@ -110,6 +130,21 @@ namespace CS2M.Sync
                     pos = result.m_Hit.m_HitPosition;
                     valid = !math.any(math.isnan(pos));
                 }
+                else if (InputManager.instance.controlOverWorld
+                         && _cameraUpdateSystem.TryGetViewer(out Viewer viewer))
+                {
+                    // v73 fallback: the DefaultTool (mouse idling, no tool active) never requests a
+                    // raycast, so the primary path above is invalid almost all of idle time. Do our
+                    // own terrain raycast — same recipe as the vanilla debug system — so the remote
+                    // cursor stays visible while the player is just looking around.
+                    Line3.Segment seg = ToolRaycastSystem.CalculateRaycastLine(viewer.camera);
+                    TerrainHeightData heightData = _terrainSystem.GetHeightData();
+                    if (TerrainUtils.Raycast(ref heightData, seg, true, out float t, out float3 normal, out Bounds3 hitBounds))
+                    {
+                        pos = MathUtils.Position(seg, t);
+                        valid = !math.any(math.isnan(pos));
+                    }
+                }
             }
             catch
             {
@@ -118,20 +153,43 @@ namespace CS2M.Sync
 
             _lastValid = valid;
             _lastPos = pos;
+
+            // v71 debounce: keep the cursor alive at its last good position through brief raycast
+            // drop-outs (fast mouse / no active tool) instead of hiding it every stutter.
+            float3 sendPos;
+            bool sendValid;
             if (valid)
             {
+                _invalidSends = 0;
                 LastLocalCursorPos = pos;
                 LastLocalCursorValid = true;
+                sendPos = pos;
+                sendValid = true;
             }
-
-            // Don't spam 20 Hz invalid packets while the mouse sits on the UI: send exactly one
-            // "hide" packet on the valid→invalid transition, then stay quiet until valid again.
-            if (!valid && !_sentValid)
+            else
             {
-                return;
+                _invalidSends++;
+                if (_invalidSends < HideAfterInvalidSends && _sentValid && LastLocalCursorValid)
+                {
+                    // Within the tolerance window: resend the last VALID spot so the remote cursor
+                    // holds steady instead of blinking out.
+                    sendPos = LastLocalCursorPos;
+                    sendValid = true;
+                }
+                else
+                {
+                    // Truly off the map/on UI for a while: send exactly one "hide", then stay quiet.
+                    if (!_sentValid)
+                    {
+                        return;
+                    }
+
+                    sendPos = default;
+                    sendValid = false;
+                }
             }
 
-            _sentValid = valid;
+            _sentValid = sendValid;
 
             string username = NetworkInterface.Instance.LocalPlayer.Username;
             if (string.IsNullOrEmpty(username))
@@ -141,10 +199,10 @@ namespace CS2M.Sync
 
             Command.SendToAll?.Invoke(new PlayerCursorCommand
             {
-                X = pos.x,
-                Y = pos.y,
-                Z = pos.z,
-                Valid = valid,
+                X = sendPos.x,
+                Y = sendPos.y,
+                Z = sendPos.z,
+                Valid = sendValid,
                 Username = username,
             });
         }

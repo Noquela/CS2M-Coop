@@ -122,13 +122,29 @@ namespace CS2M.Sync
             UI.ChatPanel.RefreshPlayerList();
         }
 
+        /// <summary>
+        ///     Resolves a roster id (from NetworkManager.LatencySnapshot(), which keys by
+        ///     peer.Id + 1) to the player's real username.
+        ///     <para>
+        ///         This deliberately does NOT look at RemotePlayerCursors: that dictionary is
+        ///         keyed by CommandBase.SenderId, and SenderId is always 0 — Player.PlayerId is
+        ///         never assigned anywhere in this codebase. Looking the roster id up there can
+        ///         never hit, so it always fell through to the "Player {id}" fallback, producing
+        ///         a ghost row next to the real player's name. The peer id space (peer.Id + 1)
+        ///         and the command sender id space (always 0) are simply two different id spaces
+        ///         that don't map onto each other.
+        ///     </para>
+        ///     Instead, resolve directly against NetworkInterface.PlayerListConnected, which holds
+        ///     the actual RemotePlayer objects (NetPeer + real Username) — the same id space the
+        ///     roster was built from in the first place.
+        /// </summary>
         private static string ResolveName(int playerId)
         {
-            foreach (var kv in RemotePlayerCursors.Snapshot())
+            foreach (Player p in NetworkInterface.Instance.PlayerListConnected)
             {
-                if (kv.Key == playerId && !string.IsNullOrEmpty(kv.Value.Username))
+                if (p is RemotePlayer rp && rp.NetPeer != null && rp.NetPeer.Id + 1 == playerId)
                 {
-                    return kv.Value.Username;
+                    return rp.Username;
                 }
             }
 

@@ -382,52 +382,53 @@ namespace CS2M.Sync
                         continue;
                     }
 
-                    // AUTHORITY (Fase 1): the HOST is the single source of truth for a building-owned work-area
-                    // (farm/extractor FIELD) shape. Each PC's own AreaSpawnSystem spawns the field locally and
-                    // DIVERGENTLY; if the client also shipped its shape, the two would ping-pong forever (the
-                    // 585-vs-593 areas drift). So only the host ships — the client keeps its locally-spawned
-                    // field but gets rewritten to the host's polygon via the identity apply (owner+prefab).
-                    // This is why the client is never field-less: no AREASUPPRESS needed.
-                    //
-                    // KNOWN TRADE-OFF (adversarial review, Fase 1): this ALSO means a CLIENT-initiated field
-                    // RESHAPE does not propagate to the host — the host owns the shape. Common cases still work
-                    // (host places/edits a farm → syncs; client places a farm → host spawns+ships its field), so
-                    // this is an accepted Fase-1 limitation, not a bug. Lifting it (let known-change reshapes
-                    // ship from either side, guarded by WorkAreaHash echo) needs a 2-sim to confirm no ping-pong.
-                    if (!isServer)
-                    {
-                        // Client-only bookkeeping: baseline immediately (it never sends) so a LATER real
-                        // change on this area is detected as a change, not re-treated as a first sight.
-                        WorkAreaHash.Set(area, hash);
-                        continue;
-                    }
-
                     // Anchor = the nearest ancestor up the owner chain that has a Transform (a building, or
                     // a farm's "Agriculture Area Placeholder"). Using the OWNER anchor (not the polygon
                     // centre) is what makes a RESIZE sync: the field's centroid MOVES when you redraw it, but
                     // its owner does not. Old code skipped any non-Building owner outright, so the farm work-
-                    // area never synced. Walk up to 4 links to reach a Transform. Computed here (before the
-                    // firstSight gate below) because v58 AREA-FIX needs it to check CS2M_RemotePlaced.
+                    // area never synced. Walk up to 4 links to reach a Transform. Computed first because the
+                    // authority rule below keys off CS2M_RemotePlaced on it.
                     Entity anchor = FindAnchor(EntityManager.GetComponentData<Owner>(area).m_Owner);
 
+                    // AUTHORITY (v70 BIDIRECTIONAL, replaces the old host-only model): the ORIGINATOR of a
+                    // field — the machine where the PLAYER actually drew the polygon — ships its shape; the
+                    // other machine ADOPTS. The discriminator is CS2M_RemotePlaced on the anchor: it is
+                    // stamped (runtime-only, never serialized) by RemotePlacementApplySystem on a building
+                    // this machine MATERIALISED from a remote placement. A materialised building's field is a
+                    // locally-GENERATED DEFAULT (the host's small nodes=4 lot for a farm a CLIENT drew, or
+                    // vice-versa) — NOT the player's real shape — so the remote-placed side must NEVER ship
+                    // it. This is exactly the reported bug: the host used to force-ship its generated default
+                    // and CLOBBER the client's custom polygon. Now the remote-placed side stays silent and
+                    // the non-remote-placed originator ships its real polygon; the other side adopts it.
+                    //
+                    // ANTI-OSCILLATION: only ONE side of any field is remote-placed (the materialiser), so
+                    // exactly ONE side ships a session-born first shape — the two can never ping-pong (the old
+                    // 585-vs-593 drift came from BOTH sides shipping their own locally-spawned shape). A KNOWN
+                    // reshape (below) may ship from either side, but the receiver's apply stamps WorkAreaHash
+                    // with the applied shape, so an adopted rewrite is seen as known==hash next scan and never
+                    // echoes back. Trace: A draws S → A ships S, baselines hash(S). B adopts S, apply sets
+                    // WorkAreaHash(B)=hash(S). Next scan B sees known==hash → no send. Stops. (See ApplyOne.)
                     bool isSessionBornFirstSight = false;
                     if (firstSight)
                     {
-                        // First-sight fields at WORLD-LOAD are identical on both PCs (loaded from the same
-                        // save) → no need to ship. A first-sight field AFTER warmup is normally a farm the
-                        // HOST placed THIS session, whose field spawned with a shape the client can't match
-                        // → ship the baseline so the client rewrites to the host's exact polygon.
-                        //
-                        // v67 AREA-FIX (fazenda-do-CLIENT-nunca-estampa, 2-sim 09/07 00:14): the old v58 gate
-                        // also skipped fields whose anchor carries CS2M_RemotePlaced, assuming "the SENDER's
-                        // own detector already shipped the real polygon". That assumption went stale when the
-                        // create-detect loop became host-gated (the `if (!isServer) continue` above): a field
-                        // whose farm was placed by a CLIENT is remote-placed ON THE HOST, and the client is
-                        // forbidden from shipping — so NO machine ever shipped the polygon and the field could
-                        // never heal (session 00:09-00:18: zero [Area] DETECT for a client-placed livestock
-                        // farm). This scan only runs on the host (isServer gate above), the client can't race
-                        // us anymore, and the client-side apply stamps WorkAreaHash so nothing bounces —
-                        // therefore: warmup is the only remaining reason to stay silent.
+                        bool anchorIsRemotePlaced = anchor != Entity.Null
+                            && EntityManager.HasComponent<CS2M_RemotePlaced>(anchor);
+
+                        // Materialised-from-remote-placement default → adopt our current shape as the
+                        // baseline and stay silent; the originating machine ships the player's real polygon.
+                        if (anchorIsRemotePlaced)
+                        {
+                            WorkAreaHash.Set(area, hash);
+                            _pendingAnchorScans.Remove(area);
+                            continue;
+                        }
+
+                        // NOT remote-placed. During warmup this is a save-loaded field — identical on both
+                        // PCs (the CS2M_RemotePlaced tag is runtime-only, so a save-loaded field can never
+                        // carry it) → silent baseline, no need to ship. PAST warmup it is a lot the LOCAL
+                        // player placed THIS session (originated HERE — host OR client) whose field spawned
+                        // with a shape the other PC cannot match → ship the initial polygon. The send below
+                        // is shared with the known-edit path.
                         if (_scanPasses <= WarmupScans)
                         {
                             WorkAreaHash.Set(area, hash);
@@ -435,21 +436,14 @@ namespace CS2M.Sync
                             continue;
                         }
 
-                        // v61 AREA-FIX (fazenda-plantada-em-sessao-nunca-sincroniza, 2-sim 07/07): past
-                        // warmup and the anchor isn't in the RemotePlacement race window above → this lot
-                        // was derived by the HOST's OWN AreaSpawnSystem this session (loop (1) above never
-                        // catches it: a spawned field gains Created, never Applied). This scanner is the
-                        // ONLY path that can ever ship such a lot's INITIAL shape, so — unlike the plain
-                        // known-edit case below — it must actively SEND here, not just baseline. The actual
-                        // send is the SAME command-building code the known-edit path uses further down
-                        // (shared, not duplicated); isSessionBornFirstSight only decides whether/when we're
-                        // allowed to call WorkAreaHash.Set (see the anchor-unresolved branch just below).
                         isSessionBornFirstSight = true;
                     }
                     else
                     {
-                        // Known area with a real polygon change (host-authoritative reshape) — baseline
-                        // immediately, same as before, so we never re-send the same shape twice.
+                        // Known area with a real polygon change: a RESHAPE by the local player, on EITHER
+                        // machine now (bidirectional). Baseline immediately so the same shape never ships
+                        // twice; the remote apply stamps WorkAreaHash with the applied shape, so an adopted
+                        // rewrite never echoes back (anti-oscillation, see the AUTHORITY note above).
                         WorkAreaHash.Set(area, hash);
                     }
 
@@ -668,10 +662,12 @@ namespace CS2M.Sync
         ///     one hop; for a farm field that is its "Agriculture Area Placeholder", never the
         ///     building — see FindAnchor's doc comment for why walking further is unreliable) and
         ///     makes sure it carries a stable <see cref="CS2M_SyncId"/>, minting one via
-        ///     <see cref="CS2M_SyncIdSystem.Allocate"/> the first time it is seen. HOST ONLY: mirrors
-        ///     the existing host-authoritative model for area shape — the client must never invent an
-        ///     id for the same field, or the two sides would disagree forever. Also best-effort
-        ///     resolves a BUILDING for the anchor (reusing FindAnchor's own building-search) purely as
+        ///     <see cref="CS2M_SyncIdSystem.Allocate"/> the first time it is seen. Minted on the
+        ///     ORIGINATOR — host OR client under the v70 bidirectional authority (see ScanWorkAreaEdits);
+        ///     only the originator ships a field's first shape so exactly one machine mints its id (the
+        ///     <paramref name="isServer"/> flag is retained for the callers' signature but no longer gates
+        ///     minting). Also best-effort resolves a BUILDING for the anchor (reusing FindAnchor's own
+        ///     building-search) purely as
         ///     a position HINT the receiver can use for its own one-time local search; never required
         ///     for correctness (the receiver's search is unbounded and type-filtered instead — see
         ///     AreaEditApplySystem.ResolveOwnerByAnchor).
@@ -712,15 +708,17 @@ namespace CS2M.Sync
             {
                 anchorId = EntityManager.GetComponentData<CS2M_SyncId>(directOwner).m_Id;
             }
-            else if (isServer)
-            {
-                // First sighting of this owner anywhere — mint its identity.
-                anchorId = CS2M_SyncIdSystem.Allocate();
-                CS2M_SyncIdSystem.Register(EntityManager, directOwner, anchorId);
-            }
             else
             {
-                return false; // client with an unregistered anchor: nothing stable to ship yet
+                // First sighting of this owner anywhere — mint its identity. Minted on the ORIGINATOR,
+                // which under the v70 bidirectional authority (see ScanWorkAreaEdits) is whichever machine
+                // the player drew the field on — host OR client. CS2M_SyncIdSystem is sender-allocates-by-
+                // design (nonce-namespaced, so host/client ids never collide); only the originator ships a
+                // field's FIRST shape, so exactly one machine ever mints this placeholder's id and the
+                // receiver adopts it via ResolveOwnerByAnchor. The client used to bail here (host-only
+                // model), which is why a client-drawn farm's shape could never ship.
+                anchorId = CS2M_SyncIdSystem.Allocate();
+                CS2M_SyncIdSystem.Register(EntityManager, directOwner, anchorId);
             }
 
             Entity building = FindAnchor(directOwner);

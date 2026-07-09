@@ -124,6 +124,80 @@ namespace CS2M.Sync
         private float3 _cfGhostPos;
         private int _cfGhostFrames;
 
+        // CS2M_AP_TEST=7: CLIENT-MESH — the client-side twin of TRIREPRO's ROAD portion. TRIREPRO (test=3)
+        // proved the HOST->client road path by solo-drawing a triangle+diagonal+X-cross+S-curve+overdraw
+        // mesh on the HOST; the user's real bug (complex junctions diverging) fires on the CLIENT->host
+        // path, when the CLIENT is the one drawing. This scene reuses the EXACT same road-drawing methods
+        // TRIREPRO uses (TriRepro_Setup/Side2/Side3/Diagonal/Phase2_XCross*/Phase3_Curve/Phase4_Overdraw —
+        // all built on the capturable-local ReplayRoadSegmentLocal/ReplayRoadCurveLocal primitive), so the
+        // road GEOMETRY is byte-for-byte the same layout TRIREPRO draws (same dry-quadrant search, same
+        // offsets); the ONLY difference is the side that runs them. RunClientMeshStep drives them from
+        // UpdateClient (role==CLIENT), while the HOST stays idle (ClientMesh_HostIdle, mirroring test=4's
+        // ClientFarm_HostIdle) and just receives the roads via the normal NetDetectorSystem capture->sync
+        // path — the exact client->host route under suspicion for the junction drift. It draws ROADS only
+        // (deliberately NOT TRIREPRO's later host-authoritative zone-paint/farm-place phases, which
+        // Command.SendToAll from a queue and would be wrong to fire from the client — the road mesh is
+        // what the cliente->host statediff needs). ClientMesh_Finish emits the SAME "TRIREPRO DONE"/
+        // "TRIREPRO PHASES" dump TriRepro_Finish emits (so the existing statediff harness that greps those
+        // lines to snapshot host-vs-client fires unchanged) plus a distinct "[Auto] CLIENTMESH DONE"
+        // marker. Client-side drawing is gated on _joinReAnnounced — the same "join settled" signal
+        // RunClientFarmStep waits on — so it never starts before the handshake has stabilized.
+        private bool _clientMesh;
+        private int _cmStep;
+        private int _cmTimer = 180; // ~3s settle after join-settle before stroke 1, then between strokes —
+                                     // same cadence as TRIREPRO's _triTimer
+        private bool _cmHostIdleLogged;
+
+        // CS2M_AP_TEST=8: CLIENT-STAR — the CLIENT solo-draws a HIGH-DEGREE star (10 radial roads from one
+        // shared centre node), the worst case for node-identity / re-centre divergence. Same client->host
+        // route and dry-quadrant reuse as CLIENT-MESH; host idle. Validates zone-block derivation on a
+        // grade-10 junction (the case the user's manual star hit).
+        private bool _clientStar;
+        private int _csStep;
+        private int _csTimer = 180;
+        private bool _csHostIdleLogged;
+
+        // CS2M_AP_TEST=9: CONNECT-EXISTING — every scene above (TRIREPRO/CLIENT-MESH/CLIENT-STAR) builds
+        // its whole road mesh in a fresh, empty quadrant — never onto a road that was ALREADY in the save
+        // before this session even started. The field bug this scene targets only fires when a NEW road is
+        // drawn so it CONNECTS to a PRE-EXISTING save edge mid-span (never covered by test=3/7/8): the host
+        // finds a real save-born edge (Game.Net.Edge+Curve, no Temp/Deleted/Owner, and — the actual "never
+        // touched by this mod" marker — no CS2M_EdgeSyncId; see CS2M_EdgeSyncId.cs's class doc: that tag is
+        // stamped the FIRST time NetDetectorSystem/NetSetAuthoritySystem ever see an edge, so its absence
+        // means a genuine save leftover, not something an earlier phase of THIS run already touched) nearest
+        // a deterministic origin (TryFindExistingSaveEdge), and draws TWO new roads from open ground
+        // (~80-120m away, different bearings, dry ground via IsQuadrantDry/WaterUtils — same helper
+        // TriRepro_Setup's quadrant search uses) ending EXACTLY at that edge's curve midpoint with a kind=2
+        // "nearest edge" snap — the identical primitive TriRepro_Diagonal already proved works for a
+        // mid-span T-junction (see that method's doc); no split/merge logic is reimplemented here, the real
+        // NetToolSystem.CreateDefinitionsJob (driven by ReplayRoadSegmentLocal, same helper every other
+        // scene in this file uses) does the actual split. After a settle window the CLIENT independently
+        // runs the SAME deterministic query (its own TryFindExistingSaveEdge call, its own TryAnchor origin)
+        // and draws a THIRD road into the identical point — the save's edge geometry (Bezier control
+        // points) is byte-identical on both machines, so both sides land on the SAME midpoint even though
+        // the WINNING Entity (and the query's own array iteration order) legitimately differs between
+        // processes; see TryFindExistingSaveEdge's doc for why ties are broken by POSITION, never by
+        // array/Entity order — this file's own zone-drift lesson (CS2M_NodeSyncIds' Remap doc) is that raw
+        // Entity identity folds differently per machine. Each side then counts nodes/edges
+        // (CS2M_NodeSyncId/CS2M_EdgeSyncId-tagged) within 200m of the junction and logs
+        // "[Auto] TEST9 nodes=<n> edges=<m>" for the external NODEDUMP/statediff harness to diff
+        // host-vs-client; this scene only drives the actions and logs a LOCAL sanity floor (explicit FAIL if
+        // a side's own count ever drops below what THAT side itself built — a road vanishing underfoot).
+        private bool _connectExisting;
+        private int _ceStep;         // host step: 0=setup(find junction), 1/2=draw the two host roads, 3=FINAL
+        private int _ceTimer = 180;  // ~3s between host steps, same cadence as TriRepro's _triTimer
+        private string _ceRoadType, _ceRoadName;
+        private float3 _ceJunction;   // curve midpoint of the pre-existing edge both sides connect to
+        private bool _ceJunctionFound;
+        private int _ceEdgesBuilt;    // roads built by THIS process in this scene — the FAIL floor below
+        private int _ceClientStep;    // client step: 0=query+draw, 1=FINAL
+        private int _ceClientTimer = 300; // ~5s after join-settle: early enough that the client's own query
+                                           // almost always still sees the pristine save edge (the host's own
+                                           // first road doesn't even START building until its own
+                                           // testStarted+~6s, then needs to be captured+shipped on top), yet
+                                           // past the raw join transient — same order of magnitude as the
+                                           // other client scenes' initial settle (CLIENT-MESH/STAR: 180f).
+
         // CS2M_AP_TEST=5: CLIENT-ACTIONS — a THIRD scene, separate from TRIREPRO (host-solo) and
         // CLIENT-FARM (client-solo), built to exercise two audit gap-fixes that specifically need a
         // CLIENT acting on something the HOST created:
@@ -374,6 +448,9 @@ namespace CS2M.Sync
             _clientFarm = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "4";
             _test5 = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "5";
             _test6 = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "6";
+            _clientMesh = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "7";
+            _clientStar = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "8";
+            _connectExisting = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "9";
 
             GameManager.instance.onGameLoadingComplete += OnLoadingComplete;
 
@@ -636,6 +713,14 @@ namespace CS2M.Sync
                 {
                     ClientFarm_HostIdle(); // test=4 drives the CLIENT side only — host runs no roteiro
                 }
+                else if (_clientStar)
+                {
+                    ClientStar_HostIdle(); // test=8 drives the CLIENT side only — host just receives roads
+                }
+                else if (_clientMesh)
+                {
+                    ClientMesh_HostIdle(); // test=7 drives the CLIENT side only — host just receives roads
+                }
                 else if (_test5)
                 {
                     RunTest5HostStep();
@@ -643,6 +728,10 @@ namespace CS2M.Sync
                 else if (_test6)
                 {
                     RunTest6HostStep();
+                }
+                else if (_connectExisting)
+                {
+                    RunConnectExistingHostStep();
                 }
                 else
                 {
@@ -5679,6 +5768,444 @@ namespace CS2M.Sync
             L("[Auto] CLIENTFARM DONE");
         }
 
+        // ------------------------- CS2M_AP_TEST=7: CLIENT-MESH (client solo-draws TRIREPRO's road mesh) -------------------------
+
+        /// <summary>Host side of the CLIENT-MESH scene: intentionally does nothing scripted — the point is
+        /// to isolate "client draws a complex road mesh -> host receives it as remote" with no host-authored
+        /// traffic in flight, so any divergence can only come from that one client build. Mirrors
+        /// <see cref="ClientFarm_HostIdle"/> (test=4): the host's ALWAYS-ON receive systems
+        /// (NetDetectorSystem/NetPlaceApplySystem/…) keep running exactly as they would for a real human
+        /// host; only the autopilot's own scripted roteiro is suppressed here.</summary>
+        private void ClientMesh_HostIdle()
+        {
+            if (_cmHostIdleLogged) { return; }
+            _cmHostIdleLogged = true;
+            L("[Auto] CLIENTMESH host idle (test=7 drives the CLIENT side only — waiting for the client's " +
+              "road mesh to arrive over the wire as normal remote NetPlaceCommands)");
+        }
+
+        /// <summary>Client-side pacing for the CLIENT-MESH scene. This is the CLIENT->host twin of
+        /// <see cref="RunTriReproStep"/>: it runs the EXACT same TRIREPRO road-drawing methods, in the same
+        /// order and with the same geometry, but from <see cref="UpdateClient"/> instead of UpdateHost, so
+        /// the client is the one authoring the mesh and the host receives it through the normal
+        /// NetDetectorSystem capture -> sync path (the client->host route the user's junction bug lives on).
+        /// Only the ROAD phases are reused — TRIREPRO's later zone-paint (PHASE5) and farm-place (PHASE6+)
+        /// steps are host-authoritative (they Command.SendToAll from a queue) and are deliberately NOT run
+        /// here; the road mesh is what the client->host statediff needs. Gated on <see cref="_joinReAnnounced"/>
+        /// (same "join settled" signal <see cref="RunClientFarmStep"/> waits on) so the first stroke never
+        /// races the join handshake. Every step below calls an EXISTING TRIREPRO method unchanged — no road
+        /// geometry or drawing logic is reimplemented; those methods enqueue through the same capturable
+        /// <c>ReplayRoadSegmentLocal</c>/<c>ReplayRoadCurveLocal</c> primitive whether host or client runs
+        /// them. IsQuadrantDry is reused (via TriRepro_Setup) so the mesh only lands on dry ground.</summary>
+        private void RunClientMeshStep()
+        {
+            if (_cmStep > 8 || !_joinReAnnounced) { return; }
+            if (_cmTimer > 0) { _cmTimer--; return; }
+            _cmTimer = 180; // ~3s between strokes, same cadence as TRIREPRO's _triTimer
+
+            switch (_cmStep)
+            {
+                case 0:
+                    TriRepro_Setup();                     // dry-quadrant pick + triangle side 1 (A->B)
+                    // TriRepro_Setup jumps its OWN _triStep on a no-anchor/no-prefab SKIP; that field is
+                    // unused here, so detect the same SKIP by the road name it leaves null and jump our
+                    // machine straight to Finish (the trailing _cmStep++ lands the NEXT call on case 8).
+                    if (_triRoadName == null) { _cmStep = 7; }
+                    break;
+                case 1: TriRepro_Side2(); break;              // B->C, snapped onto node B
+                case 2: TriRepro_Side3(); break;              // C->A, closes the triangle
+                case 3: TriRepro_Diagonal(); break;          // mid-span T-junction into side A-B
+                case 4: TriRepro_Phase2_XCrossLine1(); break; // mid-span X, stroke 1
+                case 5: TriRepro_Phase2_XCrossLine2(); break; // mid-span X, stroke 2
+                case 6: TriRepro_Phase3_Curve(); break;      // 4-control-point S-curve crossing
+                case 7: TriRepro_Phase4_Overdraw(); break;   // overdraw exactly on an existing edge
+                case 8: ClientMesh_Finish(); break;
+            }
+
+            _cmStep++;
+        }
+
+        /// <summary>Final step: reuse <see cref="TriRepro_Finish"/> verbatim so the existing statediff
+        /// harness (which greps the "TRIREPRO DONE"/"TRIREPRO PHASES" lines to know when to snapshot
+        /// host-vs-client) fires unchanged on this client-drawn mesh, THEN log the distinct
+        /// "[Auto] CLIENTMESH DONE" marker the runner/bot greps to know THIS (client-authored) scene
+        /// finished.</summary>
+        private void ClientMesh_Finish()
+        {
+            TriRepro_Finish(); // emits "[Auto] TRIREPRO DONE" + "[Auto] TRIREPRO PHASES=" — same dump
+            L("[Auto] CLIENTMESH DONE");
+        }
+
+        private void ClientStar_HostIdle()
+        {
+            if (_csHostIdleLogged) { return; }
+            _csHostIdleLogged = true;
+            L("[Auto] CLIENTSTAR host idle (test=8 drives the CLIENT side only — client draws a grade-10 " +
+              "star; host receives the roads over the wire, the worst case for the zone-block derivation).");
+        }
+
+        /// <summary>CLIENT-STAR: the client solo-draws 10 straight roads radiating from ONE shared centre
+        /// (grade-10 junction) — the highest node re-centre stress, the case the user's manual star hit.
+        /// Reuses TriRepro_Setup (dry-quadrant pick + _triOrigin + prefab in _triRoadType/_triRoadName) for
+        /// step 0, then draws each radial from the centre outward via the SAME capturable
+        /// ReplayRoadSegmentLocal primitive TRIREPRO/CLIENT-MESH use (no geometry reimplemented). All radials
+        /// start EXACTLY at _triOrigin (open-ground snap) so the game fuses them into one centre node by
+        /// proximity — the fusion that stresses identity. Ends with the same TriRepro_Finish dump + a distinct
+        /// CLIENTSTAR DONE marker.</summary>
+        private void RunClientStarStep()
+        {
+            if (_csStep > 10 || !_joinReAnnounced) { return; }
+            if (_csTimer > 0) { _csTimer--; return; }
+            _csTimer = 180; // ~3s between strokes, same cadence as TRIREPRO
+
+            if (_csStep == 0)
+            {
+                TriRepro_Setup(); // dry-quadrant pick + _triOrigin + first road (also seeds the centre node)
+                if (_triRoadName == null) { _csStep = 10; _csStep++; return; } // no-anchor SKIP -> jump to Finish
+            }
+            else if (_csStep <= 9)
+            {
+                // Radial i outward from the shared centre _triOrigin. First road already exists from Setup;
+                // these 9 make the centre a grade-10 junction. 150 m long, evenly spaced by 2*pi/10.
+                float ang = _csStep * 2f * math.PI / 10f;
+                float3 outp = _triOrigin + new float3(150f * math.cos(ang), 0f, 150f * math.sin(ang));
+                ReplayRoadSegmentLocal(_triRoadType, _triRoadName, _triOrigin, outp, 5100 + _csStep,
+                    0, 0UL, _triOrigin, 0, 0UL, outp);
+            }
+            else // _csStep == 10
+            {
+                ClientStar_Finish();
+            }
+
+            _csStep++;
+        }
+
+        private void ClientStar_Finish()
+        {
+            TriRepro_Finish(); // same "[Auto] TRIREPRO DONE"/"PHASES=" dump the statediff harness greps
+            L("[Auto] CLIENTSTAR DONE");
+        }
+
+        // ------------------------- CS2M_AP_TEST=9: CONNECT-EXISTING (new road onto a save-born edge) -------------------------
+
+        /// <summary>Host side of CONNECT-EXISTING: step 0 finds the junction (see
+        /// <see cref="TryFindExistingSaveEdge"/>), steps 1-2 draw the two host roads into it from different
+        /// bearings, step 3 counts+logs after a long settle. Mirrors RunTriReproStep's own step-machine
+        /// shape (decrement a shared timer, dispatch on a step counter, SKIP jumps the counter ahead so the
+        /// trailing <c>_ceStep++</c> lands on FINAL next call instead of re-running a step that has nothing
+        /// to do).</summary>
+        private void RunConnectExistingHostStep()
+        {
+            if (_ceStep > 3) { return; }
+            if (_ceTimer > 0) { _ceTimer--; return; }
+            _ceTimer = 180; // ~3s between steps, same cadence as TriRepro's _triTimer
+
+            switch (_ceStep)
+            {
+                case 0: ConnectExisting_HostSetup(); break;
+                case 1: ConnectExisting_HostRoad(0f, 5200); break;                  // bearing 0deg (+X)
+                case 2: ConnectExisting_HostRoad(2f * math.PI / 3f, 5201); _ceTimer = 600; break; // bearing 120deg + long settle before FINAL
+                case 3: ConnectExisting_HostFinal(); break;
+            }
+
+            _ceStep++;
+        }
+
+        /// <summary>Step 0: pick the road prefab, find the pre-existing save edge nearest this process's
+        /// own <see cref="TryAnchor"/> origin, and lock in its curve midpoint as <see cref="_ceJunction"/> —
+        /// every later step (both host roads, and the client's own independent draw) targets this ONE
+        /// value. SKIP (no anchor / no prefab / no candidate edge) jumps <see cref="_ceStep"/> so the
+        /// trailing increment in <see cref="RunConnectExistingHostStep"/> lands on FINAL next call, same
+        /// shape as TriRepro_Setup's own SKIP.</summary>
+        private void ConnectExisting_HostSetup()
+        {
+            if (!TryAnchor(out float3 anchor))
+            {
+                L("[Auto] TEST9 CONNECT-EXISTING SKIP no anchor point in city");
+                _ceStep = 2; // -> FINAL lands on case 3 next call
+                return;
+            }
+
+            if (!TryGetRoadPrefab(out _ceRoadType, out _ceRoadName))
+            {
+                L("[Auto] TEST9 CONNECT-EXISTING SKIP no Road prefab found");
+                _ceStep = 2;
+                return;
+            }
+
+            if (!TryFindExistingSaveEdge(anchor, out Entity _, out _ceJunction))
+            {
+                L("[Auto] TEST9 CONNECT-EXISTING SKIP no pre-existing road edge found near origin — fresh/empty save?");
+                _ceStep = 2;
+                return;
+            }
+
+            _ceJunctionFound = true;
+            L($"[Auto] TEST9 CONNECT-EXISTING junction=({_ceJunction.x:F0},{_ceJunction.z:F0}) " +
+              $"anchor=({anchor.x:F0},{anchor.z:F0}) road='{_ceRoadName}'");
+        }
+
+        /// <summary>Draws one of the host's two new roads: open ground (kind=0) ~80-120m out from
+        /// <see cref="_ceJunction"/> along <paramref name="bearingRad"/> (dry ground — see
+        /// <see cref="ConnectExisting_PickApproach"/>), ending EXACTLY at <see cref="_ceJunction"/> with a
+        /// kind=2 "nearest edge" snap — the identical mid-span-T primitive <see cref="TriRepro_Diagonal"/>
+        /// already proved works; the real NetToolSystem.CreateDefinitionsJob (driven by
+        /// <see cref="ReplayRoadSegmentLocal"/>) does the actual split/merge, nothing reimplemented here.
+        /// No-ops (SKIP already logged by Setup) if no junction was found.</summary>
+        private void ConnectExisting_HostRoad(float bearingRad, int seed)
+        {
+            if (!_ceJunctionFound) { return; }
+
+            float3 start = ConnectExisting_PickApproach(_ceJunction, bearingRad);
+            ReplayRoadSegmentLocal(_ceRoadType, _ceRoadName, start, _ceJunction, seed,
+                0, 0UL, float3.zero,
+                2, 0UL, _ceJunction);
+            _ceEdgesBuilt++;
+            L($"[Auto] TEST9 CONNECT-EXISTING host road start=({start.x:F0},{start.z:F0}) -> " +
+              $"junction=({_ceJunction.x:F0},{_ceJunction.z:F0}) bearing={bearingRad * (180f / math.PI):F0}deg");
+        }
+
+        /// <summary>Step 3: after the long post-Road2 settle, count nodes/edges near the junction and log
+        /// the "[Auto] TEST9 nodes=<c>n</c> edges=<c>m</c>" line the external NODEDUMP/statediff harness
+        /// diffs host-vs-client, plus an explicit local FAIL if this side's own edge count ever dropped
+        /// below what it itself built (a road vanishing underfoot) — the one thing this process CAN judge
+        /// on its own, since cross-machine convergence is checked externally (see the class-level TEST9
+        /// doc).</summary>
+        private void ConnectExisting_HostFinal()
+        {
+            if (!_ceJunctionFound)
+            {
+                L("[Auto] TEST9 CONNECT-EXISTING host FINAL SKIP (setup never found a junction)");
+                return;
+            }
+
+            ConnectExisting_CountNear(_ceJunction, 200f, out int nodes, out int edges);
+            L($"[Auto] TEST9 nodes={nodes} edges={edges}");
+
+            if (edges < _ceEdgesBuilt)
+            {
+                L($"[Auto] TEST9 CONNECT-EXISTING host FAIL edges={edges} < builtLocally={_ceEdgesBuilt} (road vanished)");
+            }
+            else
+            {
+                L($"[Auto] TEST9 CONNECT-EXISTING host settle OK edges={edges} >= builtLocally={_ceEdgesBuilt}");
+            }
+
+            L("[Auto] TEST9 DONE");
+        }
+
+        /// <summary>Client side of CONNECT-EXISTING: gated on <see cref="_joinReAnnounced"/> (same "join
+        /// settled" signal every other client scene in this file waits on). Step 0 fires after
+        /// <see cref="_ceClientTimer"/> (see that field's doc for why it's tuned short — the client's OWN
+        /// query needs to run before the host's construction has had a chance to reach and re-tag this
+        /// edge); step 1 fires after a further long settle and logs FINAL, same two-step shape as the host
+        /// machine above.</summary>
+        private void RunConnectExistingClientStep()
+        {
+            if (_ceClientStep > 1 || !_joinReAnnounced) { return; }
+            if (_ceClientTimer > 0) { _ceClientTimer--; return; }
+
+            switch (_ceClientStep)
+            {
+                case 0: ConnectExisting_ClientFindAndDraw(); _ceClientTimer = 600; break; // long settle before FINAL, same gap as the host's Road2->FINAL
+                case 1: ConnectExisting_ClientFinal(); break;
+            }
+
+            _ceClientStep++;
+        }
+
+        /// <summary>The client's OWN independent run of the exact same deterministic query
+        /// (<see cref="TryFindExistingSaveEdge"/>, its own <see cref="TryAnchor"/> origin) — no value is
+        /// received from the host, the save's byte-identical edge geometry is what makes both sides land on
+        /// the same midpoint (see the class-level TEST9 doc). Draws the third road from a THIRD bearing
+        /// (180deg — distinct from the host's 0deg/120deg) so all three approaches are geometrically
+        /// separated even though they share one endpoint.</summary>
+        private void ConnectExisting_ClientFindAndDraw()
+        {
+            if (!TryAnchor(out float3 anchor) || !TryGetRoadPrefab(out _ceRoadType, out _ceRoadName)
+                || !TryFindExistingSaveEdge(anchor, out Entity _, out _ceJunction))
+            {
+                L("[Auto] TEST9 CONNECT-EXISTING CLIENT SKIP (no anchor/prefab/pre-existing edge found)");
+                return;
+            }
+
+            _ceJunctionFound = true;
+            float3 start = ConnectExisting_PickApproach(_ceJunction, math.PI); // bearing 180deg
+            ReplayRoadSegmentLocal(_ceRoadType, _ceRoadName, start, _ceJunction, 5202,
+                0, 0UL, float3.zero,
+                2, 0UL, _ceJunction);
+            _ceEdgesBuilt++;
+            L($"[Auto] TEST9 CONNECT-EXISTING client road start=({start.x:F0},{start.z:F0}) -> " +
+              $"junction=({_ceJunction.x:F0},{_ceJunction.z:F0})");
+        }
+
+        /// <summary>Client's own FINAL: same counting + local-shrink FAIL floor as
+        /// <see cref="ConnectExisting_HostFinal"/>, logged from this process's OWN world so the external
+        /// harness has both sides' "[Auto] TEST9 nodes=... edges=..." lines to diff.</summary>
+        private void ConnectExisting_ClientFinal()
+        {
+            if (!_ceJunctionFound)
+            {
+                L("[Auto] TEST9 CONNECT-EXISTING CLIENT FINAL SKIP (no junction found earlier)");
+                return;
+            }
+
+            ConnectExisting_CountNear(_ceJunction, 200f, out int nodes, out int edges);
+            L($"[Auto] TEST9 nodes={nodes} edges={edges}");
+
+            if (edges < _ceEdgesBuilt)
+            {
+                L($"[Auto] TEST9 CONNECT-EXISTING CLIENT FAIL edges={edges} < builtLocally={_ceEdgesBuilt} (road vanished)");
+            }
+            else
+            {
+                L($"[Auto] TEST9 CONNECT-EXISTING CLIENT settle OK edges={edges} >= builtLocally={_ceEdgesBuilt}");
+            }
+
+            L("[Auto] TEST9 DONE");
+        }
+
+        /// <summary>Deterministic nearest-pre-existing-edge scan for TEST9: scans every live road edge
+        /// (Edge+Curve, no Temp/Deleted/Owner — Owner-owned edges are subordinate sub-nets, e.g. a
+        /// building's driveway, not a through-road worth connecting to; no CS2M_RemotePlaced — a remote
+        /// copy of some OTHER peer's edit is not a genuine save leftover either, same reasoning
+        /// <see cref="_edgeQuery"/> already applies) and returns the one whose curve midpoint
+        /// (<c>MathUtils.Position(bezier, 0.5f)</c>, same computation <see cref="ActStop"/> already uses
+        /// for a curve midpoint) is nearest <paramref name="origin"/>.
+        ///
+        /// v73 run-1 lesson: this deliberately does NOT exclude CS2M_EdgeSyncId — the NetSet full-sweep
+        /// (default ON since v73) stamps every save edge with an id within seconds of the join, so "no id
+        /// yet" stopped being a usable "save-born" marker (run 1 SKIPped on it, zero candidates). Being
+        /// stamped changes nothing about the scenario under test: the point is connecting mid-span onto an
+        /// edge BOTH sides already share, and a save edge is still exactly that after the sweep stamps it.
+        ///
+        /// Both host and client call this with their OWN process's TryAnchor-derived origin; the SAVE's
+        /// edge geometry (Bezier control points) is byte-identical on both machines, so both processes land
+        /// on the SAME midpoint even though the WINNING Entity — and the query array's own iteration order —
+        /// can legitimately differ between processes (this file's own zone-drift lesson: raw Entity/array
+        /// order folds differently per machine, see CS2M_NodeSyncIds' Remap doc). Ties (distance equal
+        /// within <c>tieEps</c>) are broken by POSITION (x then z), NEVER by "whichever the iteration
+        /// happened to visit first" — the one place a naive port of <see cref="TagNodeNear"/>'s first-wins
+        /// loop would have silently reintroduced exactly that cross-machine non-determinism.</summary>
+        private bool TryFindExistingSaveEdge(float3 origin, out Entity edge, out float3 midpoint)
+        {
+            edge = Entity.Null;
+            midpoint = default;
+
+            EntityQuery q = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Net.Edge>(), ComponentType.ReadOnly<Game.Net.Curve>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<CS2M_RemotePlaced>(),
+                },
+            });
+            if (q.IsEmptyIgnoreFilter) { return false; }
+
+            const float tieEps = 0.01f; // 1cm — genuine tie vs. float noise
+            float bestSq = float.MaxValue;
+            NativeArray<Entity> ents = q.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in ents)
+                {
+                    Colossal.Mathematics.Bezier4x3 bz = EntityManager.GetComponentData<Game.Net.Curve>(e).m_Bezier;
+                    float3 mid = Colossal.Mathematics.MathUtils.Position(bz, 0.5f);
+                    float dx = mid.x - origin.x, dz = mid.z - origin.z;
+                    float dsq = dx * dx + dz * dz;
+
+                    if (edge == Entity.Null || dsq < bestSq - tieEps)
+                    {
+                        bestSq = dsq; midpoint = mid; edge = e;
+                    }
+                    else if (dsq < bestSq + tieEps
+                             && (mid.x < midpoint.x - tieEps
+                                 || (math.abs(mid.x - midpoint.x) <= tieEps && mid.z < midpoint.z - tieEps)))
+                    {
+                        // Genuine tie: deterministic position tie-break (x then z) — NEVER array/Entity order.
+                        bestSq = dsq; midpoint = mid; edge = e;
+                    }
+                }
+
+                return edge != Entity.Null;
+            }
+            finally { ents.Dispose(); }
+        }
+
+        /// <summary>Walks distance 80..120m (10m steps) out from <paramref name="junction"/> along
+        /// <paramref name="bearingRad"/> looking for the first dry candidate (reuses
+        /// <see cref="IsQuadrantDry"/>/WaterUtils exactly as <see cref="TriRepro_Setup"/>'s own quadrant
+        /// search and <see cref="TriRepro_Phase6_FarmPlace"/>'s placement search do). Falls back to the
+        /// farthest (120m) candidate if every distance comes back wet — <see cref="ReplayRoadSegmentLocal"/>
+        /// still runs on it (a road ending in shallow water is a real, if unlikely, player scenario) rather
+        /// than silently dropping the step like Setup's harder SKIPs do.</summary>
+        private float3 ConnectExisting_PickApproach(float3 junction, float bearingRad)
+        {
+            float3 candidate = junction;
+            for (int i = 0; i < 5; i++)
+            {
+                float dist = 80f + i * 10f; // 80,90,100,110,120m
+                candidate = junction + new float3(dist * math.cos(bearingRad), 0f, dist * math.sin(bearingRad));
+                if (IsQuadrantDry(candidate, candidate)) { return candidate; }
+            }
+
+            return candidate;
+        }
+
+        /// <summary>Counts LIVE (no Temp/Deleted) nodes and edges tagged CS2M_NodeSyncId/CS2M_EdgeSyncId —
+        /// i.e. everything this mod's sync pipeline has touched, host-authored OR remote-received alike (a
+        /// remote copy from the other side is exactly what TEST9 wants counted too, so CS2M_RemotePlaced is
+        /// deliberately NOT excluded here, unlike <see cref="TryFindExistingSaveEdge"/>'s query) — within
+        /// <paramref name="radius"/> meters (XZ only) of <paramref name="center"/>. Used identically by both
+        /// <see cref="ConnectExisting_HostFinal"/> and <see cref="ConnectExisting_ClientFinal"/> to produce
+        /// the "[Auto] TEST9 nodes=... edges=..." line the external statediff harness diffs.</summary>
+        private void ConnectExisting_CountNear(float3 center, float radius, out int nodes, out int edges)
+        {
+            nodes = 0;
+            edges = 0;
+            float rSq = radius * radius;
+
+            EntityQuery nodesQ = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<Game.Net.Node>(), ComponentType.ReadOnly<CS2M_NodeSyncId>() },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+            NativeArray<Entity> nodeEnts = nodesQ.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in nodeEnts)
+                {
+                    float3 p = EntityManager.GetComponentData<Game.Net.Node>(e).m_Position;
+                    float dx = p.x - center.x, dz = p.z - center.z;
+                    if (dx * dx + dz * dz <= rSq) { nodes++; }
+                }
+            }
+            finally { nodeEnts.Dispose(); }
+
+            EntityQuery edgesQ = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Net.Edge>(), ComponentType.ReadOnly<Game.Net.Curve>(),
+                    ComponentType.ReadOnly<CS2M_EdgeSyncId>(),
+                },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
+            NativeArray<Entity> edgeEnts = edgesQ.ToEntityArray(Allocator.Temp);
+            try
+            {
+                foreach (Entity e in edgeEnts)
+                {
+                    Colossal.Mathematics.Bezier4x3 bz = EntityManager.GetComponentData<Game.Net.Curve>(e).m_Bezier;
+                    float3 mid = Colossal.Mathematics.MathUtils.Position(bz, 0.5f);
+                    float dx = mid.x - center.x, dz = mid.z - center.z;
+                    if (dx * dx + dz * dz <= rSq) { edges++; }
+                }
+            }
+            finally { edgeEnts.Dispose(); }
+        }
+
         // ------------------------- CS2M_AP_TEST=5: CLIENT-ACTIONS (DELFIX + TAXFIX) -------------------------
 
         /// <summary>Host side of the CLIENT-ACTIONS scene. Step 0 plants a real water source LOCALLY
@@ -6864,8 +7391,11 @@ namespace CS2M.Sync
 
             if (_concurrent) { RunConcurrentStep(false); }
             else if (_clientFarm) { RunClientFarmStep(); }
+            else if (_clientMesh) { RunClientMeshStep(); }
+            else if (_clientStar) { RunClientStarStep(); }
             else if (_test5) { RunTest5ClientStep(); }
             else if (_test6) { RunTest6ClientStep(); }
+            else if (_connectExisting) { RunConnectExistingClientStep(); }
 
             LogCounts(status.ToString());
         }

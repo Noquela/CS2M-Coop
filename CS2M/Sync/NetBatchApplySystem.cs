@@ -94,6 +94,16 @@ namespace CS2M.Sync
         // (I6). Mirrors _pendingDefinitions' one-frame-later contract.
         private readonly List<PendingReattach> _pendingReattach = new List<PendingReattach>();
 
+        // FIX C — FOLD CEILING PARK. An edge whose captured bezier endpoint sits > FoldParkCeiling from the
+        // WIRE position of the node id it names is NOT emitted immediately (the old FOLD-TRUST bent the edge
+        // tens of metres onto the stale wire coord — the 32 m field bug). Instead it is parked here and
+        // retried each frame: once a NodePosUpdate has brought the resolved node's LIVE position within
+        // EndpointFoldTolerance of the bezier endpoint, it emits cleanly (pinned to the live coord); if it
+        // never converges within FoldParkTtl frames it emits anyway as FOLD-TRUST-EXPIRED (pinned to the
+        // node's CURRENT live coord, not the stale wire one). Retried at the top of OnUpdate, after the NPU
+        // drain, so it sees this frame's position corrections.
+        private readonly List<PendingFoldEdge> _pendingFoldEdges = new List<PendingFoldEdge>();
+
         /// <summary>A node whose local (NodeAlign-derived) position must be reconciled to the builder's
         /// wire-authoritative <see cref="WantPos"/>. <see cref="Age"/> gates the settle delay (>=3 frames)
         /// AND caps the unresolved-id retry (drop at 120); <see cref="Tries"/> caps the small-drift nudge
@@ -138,6 +148,31 @@ namespace CS2M.Sync
             public ulong NodeId;
             public Entity Node;
             public List<ReattachArm> Arms;
+        }
+
+        /// <summary>FIX C — an edge parked because a captured bezier endpoint was too far (&gt; FoldParkCeiling)
+        /// from the wire position of the node id it names. Self-contained (everything <see cref="EmitEdgeCourse"/>
+        /// transports) so the retry needs no wire command: it re-resolves the endpoints by id and, once their
+        /// LIVE positions have converged (a NodePosUpdate arrived) or <see cref="Ttl"/> runs out, emits the
+        /// course pinned to the live node coords.</summary>
+        private struct PendingFoldEdge
+        {
+            public ulong StartId;
+            public ulong EndId;
+            public Entity Prefab;
+            public string PrefabName;
+            public Bezier4x3 Bezier;
+            public int Seed;
+            public bool HasElev;
+            public float2 Elev;
+            public bool HasUpgraded;
+            public uint UpgG;
+            public uint UpgL;
+            public uint UpgR;
+            public bool HasOrder;
+            public uint OrderStart;
+            public uint OrderEnd;
+            public int Ttl;
         }
 
         /// <summary>One edge's wire-authoritative BuildOrder, queued until the edge it names exists.</summary>
@@ -198,6 +233,30 @@ namespace CS2M.Sync
 
         protected override void OnUpdate()
         {
+            // FIX B — NodePosUpdate drain (TOP of OnUpdate, before every other drain so the fold-park retry
+            // below sees this frame's corrections). Each update reconciles a node BY IDENTITY to the builder's
+            // newest settled coord via the SAME machinery the batch apply uses. When not PLAYING, drop the
+            // queue instead (teardown-equivalent cleanup — LocalPlayer.cs is intentionally not touched).
+            if (NetworkInterface.Instance.LocalPlayer.PlayerStatus == PlayerStatus.PLAYING)
+            {
+                while (RemoteNodePosUpdateQueue.TryDequeue(out NodePosUpdateCommand npu))
+                {
+                    try
+                    {
+                        ApplyNodePosUpdate(npu);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        CS2M.Log.Info($"[Guard] NodePosUpdate apply failed: {ex.Message}");
+                    }
+                }
+            }
+            else
+            {
+                RemoteNodePosUpdateQueue.Clear();
+                if (_pendingFoldEdges.Count > 0) { _pendingFoldEdges.Clear(); }
+            }
+
             // Edge definitions injected last frame were consumed by GenerateNodes/Edges already — clean up.
             // (ToolClearSystem may have destroyed them first; the Exists guard makes this idempotent.)
             // Mirrors NetPlaceApplySystem; runs before the PLAYING gate so nothing ever leaks.
@@ -352,6 +411,53 @@ namespace CS2M.Sync
                 }
 
                 CS2M.Log.Info($"[Batch] POS-REATTACH id={r.NodeId} arms={emitted}");
+            }
+
+            // FIX C — FOLD-PARK RETRY. Re-attempt each edge parked because its captured bezier endpoint was
+            // too far from the wire position of the node id it named. This runs AFTER the NPU drain above, so
+            // the resolved endpoints' LIVE positions already reflect this frame's corrections. Emit when both
+            // endpoints have converged onto the captured bezier ends, or force-emit (FOLD-TRUST-EXPIRED,
+            // pinned to the live coords) when the TTL runs out. Emits definitions like the reattach drain,
+            // which is why it lives here (before the PLAYING gate); a post-teardown id simply fails to resolve
+            // and ages out with no side effect.
+            for (int i = _pendingFoldEdges.Count - 1; i >= 0; i--)
+            {
+                PendingFoldEdge fe = _pendingFoldEdges[i];
+                fe.Ttl--;
+                bool expired = fe.Ttl <= 0;
+
+                bool sOk = CS2M_NodeSyncIds.TryResolve(EntityManager, fe.StartId, out Entity sN);
+                bool eOk = CS2M_NodeSyncIds.TryResolve(EntityManager, fe.EndId, out Entity eN);
+                if (!sOk || !eOk || sN == eN)
+                {
+                    if (expired)
+                    {
+                        CS2M.Log.Info($"[Batch] FOLD-PARK-DROP startId={fe.StartId} endId={fe.EndId} " +
+                                      "(endpoint unresolved/degenerate at TTL expiry)");
+                        _pendingFoldEdges.RemoveAt(i);
+                    }
+                    else
+                    {
+                        _pendingFoldEdges[i] = fe;
+                    }
+
+                    continue;
+                }
+
+                float3 sPos = EntityManager.GetComponentData<Node>(sN).m_Position;
+                float3 ePos = EntityManager.GetComponentData<Node>(eN).m_Position;
+                float gapS = math.distance(new float2(sPos.x, sPos.z), new float2(fe.Bezier.a.x, fe.Bezier.a.z));
+                float gapE = math.distance(new float2(ePos.x, ePos.z), new float2(fe.Bezier.d.x, fe.Bezier.d.z));
+
+                if ((gapS <= EndpointFoldTolerance && gapE <= EndpointFoldTolerance) || expired)
+                {
+                    EmitParkedFoldEdge(fe, sN, eN, sPos, ePos, expired, gapS, gapE);
+                    _pendingFoldEdges.RemoveAt(i);
+                }
+                else
+                {
+                    _pendingFoldEdges[i] = fe;
+                }
             }
 
             // FIX A steps 2-3 — DEFERRED POSITION CORRECTOR. Nudge each queued node back to the builder's
@@ -1054,6 +1160,18 @@ namespace CS2M.Sync
         // self-inconsistency, never on junction re-centre (BOUND-SNAP already reconciled the node first).
         private const float EndpointFoldTolerance = 4f;
 
+        // FIX C — FOLD CEILING. Above this wire gap the fold guard REFUSES to guess in-frame (neither
+        // TRUST-pin nor SPLIT-attach): it PARKS the edge and waits for a NodePosUpdate to bring the resolved
+        // node's LIVE position within EndpointFoldTolerance of the bezier endpoint. 8 m sits comfortably above
+        // the (EndpointFoldTolerance, 8] band the in-frame TRUST/SPLIT logic still handles and well below the
+        // 20-32 m drifts the field bug bent edges by (FOLD-TRUST gap=32.4 m). Only the pre-emit wire gap is
+        // measured here; the retry re-measures against live positions.
+        private const float FoldParkCeiling = 8f;
+
+        // Frames a parked fold edge waits for a NodePosUpdate to converge it before force-emitting as
+        // FOLD-TRUST-EXPIRED (pinned to the node's CURRENT live coord, not the stale wire coord).
+        private const int FoldParkTtl = 120;
+
         // FOLD GUARD disambiguator — search radius (m, xz) for a REAL node at the edge's bezier endpoint. A hit
         // means the builder genuinely has a distinct node there (fold-real → attach); a miss means the curve is
         // merely stale (stale-curve → trust the id, do NOT mint). Tight (2 m) so it only adopts a node that truly
@@ -1119,6 +1237,205 @@ namespace CS2M.Sync
 
             CS2M.Log.Info($"[Batch] BOUND-SNAP id={id} moved={dist:F1}m " +
                           $"({oldPos.x:F1},{oldPos.z:F1})->({wantPos.x:F1},{wantPos.z:F1})");
+        }
+
+        /// <summary>FIX B — apply one <see cref="NodePosUpdateCommand"/>: reconcile each node BY IDENTITY to
+        /// the builder's newest settled coord. ≤0.25 m skip; ≤10 m drag via <see cref="NetGraphSafety"/>.
+        /// MoveNodeWithCurves; &gt;10 m route through the existing deferred POS-RELOC detach-move-reattach path
+        /// (<see cref="EnqueuePosFix"/> → the pos corrector, which carries the loop guard) rather than
+        /// teleporting a connected node (Burst crash).</summary>
+        private void ApplyNodePosUpdate(NodePosUpdateCommand cmd)
+        {
+            if (cmd?.Ids == null || cmd.X == null || cmd.Y == null || cmd.Z == null)
+            {
+                return;
+            }
+
+            int n = cmd.Ids.Length;
+            if (cmd.X.Length < n || cmd.Y.Length < n || cmd.Z.Length < n)
+            {
+                return;
+            }
+
+            for (int i = 0; i < n; i++)
+            {
+                ulong id = cmd.Ids[i];
+                if (!CS2M_NodeSyncIds.TryResolve(EntityManager, id, out Entity node))
+                {
+                    continue;
+                }
+
+                var want = new float3(cmd.X[i], cmd.Y[i], cmd.Z[i]);
+                float3 local = EntityManager.GetComponentData<Node>(node).m_Position;
+                float drift = math.distance(local, want);
+
+                if (drift <= 0.25f)
+                {
+                    continue;
+                }
+
+                if (drift <= 10f)
+                {
+                    NetGraphSafety.MoveNodeWithCurves(EntityManager, node, want);
+                    CS2M.Log.Info($"[Batch] NPU id={id} drift={drift:F2}");
+                }
+                else
+                {
+                    // Large move: reuse the proven POS-RELOC detach-move-reattach path (with its Relocated
+                    // loop guard) via the deferred position corrector instead of teleporting a connected node.
+                    EnqueuePosFix(id, want);
+                    CS2M.Log.Info($"[Batch] NPU id={id} drift={drift:F2} (queued POS-RELOC)");
+                }
+            }
+        }
+
+        /// <summary>FIX C — the larger of the two endpoints' horizontal (xz) gaps between the captured bezier
+        /// point and the WIRE position of the node id it names. Drives the fold-ceiling park decision.</summary>
+        private float MaxFoldGap(NetBatchCommand cmd, int i, Bezier4x3 bezier, Dictionary<ulong, float3> wirePos)
+        {
+            float g = 0f;
+            if (wirePos.TryGetValue(cmd.EdgeStartNodeIds[i], out float3 ws))
+            {
+                g = math.max(g, math.distance(new float2(ws.x, ws.z), new float2(bezier.a.x, bezier.a.z)));
+            }
+
+            if (wirePos.TryGetValue(cmd.EdgeEndNodeIds[i], out float3 we))
+            {
+                g = math.max(g, math.distance(new float2(we.x, we.z), new float2(bezier.d.x, bezier.d.z)));
+            }
+
+            return g;
+        }
+
+        /// <summary>FIX C — snapshot an edge whose fold gap exceeded <see cref="FoldParkCeiling"/> into a
+        /// self-contained <see cref="PendingFoldEdge"/> (everything <see cref="EmitEdgeCourse"/> transports),
+        /// so the retry drain can re-resolve and emit it once a NodePosUpdate converges the node.</summary>
+        private void EnqueueFoldPark(NetBatchCommand cmd, int i, Bezier4x3 bezier, Entity netPrefab)
+        {
+            bool hasOrder = cmd.EdgeBuildOrderStart != null && cmd.EdgeBuildOrderEnd != null
+                            && i < cmd.EdgeBuildOrderStart.Length && i < cmd.EdgeBuildOrderEnd.Length
+                            && (cmd.EdgeBuildOrderStart[i] != 0 || cmd.EdgeBuildOrderEnd[i] != 0);
+
+            _pendingFoldEdges.Add(new PendingFoldEdge
+            {
+                StartId = cmd.EdgeStartNodeIds[i],
+                EndId = cmd.EdgeEndNodeIds[i],
+                Prefab = netPrefab,
+                PrefabName = cmd.EdgePrefabNames[i],
+                Bezier = bezier,
+                Seed = cmd.EdgeSeeds[i],
+                HasElev = cmd.EdgeHasElevation[i],
+                Elev = cmd.EdgeHasElevation[i] ? new float2(cmd.EdgeElevX[i], cmd.EdgeElevY[i]) : float2.zero,
+                HasUpgraded = cmd.EdgeHasUpgraded[i],
+                UpgG = cmd.EdgeUpgradedG[i],
+                UpgL = cmd.EdgeUpgradedL[i],
+                UpgR = cmd.EdgeUpgradedR[i],
+                HasOrder = hasOrder,
+                OrderStart = hasOrder ? cmd.EdgeBuildOrderStart[i] : 0u,
+                OrderEnd = hasOrder ? cmd.EdgeBuildOrderEnd[i] : 0u,
+                Ttl = FoldParkTtl,
+            });
+        }
+
+        /// <summary>FIX C — emit a parked fold edge as a vanilla <c>CreationDefinition</c>+<c>NetCourse</c>
+        /// (mirror of <see cref="EmitEdgeCourse"/>'s tail), but with both bezier endpoints PINNED onto the
+        /// resolved nodes' CURRENT LIVE positions (2/3-1/3 falloff, the <see cref="NetGraphSafety"/> rule) —
+        /// never the stale wire coord that made FOLD-TRUST bend the edge. Called from the retry drain either on
+        /// convergence or (<paramref name="expired"/>) at TTL expiry.</summary>
+        private void EmitParkedFoldEdge(PendingFoldEdge fe, Entity startNode, Entity endNode,
+            float3 sPos, float3 ePos, bool expired, float gapS, float gapE)
+        {
+            if (EdgeAlreadyBuilt(startNode, endNode))
+            {
+                CS2M.Log.Info($"[Batch] FOLD-PARK-SKIP dup startId={fe.StartId} endId={fe.EndId} (already live)");
+                return;
+            }
+
+            Bezier4x3 bezier = fe.Bezier;
+            float3 dS = sPos - bezier.a; bezier.a = sPos; bezier.b += dS * (2f / 3f); bezier.c += dS * (1f / 3f);
+            float3 dE = ePos - bezier.d; bezier.d = ePos; bezier.c += dE * (2f / 3f); bezier.b += dE * (1f / 3f);
+
+            float2 elev = fe.HasElev ? fe.Elev : float2.zero;
+
+            // Echo guard (same as EmitEdgeCourse): the rebuilt edge is born Applied+Created without
+            // CS2M_RemotePlaced, so mark its seg hash first or NetBatchCaptureSystem re-broadcasts it.
+            RemoteNetEcho.Mark(RemoteNetEcho.SegHash(bezier.a, bezier.d, fe.PrefabName));
+
+            NetCourse course = default;
+            course.m_Curve = bezier;
+            course.m_Length = MathUtils.Length(bezier);
+            course.m_FixedIndex = -1;
+
+            course.m_StartPosition.m_Position = bezier.a;
+            course.m_StartPosition.m_Rotation = NetUtils.GetNodeRotation(MathUtils.StartTangent(bezier));
+            course.m_StartPosition.m_CourseDelta = 0f;
+            course.m_StartPosition.m_Elevation = elev;
+            course.m_StartPosition.m_ParentMesh = -1;
+            course.m_StartPosition.m_Flags = CoursePosFlags.IsFirst;
+            course.m_StartPosition.m_Entity = startNode;
+
+            course.m_EndPosition.m_Position = bezier.d;
+            course.m_EndPosition.m_Rotation = NetUtils.GetNodeRotation(MathUtils.EndTangent(bezier));
+            course.m_EndPosition.m_CourseDelta = 1f;
+            course.m_EndPosition.m_Elevation = elev;
+            course.m_EndPosition.m_ParentMesh = -1;
+            course.m_EndPosition.m_Flags = CoursePosFlags.IsLast;
+            course.m_EndPosition.m_Entity = endNode;
+
+            Entity def = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(def, new CreationDefinition
+            {
+                m_Prefab = fe.Prefab,
+                m_RandomSeed = fe.Seed,
+                m_Flags = CreationFlags.Permanent,
+            });
+            EntityManager.AddComponentData(def, course);
+            EntityManager.AddComponent<Updated>(def);
+            _pendingDefinitions.Add(def);
+
+            if (fe.HasOrder)
+            {
+                _pendingOrderFixes.Add(new PendingOrderFix
+                {
+                    StartId = fe.StartId,
+                    EndId = fe.EndId,
+                    OrderStart = fe.OrderStart,
+                    OrderEnd = fe.OrderEnd,
+                    Age = 0,
+                });
+            }
+
+            if (fe.HasUpgraded)
+            {
+                RemoteNetUpgradeQueue.Enqueue(new NetUpgradeCommand
+                {
+                    StartNodeId = fe.StartId,
+                    EndNodeId = fe.EndId,
+                    General = fe.UpgG,
+                    Left = fe.UpgL,
+                    Right = fe.UpgR,
+                    StartX = bezier.a.x, StartY = bezier.a.y, StartZ = bezier.a.z,
+                    EndX = bezier.d.x, EndY = bezier.d.y, EndZ = bezier.d.z,
+                    IsNode = false,
+                });
+            }
+
+            // The endpoint nodes gained an arm — re-derive their junctions (same as the batch's
+            // boundaryTouched step; these are genuine new arms, not the block re-derive the silent order write
+            // deliberately avoids).
+            MarkUpdated(startNode);
+            MarkUpdated(endNode);
+
+            if (expired)
+            {
+                CS2M.Log.Info($"[Batch] FOLD-TRUST-EXPIRED startId={fe.StartId} endId={fe.EndId} " +
+                              $"gapS={gapS:F1} gapE={gapE:F1} (never converged in {FoldParkTtl}f — pinned to live coords)");
+            }
+            else
+            {
+                CS2M.Log.Info($"[Batch] FOLD-PARK-RESOLVED startId={fe.StartId} endId={fe.EndId} " +
+                              $"gapS={gapS:F1} gapE={gapE:F1} (NodePosUpdate brought nodes close — emitted)");
+            }
         }
 
         private Entity CreateNode(NetBatchCommand cmd, int i)
@@ -1189,6 +1506,21 @@ namespace CS2M.Sync
             // "is this a real net?" proxy even though the definition path no longer uses the archetype).
             if (!ResolveNetPrefab(cmd.EdgePrefabTypes[i], cmd.EdgePrefabNames[i], out Entity netPrefab, out NetData netData))
             {
+                return false;
+            }
+
+            // FIX C — FOLD CEILING. When either endpoint's captured bezier point sits more than
+            // FoldParkCeiling from the WIRE position of the node id it names, do NOT guess this frame (the old
+            // FOLD-TRUST bent the edge tens of metres onto the stale wire coord — the 32 m field bug). PARK
+            // the edge; the retry drain at the top of OnUpdate emits it once a NodePosUpdate has brought the
+            // node close, or as FOLD-TRUST-EXPIRED after FoldParkTtl frames. The in-frame (tolerance, 8 m]
+            // TRUST/SPLIT logic below is unchanged.
+            float foldGap = MaxFoldGap(cmd, i, bezier, wirePos);
+            if (foldGap > FoldParkCeiling)
+            {
+                EnqueueFoldPark(cmd, i, bezier, netPrefab);
+                CS2M.Log.Info($"[Batch] FOLD-PARK edge {i} gap={foldGap:F1}m name={cmd.EdgePrefabNames[i]} " +
+                              $"(>{FoldParkCeiling}m; await NodePosUpdate, retry {FoldParkTtl}f)");
                 return false;
             }
 
@@ -1601,29 +1933,43 @@ namespace CS2M.Sync
         /// client has applied anything at all — the same physics the proven legacy path already accounts
         /// for (<see cref="NetPlaceApplySystem"/>.FindJunctionNode: "a busy junction re-centres MORE than
         /// 3.5 m as roads join over time"). Reuses that path's exact two radii: 3.5 m for ANY live node,
-        /// 8 m reserved for a node that is ALREADY a junction (2+ live connected edges) so a distant
-        /// dead-end never fuses onto an unrelated intersection. Unlike <see cref="FindNodeStrict"/>, a
-        /// candidate here MAY already carry a <see cref="CS2M_NodeSyncId"/> — the client's twin can have
-        /// adopted a different id first (e.g. an earlier batch that touched this same junction) — the
-        /// caller REMAPS this id onto it instead of re-deriving identity from scratch.
+        /// 8 m for the wide tier, which PREFERS a node that is ALREADY a junction (2+ live connected
+        /// edges) so a distant dead-end doesn't fuse onto an unrelated intersection, but falls back to a
+        /// lone non-junction node when no junction candidate exists (see v73 note below). Unlike
+        /// <see cref="FindNodeStrict"/>, a candidate here MAY already carry a <see cref="CS2M_NodeSyncId"/>
+        /// — the client's twin can have adopted a different id first (e.g. an earlier batch that touched
+        /// this same junction) — the caller REMAPS this id onto it instead of re-deriving identity from
+        /// scratch.
         ///
         /// Ambiguity-safe: each radius tier is accepted ONLY when it has EXACTLY ONE candidate within it
         /// (mirrors <see cref="FindEdgeByPosition"/>'s matches==1 rule) — two candidates in range means
         /// "can't tell which junction this is" and the whole lookup refuses rather than guess. The tight
-        /// tier is tried first; the wide (junction-only) tier only fires when the tight tier found NOTHING
-        /// (an ambiguous tight tier does not fall through — it is already an unresolvable read).</summary>
+        /// tier is tried first; the wide tier only fires when the tight tier found NOTHING (an ambiguous
+        /// tight tier does not fall through — it is already an unresolvable read). Within the wide tier,
+        /// a single junction candidate always wins over any non-junction candidates also in range; the
+        /// lone-non-junction tier only fires when the wide radius holds NO junction at all.
+        ///
+        /// v73: a save node never touched by either side still has degree&lt;2 when the first remote batch
+        /// that would give it a second arm arrives — the arm that WOULD make it a junction is IN that same
+        /// batch, so requiring an existing junction here was order-dependent and dropped the whole batch
+        /// (boundary-miss DROP proven in a real test on 09/07/2026; see CS2M_NodeSyncId.cs:10-17). The wide
+        /// tier now also accepts a live non-junction node, but only as the single candidate in its radius
+        /// and only once no junction claims that radius, preserving the old "prefer the junction" rule.</summary>
         private bool FindNodeWide(float3 pos, HashSet<Entity> claimed, out Entity node)
         {
             node = Entity.Null;
             const float tightRadiusSq = 12.25f; // 3.5 m — any live node
-            const float wideRadiusSq = 64f;     // 8 m — existing junction (degree >= 2) only
+            const float wideRadiusSq = 64f;     // 8 m — junction preferred, lone non-junction as fallback (v73)
 
             Entity tightBest = Entity.Null;
             float tightBestSq = tightRadiusSq;
             int tightMatches = 0;
-            Entity wideBest = Entity.Null;
-            float wideBestSq = wideRadiusSq;
-            int wideMatches = 0;
+            Entity wideJunctionBest = Entity.Null;
+            float wideJunctionBestSq = wideRadiusSq;
+            int wideJunctionMatches = 0;
+            Entity wideAnyBest = Entity.Null; // v73: lone non-junction candidate in the wide radius
+            float wideAnyBestSq = wideRadiusSq;
+            int wideAnyMatches = 0;
 
             Unity.Collections.NativeArray<Entity> arr = _liveNodes.ToEntityArray(Unity.Collections.Allocator.Temp);
             try
@@ -1646,13 +1992,25 @@ namespace CS2M.Sync
                         }
                     }
 
-                    if (d < wideRadiusSq && IsJunctionNodeWide(n))
+                    if (d < wideRadiusSq)
                     {
-                        wideMatches++;
-                        if (d < wideBestSq)
+                        if (IsJunctionNodeWide(n))
                         {
-                            wideBestSq = d;
-                            wideBest = n;
+                            wideJunctionMatches++;
+                            if (d < wideJunctionBestSq)
+                            {
+                                wideJunctionBestSq = d;
+                                wideJunctionBest = n;
+                            }
+                        }
+                        else
+                        {
+                            wideAnyMatches++;
+                            if (d < wideAnyBestSq)
+                            {
+                                wideAnyBestSq = d;
+                                wideAnyBest = n;
+                            }
                         }
                     }
                 }
@@ -1668,9 +2026,17 @@ namespace CS2M.Sync
                 return true;
             }
 
-            if (tightMatches == 0 && wideMatches == 1)
+            if (tightMatches == 0 && wideJunctionMatches == 1)
             {
-                node = wideBest;
+                node = wideJunctionBest;
+                return true;
+            }
+
+            // v73: no junction in range — fall back to a lone non-junction node, still ambiguity-safe
+            // (matches==1 rule) and still behind the tight tier and the junction tier above.
+            if (tightMatches == 0 && wideJunctionMatches == 0 && wideAnyMatches == 1)
+            {
+                node = wideAnyBest;
                 return true;
             }
 

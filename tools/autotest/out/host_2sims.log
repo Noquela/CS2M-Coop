@@ -1,35 +1,168 @@
-00:25:00.243 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
-00:25:16.320 [Auto] loadingComplete purpose=LoadGame mode=Game
-00:25:16.322 [Auto] city loaded -> arming StartServer
-00:25:17.594 [Auto] StartServer on :1111 status=PLAYING
-00:26:10.384 [Auto] HOST client connected (peers=1); test begins in 600f
-00:26:21.595 [Auto] TEST object SEND kind=tree name=EU_PoplarTree01 syncId=8820570350065549313
-00:26:28.014 [Auto] TEST object SEND kind=building name=RuinsCastle01 syncId=8820570350065549314
-00:26:30.888 [Auto] TEST net SEND name=ExtradosedBridge01 syncId=8820570350065549315
-00:26:30.897 [Auto] TEST replay INJECT road name=ExtradosedBridge01 A=(-4071,-1263) B=(-4183,-1395)
-00:26:38.693 [Auto] TEST delete SEND syncId=8820570350065549313
-00:26:45.924 [Auto] TEST zone SEND block=(3411,-3646) name='Office Low'
-00:26:54.876 [Auto] TEST water SEND pos=(4101,1644)
-00:27:03.984 [Auto] TEST move SEND syncId=8820570350065549314 to=(4026,1569)
-00:27:13.013 [Auto] TEST district SEND name=District Area center=(3751,1294)
-00:27:21.921 [Auto] TEST upgrade SEND edge=55676
-00:27:30.912 [Auto] TEST terrain SEND pos=(4201,1244)
-00:27:40.168 [Auto] TEST policy SEND name=Taxi Starting Fee
-00:27:49.366 [Auto] TEST tile SEND center=(-6856,-1870)
-00:27:58.554 [Auto] TEST devtree SEND node=PostSortingFacilityNode
-00:28:08.154 [Auto] TEST route SEND prefab=Bus Line id=8820570350065549320
-00:28:17.235 [Auto] TEST fire SEND syncId=8820570350065549314
-00:28:26.322 [Auto] TEST junction-stress SEND X-cross 4 arms drifting-centre (HasNodes) at (130,-3902)
-00:28:38.674 [Auto] TEST junction-arm-delete SEND north arm of stress-X at (130,-3902)
-00:28:47.856 [Auto] TEST moved-junction SEND M=(-720,-3852) + 3rd road to M+5m (8m fallback) cross-machine
-00:29:00.237 [Auto] TEST node-upgrade SEND TrafficLights at (130,-3902)
-00:29:12.074 [Auto] TEST fee SEND resource=1 -> 99,7
-00:29:21.151 [Auto] TEST water-move SEND create (30,-4002)
-00:29:30.145 [Auto] TEST water-move SEND move ->(100,-3932)
-00:29:39.321 [Auto] TEST district-reshape SEND create (380,-3652)
-00:29:48.313 [Auto] TEST district-reshape SEND reshape ->+-120 (StateHash checks 1 district, no dup)
-00:30:00.050 [Auto] TEST city-name SEND "CoopCity-10" (client [Rename] APPLIED city name = proof)
-00:30:08.617 [Auto] TEST line-visibility SEND hide number=88 (StateHash RouteHash checks convergence)
-00:30:18.141 [Auto] TEST tax SEND main=12 (StateHash TaxHash checks convergence)
-00:30:27.005 [Auto] TEST net-batch2 SEND ids=8820570350065549328/8820570350065549329 prefab=ExtradosedBridge01
-00:30:39.276 [Auto] scripted test DONE (over the wire). Check CLIENT log VERIFY lines.
+20:10:23.861 [Auto] ENABLED role=HOST port=1111 ip=127.0.0.1 scriptedTest=True log=C:\Users\Bruno\CS2M-Coop\tools\autotest\out\host_2sims.log
+20:10:53.817 [Auto] loadingComplete purpose=LoadGame mode=Game
+20:10:53.818 [Auto] city loaded -> arming StartServer
+20:10:56.369 [Auto] StartServer on :1111 status=PLAYING
+20:11:46.360 [Auto] HOST client connected (peers=1); test begins in 600f
+20:11:47.600 [Auto] TRIREPRO quadrant k=0 origem=(4851,2694) dry=true
+20:11:47.601 [Auto] TRIREPRO start road='Small Road' A=(4851,2694) B=(5051,2694) C=(4951,2867)
+20:11:47.603 [Auto] TRIREPRO road-replay name=Small Road A=(4851,2694) D=(5051,2694) snap=(0:0,0:0)
+20:11:56.529 [Auto] TRIREPRO road-replay name=Small Road A=(5051,2694) D=(4951,2867) snap=(1:16027761317997707266,0:0)
+20:12:04.415 [Auto] TRIREPRO road-replay name=Small Road A=(4951,2867) D=(4851,2694) snap=(1:16027761317997708362,1:16027761317997707265)
+20:12:07.635 [Auto] TRIREPRO road-replay name=Small Road A=(4951,2694) D=(4951,2867) snap=(2:0,1:16027761317997708362)
+20:12:07.636 [Auto] TRIREPRO diagonal mid=(4951,2694) -> C=(4951,2867)
+20:12:17.030 [Auto] TRIREPRO zone painted cells=198 near side A-B (name='Office Low')
+20:12:17.030 [Auto] TRIREPRO PHASE1 DONE
+20:12:28.561 [Auto] TRIREPRO road-replay name=Small Road A=(5162,2605) D=(5339,2782) snap=(0:0,0:0)
+20:12:28.561 [Auto] TRIREPRO PHASE2 X-CROSS line1 center=(5251,2694) A=(5162,2605) D=(5339,2782)
+20:12:39.393 [Auto] TRIREPRO road-replay name=Small Road A=(5162,2782) D=(5339,2605) snap=(0:0,0:0)
+20:12:39.394 [Auto] TRIREPRO PHASE2 X-CROSS line2 A=(5162,2782) D=(5339,2605)
+20:12:39.394 [Auto] TRIREPRO PHASE2 X-CROSS DONE
+20:12:50.814 [Auto] TRIREPRO curve-replay name=Small Road points=4 mode=2 snap=(0:0,0:0)
+20:12:50.815 [Auto] TRIREPRO PHASE3 CURVA s0=(5293,2636) p1=(5333,2703) p2=(5253,2769) s3=(5293,2836) crossing X-CROSS line1 at (5293,2736)
+20:12:50.816 [Auto] TRIREPRO PHASE3 CURVA DONE
+20:13:02.140 [Auto] TRIREPRO PHASE4 WARN mid-split node not found (diagonal may not have split side1) — overdraw falls back to open ground at that end
+20:13:02.141 [Auto] TRIREPRO road-replay name=Small Road A=(4851,2694) D=(4951,2694) snap=(1:16027761317997707265,0:0)
+20:13:02.142 [Auto] TRIREPRO PHASE4 OVERDRAW A=(4851,2694) -> mid=(4951,2694) (same endpoints as existing side1 A-mid edge)
+20:13:02.142 [Auto] TRIREPRO PHASE4 OVERDRAW DONE
+20:13:13.410 [Auto] TRIREPRO PHASE5 zone painted cells=486 near X-CROSS (name='Office Low')
+20:13:24.747 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub01_L1' type=BuildingPrefab
+20:13:24.747 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub01_L3' type=BuildingPrefab
+20:13:24.748 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub01_L5' type=BuildingPrefab
+20:13:24.748 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub02_L1' type=BuildingPrefab
+20:13:24.749 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub02_L3' type=BuildingPrefab
+20:13:24.749 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub02_L5' type=BuildingPrefab
+20:13:24.749 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub03_L1' type=BuildingPrefab
+20:13:24.750 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub03_L3' type=BuildingPrefab
+20:13:24.750 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub03_L5' type=BuildingPrefab
+20:13:24.750 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub01_L2' type=BuildingPrefab
+20:13:24.751 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub02_L2' type=BuildingPrefab
+20:13:24.752 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub03_L2' type=BuildingPrefab
+20:13:24.752 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub01_L4' type=BuildingPrefab
+20:13:24.752 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub02_L4' type=BuildingPrefab
+20:13:24.753 [Auto] TRIREPRO farm prefab='IndustrialAgricultureHub03_L4' type=BuildingPrefab
+20:13:24.759 [Auto] TRIREPRO farm prefab='Agriculture Area Placeholder - Grain' type=BuildingPrefab
+20:13:24.760 [Auto] TRIREPRO farm prefab='Agriculture Area Placeholder - Livestock' type=BuildingPrefab
+20:13:24.761 [Auto] TRIREPRO farm prefab='Agriculture Area Placeholder - Vegetable' type=BuildingPrefab
+20:13:24.761 [Auto] TRIREPRO farm prefab='Agriculture Area Placeholder - Cotton' type=BuildingPrefab
+20:13:24.763 [Auto] TRIREPRO farm prefab='CargoHarborComplexTankFarm01' type=BuildingPrefab
+20:13:24.764 [Auto] TRIREPRO farm prefab='CargoHarborComplexTankFarm02' type=BuildingPrefab
+20:13:24.764 [Auto] TRIREPRO farm prefab='CargoHarborComplexTankFarm03' type=BuildingPrefab
+20:13:24.764 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarm01' type=BuildingPrefab
+20:13:24.765 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarm02' type=BuildingPrefab
+20:13:24.765 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarm03' type=BuildingPrefab
+20:13:24.765 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarm04' type=BuildingPrefab
+20:13:24.767 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarm05' type=BuildingPrefab
+20:13:24.768 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarm06' type=BuildingPrefab
+20:13:24.768 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarm07' type=BuildingPrefab
+20:13:24.769 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarm08' type=BuildingPrefab
+20:13:24.769 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarmLand01' type=BuildingPrefab
+20:13:24.769 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarmLand02' type=BuildingPrefab
+20:13:24.770 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarmLand03' type=BuildingPrefab
+20:13:24.770 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarmLand04' type=BuildingPrefab
+20:13:24.770 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarmLand05' type=BuildingPrefab
+20:13:24.771 [Auto] TRIREPRO farm prefab='ExtractorAquacultureFishFarmLand06' type=BuildingPrefab
+20:13:24.771 [Auto] TRIREPRO farm prefab='ExtractorOffshoreOilRig01' type=BuildingPrefab
+20:13:24.771 [Auto] TRIREPRO farm prefab='ExtractorOffshoreOilRig02' type=BuildingPrefab
+20:13:24.771 [Auto] TRIREPRO farm prefab='Openwater Fish Farm Entrance' type=BuildingPrefab
+20:13:24.773 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L1_2x4' type=BuildingPrefab
+20:13:24.774 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L2_2x4' type=BuildingPrefab
+20:13:24.774 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L3_2x4' type=BuildingPrefab
+20:13:24.775 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L4_2x4' type=BuildingPrefab
+20:13:24.775 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L5_2x4' type=BuildingPrefab
+20:13:24.776 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L1_2x2' type=BuildingPrefab
+20:13:24.776 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L1_5x3' type=BuildingPrefab
+20:13:24.777 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L1_2x2' type=BuildingPrefab
+20:13:24.777 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L1_2x4' type=BuildingPrefab
+20:13:24.777 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L1_3x2' type=BuildingPrefab
+20:13:24.778 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L1_3x5' type=BuildingPrefab
+20:13:24.778 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L1_4x5' type=BuildingPrefab
+20:13:24.779 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L1_5x3' type=BuildingPrefab
+20:13:24.779 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L2_2x2' type=BuildingPrefab
+20:13:24.780 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L3_2x2' type=BuildingPrefab
+20:13:24.780 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L4_2x2' type=BuildingPrefab
+20:13:24.781 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L5_2x2' type=BuildingPrefab
+20:13:24.782 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L2_5x3' type=BuildingPrefab
+20:13:24.782 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L3_5x3' type=BuildingPrefab
+20:13:24.783 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L3_3x5' type=BuildingPrefab
+20:13:24.783 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L4_3x5' type=BuildingPrefab
+20:13:24.784 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L5_3x5' type=BuildingPrefab
+20:13:24.784 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L2_4x5' type=BuildingPrefab
+20:13:24.784 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L3_4x5' type=BuildingPrefab
+20:13:24.785 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L4_4x5' type=BuildingPrefab
+20:13:24.785 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L5_4x5' type=BuildingPrefab
+20:13:24.785 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L2_5x3' type=BuildingPrefab
+20:13:24.786 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L3_5x3' type=BuildingPrefab
+20:13:24.786 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L4_5x3' type=BuildingPrefab
+20:13:24.787 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L5_5x3' type=BuildingPrefab
+20:13:24.787 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L4_5x3' type=BuildingPrefab
+20:13:24.788 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L5_5x3' type=BuildingPrefab
+20:13:24.788 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L2_2x2' type=BuildingPrefab
+20:13:24.788 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L3_2x2' type=BuildingPrefab
+20:13:24.789 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L4_2x2' type=BuildingPrefab
+20:13:24.789 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L5_2x2' type=BuildingPrefab
+20:13:24.790 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L2_2x4' type=BuildingPrefab
+20:13:24.790 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L3_2x4' type=BuildingPrefab
+20:13:24.790 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L4_2x4' type=BuildingPrefab
+20:13:24.792 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L5_2x4' type=BuildingPrefab
+20:13:24.792 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L2_3x2' type=BuildingPrefab
+20:13:24.792 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L3_3x2' type=BuildingPrefab
+20:13:24.793 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L4_3x2' type=BuildingPrefab
+20:13:24.793 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L5_3x2' type=BuildingPrefab
+20:13:24.794 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L2_3x5' type=BuildingPrefab
+20:13:24.795 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L2_6x6' type=BuildingPrefab
+20:13:24.795 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L3_6x6' type=BuildingPrefab
+20:13:24.795 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L4_6x6' type=BuildingPrefab
+20:13:24.796 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L5_6x6' type=BuildingPrefab
+20:13:24.796 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L4_3x2' type=BuildingPrefab
+20:13:24.797 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L5_3x2' type=BuildingPrefab
+20:13:24.797 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L2_3x5' type=BuildingPrefab
+20:13:24.798 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L3_3x5' type=BuildingPrefab
+20:13:24.799 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L4_3x5' type=BuildingPrefab
+20:13:24.799 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L5_3x5' type=BuildingPrefab
+20:13:24.800 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L2_4x5' type=BuildingPrefab
+20:13:24.800 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L3_4x5' type=BuildingPrefab
+20:13:24.800 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L4_4x5' type=BuildingPrefab
+20:13:24.800 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L5_4x5' type=BuildingPrefab
+20:13:24.802 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L2_6x6' type=BuildingPrefab
+20:13:24.802 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L3_6x6' type=BuildingPrefab
+20:13:24.802 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L4_6x6' type=BuildingPrefab
+20:13:24.803 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L5_6x6' type=BuildingPrefab
+20:13:24.804 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L1_3x2' type=BuildingPrefab
+20:13:24.804 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L1_3x5' type=BuildingPrefab
+20:13:24.805 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L1_4x5' type=BuildingPrefab
+20:13:24.805 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L1_6x6' type=BuildingPrefab
+20:13:24.806 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture02_L1_6x6' type=BuildingPrefab
+20:13:24.807 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L2_3x2' type=BuildingPrefab
+20:13:24.807 [Auto] TRIREPRO farm prefab='IndustrialStorageAgriculture01_L3_3x2' type=BuildingPrefab
+20:13:24.808 [Auto] TRIREPRO farm prefab='ExtractorOilDrillingRig01' type=BuildingPrefab
+20:13:24.808 [Auto] TRIREPRO farm prefab='ExtractorOilDrillingRig02' type=BuildingPrefab
+20:13:24.809 [Auto] TRIREPRO farm prefab='ExtractorOreDriftMine01' type=BuildingPrefab
+20:13:24.809 [Auto] TRIREPRO farm prefab='ExtractorOreShaftMine01' type=BuildingPrefab
+20:13:24.810 [Auto] TRIREPRO farm prefab='ExtractorOreShaftMine02' type=BuildingPrefab
+20:13:24.810 [Auto] TRIREPRO farm prefab='ExtractorAgricultureGreenhouse01' type=BuildingPrefab
+20:13:24.811 [Auto] TRIREPRO farm prefab='ExtractorAgricultureGreenhouse02' type=BuildingPrefab
+20:13:24.811 [Auto] TRIREPRO farm prefab='ExtractorAgricultureGreenhouse03' type=BuildingPrefab
+20:13:24.811 [Auto] TRIREPRO farm prefab='ExtractorAgricultureGreenhouse04' type=BuildingPrefab
+20:13:24.812 [Auto] TRIREPRO farm prefab='ExtractorAgricultureGreenhouse05' type=BuildingPrefab
+20:13:24.812 [Auto] TRIREPRO farm prefab='ExtractorAgricultureGreenhouse06' type=BuildingPrefab
+20:13:24.812 [Auto] TRIREPRO farm prefab='ExtractorAgricultureGreenhouse07' type=BuildingPrefab
+20:13:24.813 [Auto] TRIREPRO farm prefab='ExtractorOilPump01' type=BuildingPrefab
+20:13:24.814 [Auto] TRIREPRO farm prefab='ExtractorOilPump02' type=BuildingPrefab
+20:13:24.814 [Auto] TRIREPRO farm prefab='ExtractorAgricultureChickenCoop01' type=BuildingPrefab
+20:13:24.815 [Auto] TRIREPRO farm prefab='ExtractorAgricultureChickenCoop02' type=BuildingPrefab
+20:13:24.815 [Auto] TRIREPRO farm prefab='ExtractorAgricultureChickenCoop03' type=BuildingPrefab
+20:13:24.815 [Auto] TRIREPRO farm prefab='ExtractorAgricultureCattleShed01' type=BuildingPrefab
+20:13:24.815 [Auto] TRIREPRO farm prefab='ExtractorAgricultureCattleShed02' type=BuildingPrefab
+20:13:24.816 [Auto] TRIREPRO farm prefab='ExtractorAgricultureCattleShed03' type=BuildingPrefab
+20:13:24.816 [Auto] TRIREPRO farm prefab='ExtractorOreDriftMine02' type=BuildingPrefab
+20:13:24.817 [Auto] TRIREPRO farm prefab='ServerFarm01' type=BuildingPrefab
+20:13:24.819 [Auto] TRIREPRO PHASE6 quadrant k=0 REJECTED (water)
+20:13:24.819 [Auto] TRIREPRO PHASE6 quadrant k=1 REJECTED (water)
+20:13:24.820 [Auto] TRIREPRO PHASE6 quadrant k=2 REJECTED (water)
+20:13:24.820 [Auto] TRIREPRO PHASE6 farm object INJECT name=IndustrialAgricultureHub01_L1 pos=(5411,411,2394) syncId=16027761317997708376 dry=true
+20:13:24.828 [Auto] TRIREPRO FARM PLACED name=IndustrialAgricultureHub01_L1 pos=(5411,2394) syncId=16027761317997708376
+20:14:02.390 [Auto] TRIREPRO REPAINTED zone='Industrial Manufacturing' cells=756
+20:14:13.813 [Auto] TRIREPRO road-replay name=Small Road A=(-4518,-1871) D=(-4630,-2002) snap=(0:0,0:0)
+20:14:13.815 [Auto] TRIREPRO XSESSION-OVERDRAW done at=(-4574,-1936)
+20:14:32.539 [Auto] TRIREPRO DONE
+20:14:32.539 [Auto] TRIREPRO PHASES=8

@@ -69,7 +69,12 @@ namespace CS2M.Sync
 
         protected override void OnUpdate()
         {
+            // CS2M_AREAGROW (option A, default ON): do NOT suppress — let the client grow its own field
+            // locally, targeting the size implied by the host-mirrored Extractor (ExtractorSyncSystems). The
+            // crop/surface mirrors stand down in that mode (see AreaObjGate / AreaSurfaceGate) so nothing
+            // double-creates. CS2M_AREAGROW=0 restores the legacy suppress-and-mirror path.
             bool shouldSuppress = AreaSuppressGate.Enabled
+                                  && !ExtractorGrowGate.Enabled
                                   && NetworkInterface.Instance.LocalPlayer.PlayerStatus == PlayerStatus.PLAYING
                                   && NetworkInterface.Instance.LocalPlayer.PlayerType == PlayerType.CLIENT;
 

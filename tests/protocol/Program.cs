@@ -219,6 +219,41 @@ namespace CS2MTests
         public int[] Seeds { get; set; }
     }
 
+    public class AreaSurfaceCommand : CommandBase
+    {
+        public ulong OwnerAnchorId { get; set; }
+        public string OwnerAnchorPrefabName { get; set; }
+        public float OwnerX { get; set; }
+        public float OwnerY { get; set; }
+        public float OwnerZ { get; set; }
+        public ulong BuildingSyncId { get; set; }
+        public byte[] Ops { get; set; }
+        public ulong[] Ids { get; set; }
+        public string[] PrefabTypes { get; set; }
+        public string[] PrefabNames { get; set; }
+        public int[] Seeds { get; set; }
+        public int[] NodeCounts { get; set; }
+        public float[] NodeX { get; set; }
+        public float[] NodeY { get; set; }
+        public float[] NodeZ { get; set; }
+        public float[] NodeEl { get; set; }
+    }
+
+    public class ExtractorSyncCommand : CommandBase
+    {
+        public ulong[] AreaIds { get; set; }
+        public string[] AreaPrefabNames { get; set; }
+        public float[] CenterX { get; set; }
+        public float[] CenterZ { get; set; }
+        public float[] ResourceAmount { get; set; }
+        public float[] MaxConcentration { get; set; }
+        public float[] ExtractedAmount { get; set; }
+        public float[] WorkAmount { get; set; }
+        public float[] HarvestedAmount { get; set; }
+        public float[] TotalExtracted { get; set; }
+        public int[] WorkType { get; set; }
+    }
+
     public class RouteCreateCommand : CommandBase
     {
         public ulong SyncId { get; set; }
@@ -330,6 +365,54 @@ namespace CS2MTests
         public float Dx { get; set; }
         public float Dy { get; set; }
         public float Dz { get; set; }
+    }
+
+    // v67 NATIVE build preview (byte-for-byte copy of the mod's PreviewCommand POCO). Kind 1 = road (rich
+    // ControlPoint arrays), Kind 2 = building (single Transform), Kind 0 = hide. Mixed array/scalar shape.
+    public class PreviewCommand : CommandBase
+    {
+        public int Kind { get; set; }
+        public string Username { get; set; }
+        public string PrefabType { get; set; }
+        public string PrefabName { get; set; }
+        public int Mode { get; set; }
+        public int RandomSeed { get; set; }
+        public bool EditorMode { get; set; }
+        public bool LeftHandTraffic { get; set; }
+        public bool RemoveUpgrade { get; set; }
+        public float ParallelOffset { get; set; }
+        public int ParallelCount { get; set; }
+        public float[] PosX { get; set; }
+        public float[] PosY { get; set; }
+        public float[] PosZ { get; set; }
+        public float[] HitX { get; set; }
+        public float[] HitY { get; set; }
+        public float[] HitZ { get; set; }
+        public float[] DirX { get; set; }
+        public float[] DirZ { get; set; }
+        public float[] HitDirX { get; set; }
+        public float[] HitDirY { get; set; }
+        public float[] HitDirZ { get; set; }
+        public float[] RotX { get; set; }
+        public float[] RotY { get; set; }
+        public float[] RotZ { get; set; }
+        public float[] RotW { get; set; }
+        public float[] SnapPriX { get; set; }
+        public float[] SnapPriY { get; set; }
+        public int[] ElemIdxX { get; set; }
+        public int[] ElemIdxY { get; set; }
+        public float[] CurvePos { get; set; }
+        public float[] Elev { get; set; }
+        public float[] SnapPosX { get; set; }
+        public float[] SnapPosZ { get; set; }
+        public int[] SnapKind { get; set; }
+        public float BPosX { get; set; }
+        public float BPosY { get; set; }
+        public float BPosZ { get; set; }
+        public float BRotX { get; set; }
+        public float BRotY { get; set; }
+        public float BRotZ { get; set; }
+        public float BRotW { get; set; }
     }
 
     // ---- New sync commands added by the fork (byte-for-byte copies of the mod's POCOs) ----
@@ -477,6 +560,16 @@ namespace CS2MTests
         public float[] BoundaryPosZ { get; set; }
     }
 
+    // NodePosUpdate (byte-for-byte copy of the mod's NodePosUpdateCommand — the AtomicBatch settled-position
+    // stream: flat parallel primitive arrays, one settled coord per already-shipped node id).
+    public class NodePosUpdateCommand : CommandBase
+    {
+        public ulong[] Ids { get; set; }
+        public float[] X { get; set; }
+        public float[] Y { get; set; }
+        public float[] Z { get; set; }
+    }
+
     // ZoneBlockAuthority (byte-for-byte copy of the mod's POCO — CS2M/Commands/Data/Game/ZoneBlockAuthorityCommand.cs).
     // v63: BuildOrders added — the game's cell-overlap contest tiebreaks on Game.Zones.BuildOrder.m_Order
     // (decomp CellOverlapJobs.cs:582), which comes from a per-machine local counter
@@ -510,6 +603,38 @@ namespace CS2MTests
         public float[] EdgeEndXs { get; set; }
         public float[] EdgeEndZs { get; set; }
         public bool[] GroupComplete { get; set; } // v66 "host owns the grid": true = shipped as a COMPLETE group
+    }
+
+    // NetSet (byte-for-byte copy of the mod's NetSetCommand — the settled authoritative node+edge SET of one
+    // region: node identities+positions, edge identities+endpoint ids+prefab+bezier, and the region bbox).
+    public class NetSetCommand : CommandBase
+    {
+        public float MinX { get; set; }
+        public float MinZ { get; set; }
+        public float MaxX { get; set; }
+        public float MaxZ { get; set; }
+        public ulong[] NodeIds { get; set; }
+        public float[] NX { get; set; }
+        public float[] NY { get; set; }
+        public float[] NZ { get; set; }
+        public ulong[] EdgeIds { get; set; }
+        public ulong[] EdgeStartId { get; set; }
+        public ulong[] EdgeEndId { get; set; }
+        public string[] EdgePrefabType { get; set; }
+        public string[] EdgePrefab { get; set; }
+        public byte[] EdgeRoadFlags { get; set; }
+        public float[] Ax { get; set; }
+        public float[] Ay { get; set; }
+        public float[] Az { get; set; }
+        public float[] Bx { get; set; }
+        public float[] By { get; set; }
+        public float[] Bz { get; set; }
+        public float[] Cx { get; set; }
+        public float[] Cy { get; set; }
+        public float[] Cz { get; set; }
+        public float[] Dx { get; set; }
+        public float[] Dy { get; set; }
+        public float[] Dz { get; set; }
     }
 
     public static class Program
@@ -566,6 +691,30 @@ namespace CS2MTests
             RoundTrip(opts, new JoinNoticeCommand { Username = "Bruno", Joining = true }, c => c.Username == "Bruno" && c.Joining);
             RoundTrip(opts, new PlayerCursorCommand { X = 1.5f, Z = 2.5f, Valid = true, Username = "amigo" }, c => c.Username == "amigo" && c.Valid && c.X == 1.5f);
             RoundTrip(opts, new ToolPreviewCommand { Active = true, Username = "amigo", Ax = 200f, Az = 200f, Dx = 296f, Dz = 200f }, c => c.Active && c.Username == "amigo" && c.Ax == 200f && c.Dx == 296f);
+
+            // v67 native build preview: road (rich control-point arrays), building (Transform), hide (Kind 0).
+            RoundTrip(opts, new PreviewCommand
+            {
+                Kind = 1, Username = "amigo", PrefabType = "NetPrefab", PrefabName = "Small Road",
+                Mode = 0, RandomSeed = 4309, LeftHandTraffic = true,
+                PosX = new[] { 12.9f, 130.5f }, PosY = new[] { 478f, 478f }, PosZ = new[] { -50f, -60f },
+                HitX = new[] { 12.9f, 130.5f }, HitY = new[] { 478f, 478f }, HitZ = new[] { -50f, -60f },
+                DirX = new[] { 1f, 1f }, DirZ = new[] { 0f, 0f },
+                HitDirX = new[] { 1f, 1f }, HitDirY = new[] { 0f, 0f }, HitDirZ = new[] { 0f, 0f },
+                RotX = new[] { 0f, 0f }, RotY = new[] { 0f, 0f }, RotZ = new[] { 0f, 0f }, RotW = new[] { 1f, 1f },
+                SnapPriX = new[] { 0f, 0f }, SnapPriY = new[] { 0f, 0f },
+                ElemIdxX = new[] { 0, 1 }, ElemIdxY = new[] { 0, 0 },
+                CurvePos = new[] { 0f, 1f }, Elev = new[] { 0f, 0f },
+                SnapPosX = new[] { 0f, 12.5f }, SnapPosZ = new[] { 0f, -60f }, SnapKind = new[] { 0, 1 },
+            }, c => c.Kind == 1 && c.PrefabName == "Small Road" && c.LeftHandTraffic && c.PosX.Length == 2
+                    && Math.Abs(c.PosZ[1] - (-60f)) < 0.01f && c.SnapKind[1] == 1 && c.ElemIdxX[1] == 1);
+            RoundTrip(opts, new PreviewCommand
+            {
+                Kind = 2, Username = "amigo", PrefabType = "BuildingPrefab", PrefabName = "FireHouse01",
+                RandomSeed = 23203, BPosX = -300.9f, BPosY = 479.1f, BPosZ = 284.8f, BRotW = 1f,
+            }, c => c.Kind == 2 && c.PrefabName == "FireHouse01" && Math.Abs(c.BPosX - (-300.9f)) < 0.01f
+                    && c.BRotW == 1f && c.PosX == null);
+            RoundTrip(opts, new PreviewCommand { Kind = 0 }, c => c.Kind == 0 && c.PrefabName == null && c.PosX == null);
 
             // --- New fork commands ---
             RoundTrip(opts, new TaxSyncCommand { Rates = new[] { 10, 3, -2, 5, 0, 7 } }, c => c.Rates.Length == 6 && c.Rates[1] == 3 && c.Rates[2] == -2);
@@ -641,6 +790,41 @@ namespace CS2MTests
             }, c => c.Ops.Length == 3 && c.Ops[2] == 1 && c.Ids[1] == 101UL && c.PrefabNames[0] == "Wheat"
                     && Math.Abs(c.PosZ[2] - (-7f)) < 0.01f && c.OwnerAnchorId == 0xABCDEF01UL && c.BuildingSyncId == 0x55UL
                     && Math.Abs(c.RotY[1] - 0.7f) < 0.01f && c.Seeds[2] == 33);
+            // Area surface batch: two create ops (variable-length polygons flattened via NodeCounts) + a delete.
+            RoundTrip(opts, new AreaSurfaceCommand
+            {
+                OwnerAnchorId = 0xDEAD01UL, OwnerAnchorPrefabName = "Wheat Field", OwnerX = 87f, OwnerY = 478f, OwnerZ = -9f,
+                BuildingSyncId = 0x66UL,
+                Ops = new byte[] { 0, 0, 1 },
+                Ids = new[] { 200UL, 201UL, 202UL },
+                PrefabTypes = new[] { "SurfacePrefab", "SurfacePrefab", "SurfacePrefab" },
+                PrefabNames = new[] { "Farmland", "Farmland", "Farmland" },
+                Seeds = new[] { 7, 8, 9 },
+                NodeCounts = new[] { 4, 3, 0 },
+                NodeX = new[] { 0f, 10f, 10f, 0f, /*op2*/ 20f, 30f, 20f },
+                NodeY = new[] { 478f, 478f, 478f, 478f, 478f, 478f, 478f },
+                NodeZ = new[] { 0f, 0f, 10f, 10f, /*op2*/ 5f, 5f, 15f },
+                NodeEl = new[] { -3.4e38f, 0f, 0f, 0f, -3.4e38f, 0f, 0f },
+            }, c => c.Ops.Length == 3 && c.Ops[2] == 1 && c.Ids[1] == 201UL && c.PrefabNames[0] == "Farmland"
+                    && c.OwnerAnchorId == 0xDEAD01UL && c.BuildingSyncId == 0x66UL && c.Seeds[2] == 9
+                    && c.NodeCounts.Length == 3 && c.NodeCounts[0] == 4 && c.NodeCounts[1] == 3 && c.NodeCounts[2] == 0
+                    && c.NodeX.Length == 7 && Math.Abs(c.NodeX[4] - 20f) < 0.01f && Math.Abs(c.NodeZ[6] - 15f) < 0.01f);
+            // Extractor batch: host-authoritative Game.Areas.Extractor per area (the field-size driver).
+            RoundTrip(opts, new ExtractorSyncCommand
+            {
+                AreaIds = new[] { 0xEEEE01UL, 0UL },
+                AreaPrefabNames = new[] { "Wheat Field", "Forest Field" },
+                CenterX = new[] { 87f, -12f }, CenterZ = new[] { -9f, 340f },
+                ResourceAmount = new[] { 1000f, 5000f },
+                MaxConcentration = new[] { 0.75f, 1f },
+                ExtractedAmount = new[] { 250.5f, 0f },
+                WorkAmount = new[] { 12f, 3f },
+                HarvestedAmount = new[] { 240f, 0f },
+                TotalExtracted = new[] { 512.25f, 9f },
+                WorkType = new[] { 2, 0 },
+            }, c => c.AreaIds.Length == 2 && c.AreaIds[0] == 0xEEEE01UL && c.AreaPrefabNames[1] == "Forest Field"
+                    && Math.Abs(c.ExtractedAmount[0] - 250.5f) < 0.01f && Math.Abs(c.TotalExtracted[0] - 512.25f) < 0.01f
+                    && c.WorkType[0] == 2 && Math.Abs(c.MaxConcentration[0] - 0.75f) < 0.01f);
             RoundTrip(opts, new RouteCreateCommand { SyncId = 42UL, PrefabType = "TransportLinePrefab", PrefabName = "Bus Line", Complete = true, ColorR = 10, ColorG = 20, ColorB = 30, ColorA = 255, Number = 7, WpX = new[] { 1f, 2f, 3f }, WpY = new[] { 0f, 0f, 0f }, WpZ = new[] { 9f, 8f, 7f }, WpHasConn = new byte[] { 1, 0, 1 }, WpConnId = new ulong[] { 5UL, 0UL, 0UL }, WpConnX = new[] { 1f, 0f, 3f }, WpConnZ = new[] { 9f, 0f, 7f } }, c => c.Complete && c.Number == 7 && c.WpX.Length == 3 && c.WpHasConn[2] == 1 && c.WpConnId[0] == 5UL);
             RoundTrip(opts, new RouteColorCommand { SyncId = 42UL, PrefabName = "Bus Line", Number = 7, ColorR = 200, ColorG = 100, ColorB = 50, ColorA = 255 }, c => c.Number == 7 && c.ColorR == 200);
             RoundTrip(opts, new DeleteCommand { SyncId = 0UL, TargetKind = 1, PrefabName = "Bus Line", Number = 7 }, c => c.TargetKind == 1 && c.Number == 7);
@@ -697,6 +881,57 @@ namespace CS2MTests
                 BoundaryNodeIds = new ulong[0], BoundaryPosX = new float[0], BoundaryPosY = new float[0], BoundaryPosZ = new float[0],
             }, c => c.NodeIds.Length == 0 && c.EdgeStartNodeIds.Length == 0 && c.DelStartNodeIds.Length == 1
                     && c.DelEndNodeIds[0] == 4UL && c.BoundaryNodeIds.Length == 0);
+
+            // --- NodePosUpdate (settled-position stream; ulong[] ids + parallel float[] coords) ---
+            RoundTrip(opts, new NodePosUpdateCommand
+            {
+                Ids = new[] { 101UL, 202UL, 0xFFFFFF0000000009UL },
+                X = new[] { 100.5f, 200f, -3124.25f },
+                Y = new[] { 478f, 478.5f, 5f },
+                Z = new[] { -50f, -60.75f, 1204.5f },
+            }, c => c.Ids.Length == 3 && c.Ids[2] == 0xFFFFFF0000000009UL
+                    && Math.Abs(c.X[0] - 100.5f) < 0.01f && Math.Abs(c.Z[2] - 1204.5f) < 0.01f);
+
+            // Empty stream (no node moved past threshold this scan — a valid degenerate shape).
+            RoundTrip(opts, new NodePosUpdateCommand
+            {
+                Ids = new ulong[0], X = new float[0], Y = new float[0], Z = new float[0],
+            }, c => c.Ids.Length == 0 && c.X.Length == 0);
+
+            // --- NetSet (host-authoritative net-graph reconcile: 3 nodes + 2 edges, and the empty region) ---
+            RoundTrip(opts, new NetSetCommand
+            {
+                MinX = -100f, MinZ = -80f, MaxX = 260f, MaxZ = 40f,
+                NodeIds = new[] { 11UL, 12UL, 0xFFFFFF0000000013UL },
+                NX = new[] { 100f, 200f, 150f }, NY = new[] { 478f, 478f, 478.5f }, NZ = new[] { -50f, -60f, -20f },
+                EdgeIds = new[] { 501UL, 502UL },
+                EdgeStartId = new[] { 11UL, 12UL },
+                EdgeEndId = new[] { 12UL, 0xFFFFFF0000000013UL },
+                EdgePrefabType = new[] { "RoadPrefab", "RoadPrefab" },
+                EdgePrefab = new[] { "Small Road", "Small Road" },
+                EdgeRoadFlags = new byte[] { 1, 3 }, // StartHalfAligned / Start|EndHalfAligned
+                Ax = new[] { 100f, 200f }, Ay = new[] { 478f, 478f }, Az = new[] { -50f, -60f },
+                Bx = new[] { 133f, 183f }, By = new[] { 478f, 478f }, Bz = new[] { -53f, -47f },
+                Cx = new[] { 166f, 166f }, Cy = new[] { 478f, 478f }, Cz = new[] { -57f, -33f },
+                Dx = new[] { 200f, 150f }, Dy = new[] { 478f, 478.5f }, Dz = new[] { -60f, -20f },
+            }, c => c.NodeIds.Length == 3 && c.NodeIds[2] == 0xFFFFFF0000000013UL
+                    && c.EdgeIds.Length == 2 && c.EdgeStartId[1] == 12UL && c.EdgeEndId[1] == 0xFFFFFF0000000013UL
+                    && c.EdgePrefab[0] == "Small Road" && Math.Abs(c.Dx[0] - 200f) < 0.01f
+                    && c.EdgeRoadFlags.Length == 2 && c.EdgeRoadFlags[0] == 1 && c.EdgeRoadFlags[1] == 3
+                    && Math.Abs(c.MaxX - 260f) < 0.01f && Math.Abs(c.Bz[1] - (-47f)) < 0.01f);
+
+            // Empty region (a dirty-region scan that resolved no edges — a valid degenerate shape).
+            RoundTrip(opts, new NetSetCommand
+            {
+                MinX = 0f, MinZ = 0f, MaxX = 0f, MaxZ = 0f,
+                NodeIds = new ulong[0], NX = new float[0], NY = new float[0], NZ = new float[0],
+                EdgeIds = new ulong[0], EdgeStartId = new ulong[0], EdgeEndId = new ulong[0],
+                EdgePrefabType = new string[0], EdgePrefab = new string[0], EdgeRoadFlags = new byte[0],
+                Ax = new float[0], Ay = new float[0], Az = new float[0],
+                Bx = new float[0], By = new float[0], Bz = new float[0],
+                Cx = new float[0], Cy = new float[0], Cz = new float[0],
+                Dx = new float[0], Dy = new float[0], Dz = new float[0],
+            }, c => c.NodeIds.Length == 0 && c.EdgeIds.Length == 0 && c.EdgePrefab.Length == 0);
 
             Console.WriteLine($"\n=== {_pass} passed, {_fail} failed ===");
             return _fail == 0 ? 0 : 1;

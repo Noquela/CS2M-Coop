@@ -9,8 +9,9 @@ using Unity.Entities;
 
 namespace CS2M.Sync
 {
-    /// <summary>Global toggle for allowing a temporary negative DevTreePoints balance. OFF by default
-    /// (env <c>CS2M_DEVTREEFIX=1</c>) until validated on a 2-sim.
+    /// <summary>Global toggle for allowing a temporary negative DevTreePoints balance. ON by default
+    /// since 2026-07-07 — validated on a 2-sim (see <see cref="Enabled"/>). Env <c>CS2M_DEVTREEFIX=0</c>
+    /// disables it.
     ///     Gap: <see cref="DevTreeApplySystem.ApplyOne"/> floors the local balance at
     ///     <c>Max(0, points - cost)</c> after mirroring a remote purchase. <c>DevTreePoints</c> is
     ///     itself derived deterministically from milestones reached (decomp

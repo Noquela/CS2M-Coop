@@ -25,8 +25,11 @@ namespace CS2M.Sync
     ///     authority). Only pins a node that has drifted &gt; 0.2 m, throttled, so a settled junction is left
     ///     alone once converged.
     ///
-    ///     Gated OFF by default (env <c>CS2M_NODEPIN=1</c>) until validated on a 2-sim — forcing node
-    ///     positions could fight the game if a junction is still being actively re-shaped, so it ships dormant.
+    ///     PERMANENTLY DISABLED (04/07) via the unconditional <c>if (true) return;</c> at the top of
+    ///     <see cref="OnUpdate"/> — there is no env var gating this; <c>CS2M_NODEPIN</c> is not read
+    ///     anywhere in the codebase. Pinning oscillated in practice (see the comment above that
+    ///     <c>return</c> for the mechanism), and the real fix moved to tolerant zone-block matching
+    ///     instead. This class is kept only as historical reference for the mechanism that was tried.
     /// </summary>
     public partial class NodePinSystem : GameSystemBase
     {

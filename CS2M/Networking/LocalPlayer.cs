@@ -178,6 +178,22 @@ namespace CS2M.Networking
             return Inactive();
         }
 
+        /// <summary>
+        ///     Client-side: the host explicitly announced (ServerStoppingCommand) that it is shutting
+        ///     down the session. Marks the upcoming disconnect as intentional using the SAME flag
+        ///     UserDisconnect() sets, so the ClientDisconnectEvent that follows within a frame or two
+        ///     (once the host tears its socket down) doesn't kick off the v50 auto-reconnect cycle
+        ///     against a host that isn't coming back. Does NOT tear the connection down itself — that
+        ///     still happens via the normal OnClientDisconnected() path.
+        /// </summary>
+        public void ServerAnnouncedStopping()
+        {
+            _intentionalDisconnect = true;
+            _reconnecting = false;
+            _reconnectTriesLeft = 0;
+            Log.Info("[Reconnect] host encerrou a sessão — auto-reconnect suprimido");
+        }
+
         public bool ConnectionEstablished()
         {
             if (PlayerStatus != PlayerStatus.NAT_CONNECT &&
@@ -427,6 +443,8 @@ namespace CS2M.Networking
             // Drop synced-entity id map + all queued sync state.
             Sync.CS2M_SyncIdSystem.Clear();
             Sync.CS2M_NodeSyncIds.Clear();
+            Sync.CS2M_EdgeSyncIds.Clear();
+            Sync.RemoteNetSetQueue.Clear();
             Sync.RemoteMoneyQueue.Clear();
             Sync.RemoteEditQueue.Clear();
             Sync.RemoteNetQueue.Clear();
@@ -464,6 +482,8 @@ namespace CS2M.Networking
             Sync.RemoteEnvQueue.Clear();
             Sync.TileSync.Clear();
             Sync.RemoteAreaQueue.Clear();
+            Sync.RemoteAreaSurfaceQueue.Clear();
+            Sync.RemoteExtractorQueue.Clear();
             Sync.LoanSync.Clear();
             Sync.RenameSync.Clear();
             Sync.RouteSync.Clear();

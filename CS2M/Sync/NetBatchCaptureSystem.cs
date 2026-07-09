@@ -15,17 +15,19 @@ using Unity.Mathematics;
 
 namespace CS2M.Sync
 {
-    /// <summary>Global toggle for the AtomicBatch net path. BACK TO OFF BY DEFAULT in v66.3 (env
-    /// <c>CS2M_ATOMIC=1</c> to opt in). It was flipped ON in v66 for zero road drift, but 2-sim field
-    /// testing showed it CRASHES THE RECEIVER (host or client — whoever did NOT draw the road) when a
-    /// batch materializes a complex junction (a degree-4 node + multiple deletes in one frame): the
-    /// game's own Burst net pipeline (GenerateEdges/NodeAlign) faults on the topology the batch apply
-    /// leaves mid-frame. It is a native crash — our per-batch try/catch can't catch it — so the fix is
-    /// to not use the path until the apply is made topology-safe. The legacy NetDetector→NetPlaceApply
-    /// reconstruct path is availability-proven (weeks of play, no crash); the v66 zone SET-reconcile
-    /// (host owns the grid) converges zones on top of it regardless of small junction drift. When ON,
-    /// <see cref="NetBatchCaptureSystem"/> is the only net sender and the legacy NetDetectorSystem +
-    /// NetEditDetectorSystem early-return.</summary>
+    /// <summary>Global toggle for the AtomicBatch net path. ON by default since v66.5 (env
+    /// <c>CS2M_ATOMIC=0</c> to opt out — see <see cref="Enabled"/> for the v66.5 root-cause fix). It was
+    /// flipped ON in v66 for zero road drift, then BACK TO OFF in v66.3 after 2-sim field testing showed
+    /// it CRASHES THE RECEIVER (host or client — whoever did NOT draw the road) when a batch materializes
+    /// a complex junction (a degree-4 node + multiple deletes in one frame): the game's own Burst net
+    /// pipeline (GenerateEdges/NodeAlign) faults on the topology the batch apply leaves mid-frame. It is a
+    /// native crash — our per-batch try/catch can't catch it. v66.5 root-caused the crash to the zone
+    /// reconcile's block create/delete (NativeQuadTree), not the batch apply itself, fixed that at the
+    /// root, and re-enabled the path. The legacy NetDetector→NetPlaceApply reconstruct path remains
+    /// availability-proven (weeks of play, no crash) and is what runs when this is disabled; the v66 zone
+    /// SET-reconcile (host owns the grid) converges zones on top of it regardless of small junction drift.
+    /// When ON, <see cref="NetBatchCaptureSystem"/> is the only net sender and the legacy
+    /// NetDetectorSystem + NetEditDetectorSystem early-return.</summary>
     public static class AtomicBatch
     {
         private static int _state = -1;
@@ -69,6 +71,21 @@ namespace CS2M.Sync
         private EntityQuery _newNodes;
         private EntityQuery _newEdges;
         private EntityQuery _removedEdges;
+
+        // ---- A. Continuous settled-position stream (NodePosUpdate) --------------------------------------
+        // id -> last position THIS side already SENT for that node (populated after each batch send + after
+        // each stream send). Only ids this side AUTHORED live here (new nodes always; boundary nodes only
+        // when they are NOT another player's remote-placed node) — the echo guard: the receiver never
+        // re-broadcasts a node it merely received. A "star" junction re-seats its nodes AFTER the batch left
+        // (NodeAlign re-centres per new arm; successive splits nudge 1-2 m each), so every NodePosScanInterval
+        // frames we compare each node's current Node.m_Position to the last-sent value and ship the delta.
+        private readonly Dictionary<ulong, float3> _sentNodePos = new Dictionary<ulong, float3>();
+        private int _streamFrame;
+
+        // Scan cadence (frames) and the min displacement (m) worth streaming, and the per-command id cap.
+        private const int NodePosScanInterval = 30;
+        private const float NodePosSendThreshold = 0.5f;
+        private const int NodePosBatchCap = 32;
 
         protected override void OnCreate()
         {
@@ -142,7 +159,20 @@ namespace CS2M.Sync
 
             if (NetworkInterface.Instance.LocalPlayer.PlayerStatus != PlayerStatus.PLAYING)
             {
+                // Teardown-equivalent cleanup (LocalPlayer.cs is intentionally not touched by this fix): a
+                // reconnect must not carry over stale ids/positions from the previous session.
+                if (_sentNodePos.Count > 0) { _sentNodePos.Clear(); }
+                _streamFrame = 0;
                 return;
+            }
+
+            // A. Every NodePosScanInterval frames, stream any node whose settled position moved since it was
+            // last sent. Runs BEFORE the empty-query early-return below, so it fires even on frames with no
+            // new tool apply (that is exactly when the LATE re-seating of an already-shipped junction shows up).
+            if (++_streamFrame >= NodePosScanInterval)
+            {
+                _streamFrame = 0;
+                StreamNodePosUpdates();
             }
 
             if (_newNodes.IsEmptyIgnoreFilter && _newEdges.IsEmptyIgnoreFilter && _removedEdges.IsEmptyIgnoreFilter)
@@ -432,6 +462,29 @@ namespace CS2M.Sync
 
             Command.SendToAll?.Invoke(cmd);
 
+            // A. Remember what we JUST shipped for each node so the continuous stream (StreamNodePosUpdates)
+            // only sends a NodePosUpdate once the builder's later NodeAlign re-seats it past the threshold.
+            // New nodes: always this side's authorship. Boundary nodes: record ONLY when they are not another
+            // player's remote-placed node (that node's author streams it — never double-author across the echo
+            // guard); a save-loaded shared node has no CS2M_RemotePlaced and is co-authored, which is fine —
+            // whoever re-seats it past the threshold ships, and a converged pair sends nothing.
+            for (int i = 0; i < nNodeIds.Count; i++)
+            {
+                _sentNodePos[nNodeIds[i]] = new float3(nPosX[i], nPosY[i], nPosZ[i]);
+            }
+
+            for (int i = 0; i < boundaryIds.Count; i++)
+            {
+                ulong bId = boundaryIds[i];
+                if (CS2M_NodeSyncIds.TryResolve(EntityManager, bId, out Entity bEnt)
+                    && EntityManager.HasComponent<CS2M_RemotePlaced>(bEnt))
+                {
+                    continue; // authored by the other side — let them stream it
+                }
+
+                _sentNodePos[bId] = new float3(boundaryPosX[i], boundaryPosY[i], boundaryPosZ[i]);
+            }
+
             // Debug-only (logging, no behavior change): id+position dumps so a divergence hunt can tell
             // "receiver never got this node" from "receiver got it, then moved it".
             if (nNodeIds.Count > 0)
@@ -447,6 +500,71 @@ namespace CS2M.Sync
             CS2M.Log.Info(
                 $"[Batch] CAPTURED nodes={nNodeIds.Count} edges={eStart.Count} dels={dStart.Count} " +
                 $"boundary={boundaryIds.Count} strays={droppedStray}");
+        }
+
+        /// <summary>A. Scan every node THIS side has shipped and stream (by identity) each one whose settled
+        /// Node.m_Position moved &gt; <see cref="NodePosSendThreshold"/> since it was last sent — the builder
+        /// re-seating a junction AFTER the batch left. Ids no longer resolvable (node deleted/split away) are
+        /// dropped from the tracking dict. Emits <see cref="NodePosUpdateCommand"/>s of ≤ <see
+        /// cref="NodePosBatchCap"/> ids each, and advances the last-sent record for every id shipped.</summary>
+        private void StreamNodePosUpdates()
+        {
+            if (_sentNodePos.Count == 0)
+            {
+                return;
+            }
+
+            List<ulong> gone = null;
+            var upIds = new List<ulong>();
+            var upX = new List<float>(); var upY = new List<float>(); var upZ = new List<float>();
+
+            foreach (KeyValuePair<ulong, float3> kv in _sentNodePos)
+            {
+                if (!CS2M_NodeSyncIds.TryResolve(EntityManager, kv.Key, out Entity node))
+                {
+                    (gone ??= new List<ulong>()).Add(kv.Key);
+                    continue;
+                }
+
+                float3 pos = EntityManager.GetComponentData<Node>(node).m_Position;
+                if (math.distance(pos, kv.Value) > NodePosSendThreshold)
+                {
+                    upIds.Add(kv.Key); upX.Add(pos.x); upY.Add(pos.y); upZ.Add(pos.z);
+                }
+            }
+
+            if (gone != null)
+            {
+                foreach (ulong id in gone)
+                {
+                    _sentNodePos.Remove(id);
+                }
+            }
+
+            if (upIds.Count == 0)
+            {
+                return;
+            }
+
+            for (int start = 0; start < upIds.Count; start += NodePosBatchCap)
+            {
+                int cnt = System.Math.Min(NodePosBatchCap, upIds.Count - start);
+                var cmd = new NodePosUpdateCommand
+                {
+                    Ids = new ulong[cnt],
+                    X = new float[cnt], Y = new float[cnt], Z = new float[cnt],
+                };
+                for (int j = 0; j < cnt; j++)
+                {
+                    int k = start + j;
+                    cmd.Ids[j] = upIds[k];
+                    cmd.X[j] = upX[k]; cmd.Y[j] = upY[k]; cmd.Z[j] = upZ[k];
+                    _sentNodePos[upIds[k]] = new float3(upX[k], upY[k], upZ[k]); // advance last-sent
+                }
+
+                Command.SendToAll?.Invoke(cmd);
+                CS2M.Log.Info($"[Batch] NPU-SEND count={cnt}");
+            }
         }
 
         // How close an unreferenced new node must sit to one of THIS batch's boundary nodes to be
