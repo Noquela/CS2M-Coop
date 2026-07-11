@@ -323,6 +323,76 @@ namespace CS2M.Sync
 
         private bool _t6ClientIdleLogged;
 
+        // CS2M_AP_TEST=10: PREVIEW-STRESS — reproduces the production crash where a CLIENT's building
+        // preview ghost (Kind=2, injected into every OTHER machine's world via PreviewApplySystem's
+        // delete-then-regenerate cycle, ~12Hz — see PreviewCommand.cs / PreviewGhostSystems.cs) is
+        // churned on the HOST while the HOST concurrently settles a REAL construction in the same
+        // region. Hypothesis: a Burst job (one of the Generate*Systems) reads a Temp entity belonging to
+        // the ghost's SubNets (a building with a driveway SubNet, deleted-and-recreated mid-frame) while
+        // the host's own real build is applying nearby. HOST side behaves EXACTLY like TRIREPRO
+        // (test=3) — the env-var setup below also flips _triRepro=true, so RunTriReproStep's unmodified
+        // step machine keeps generating real road/zone/farm construction traffic; the host is the
+        // machine that SUFFERS the stress (runs under procdump in the harness). CLIENT side
+        // (RunPreviewStressStep) sends a SYNTHETIC Kind=2 PreviewCommand for a real, deterministic
+        // BuildingPrefab (TryGetFarmPrefab — the same extractor/farm prefab TRIREPRO's PHASE6 places,
+        // chosen because it is a lot-owning prefab with SubNets, matching the production "driveway
+        // fantasma" ghost) every 5 frames — the same SendEveryNFrames cadence PreviewCaptureSystem
+        // itself uses — orbiting the SAME deterministic origin the host's TRIREPRO uses
+        // (PreviewStress_TryDeriveOrigin mirrors TriRepro_Setup's own anchor+quadrant search WITHOUT
+        // drawing anything: unlike CLIENT-MESH/CLIENT-STAR's reuse of TriRepro_Setup, a real
+        // client-authored build here would race the host's own TRIREPRO road at the same coordinates)
+        // with theta advancing ~0.2 rad per send so every command moves the ghost and forces
+        // PreviewApplySystem's delete-then-regenerate (ApplyOne always deletes the player's previous
+        // ghost first). Every ~120 frames (~2s) one send is a Kind=0 hide instead of a preview — the
+        // very next send (5 frames later) naturally resumes Kind=2 since the frame modulus only lines
+        // up once per 120 frames — stressing the full delete-total/recreate cycle on top of the
+        // steady-state move-in-place churn. Runs for ~10800 frames (~3 min) then logs the DONE marker
+        // (with the total sent count) and stops; a periodic marker logs every 60 sends.
+        private bool _previewStress;
+        private bool _psOriginFound;
+        private float3 _psOrigin;
+        private string _psFarmType, _psFarmName;
+        private int _psFrame;        // frames elapsed since the gate opened — drives the ~10800f window
+        private int _psSentCount;    // total previews sent (periodic log every 60 + final DONE count)
+        private float _psTheta;      // orbit angle around _psOrigin, advances ~0.2 rad per send
+        private bool _psDone;
+
+        // CS2M_AP_TEST=11: CHAOS — TRIREPRO (test=3, unmodified, sets _triRepro=true above) running on
+        // the HOST as the "real construction" stress source, PLUS a host-side FORGED-preview injector
+        // that bypasses the network and Put()s straight into RemotePreviewInbox every single frame (not
+        // gated by SendEveryNFrames/keepalive — see PreviewCommand.cs / PreviewGhostSystems.cs for the
+        // wire path this skips) for THREE synthetic SenderIds, so PreviewApplySystem's
+        // delete-then-regenerate ghost cycle (ApplyOne: every update deletes the player's previous ghost
+        // FIRST, then re-injects — see PreviewGhostSystems.cs:522-535) churns at 60Hz instead of the real
+        // ~12Hz cap PreviewCaptureSystem enforces on an actual client. Hypothesis under test: a Burst job
+        // in one of the Generate*Systems reads a Temp entity belonging to a just-deleted-and-recreated
+        // ghost's SubNets while the host's OWN real TRIREPRO construction is concurrently settling in the
+        // SAME region — see RunChaosHostInject for the three senders' shapes:
+        //   SenderId=2: Kind=2 building (farm/extractor prefab, same as TRIREPRO PHASE6/TEST10) orbiting
+        //               _triOrigin at a radius sweeping 15-40m, theta advancing 0.35 rad/frame — a new
+        //               position (hence delete+regenerate) EVERY frame.
+        //   SenderId=3: Kind=1 road, a ~100m segment through the triangle's centroid rotating 0.1
+        //               rad/frame, with SnapKind/SnapPos on both control points pinned to REAL, currently
+        //               mutating TRIREPRO anchors (_triA — a live corner node; _triMid — a point ON the
+        //               A-B edge's curve, the same span the diagonal/X-CROSS/overdraw phases keep cutting)
+        //               so ResolveSnap's proximity search (3m) reliably binds m_OriginalEntity to a real,
+        //               in-flux Node/Edge instead of Entity.Null.
+        //   SenderId=4: alternates every 30 frames between a fixed-position building at the triangle's
+        //               centroid and Kind=0 (hide) — the full delete-total/recreate cycle on top of the
+        //               steady in-place churn the other two senders drive.
+        // Runs for 36000 frames (~10 min), logging an "inject frame=" marker every 600 frames and a final
+        // "TEST11 DONE". CLIENT side runs CLIENT-STAR (test=8, unmodified — the highest node-degree
+        // stress) and PREVIEW-STRESS (test=10, unmodified — real network-path preview ghosts) at the SAME
+        // time (RunChaosClientStep calls both every frame); it logs its own "TEST11 DONE" once both finish.
+        private bool _chaos;
+        private bool _chaosReady;
+        private bool _chaosDone;
+        private int _chaosFrame;     // frames elapsed since injection started — drives the 36000f window
+        private string _chaosFarmType, _chaosFarmName;
+        private float _chaosBuildTheta; // SenderId=2 orbit angle, advances 0.35 rad/frame
+        private float _chaosRoadTheta;  // SenderId=3 segment rotation, advances 0.1 rad/frame
+        private bool _chaosClientDone;
+
         private GameMode _gameMode = GameMode.Other;
         private PrefabSystem _prefabSystem;
         private CitySystem _citySystem;
@@ -451,6 +521,22 @@ namespace CS2M.Sync
             _clientMesh = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "7";
             _clientStar = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "8";
             _connectExisting = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "9";
+            _previewStress = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "10";
+            if (_previewStress)
+            {
+                // HOST runs TRIREPRO's step machine completely unmodified under client preview-ghost
+                // stress — see the class-level TEST=10 doc comment (near _previewStress) for why.
+                _triRepro = true;
+            }
+
+            _chaos = Environment.GetEnvironmentVariable("CS2M_AP_TEST") == "11";
+            if (_chaos)
+            {
+                // CHAOS is TRIREPRO's real construction PLUS the host-side forged-preview injector
+                // (RunChaosHostInject) racing it every frame — see the class-level TEST=11 doc comment
+                // (near _chaos) for the full scenario.
+                _triRepro = true;
+            }
 
             GameManager.instance.onGameLoadingComplete += OnLoadingComplete;
 
@@ -705,9 +791,21 @@ namespace CS2M.Sync
                 {
                     RunConcurrentStep(true);
                 }
-                else if (_triRepro)
+                else if (_triRepro || _previewStress)
                 {
+                    // CS2M_AP_TEST=10 (PREVIEW-STRESS) also sets _triRepro=true in OnCreate, so this is
+                    // here purely for readability — the host runs TRIREPRO's step machine completely
+                    // unmodified, the same "real construction" stress source the client's synthetic
+                    // preview ghosts (RunPreviewStressStep) are meant to collide with.
                     RunTriReproStep();
+
+                    // CS2M_AP_TEST=11 (CHAOS) also sets _triRepro=true in OnCreate; additionally, every
+                    // single frame (NOT gated by RunTriReproStep's own 180-frame step timer), forge THREE
+                    // PreviewCommands and Put() them straight into RemotePreviewInbox — bypassing the
+                    // network entirely — so PreviewApplySystem's delete-then-regenerate ghost churn races
+                    // the host's own REAL TRIREPRO construction settling in the same region at 60Hz. See
+                    // RunChaosHostInject / the class-level TEST=11 doc comment (near _chaos).
+                    if (_chaos) { RunChaosHostInject(); }
                 }
                 else if (_clientFarm)
                 {
@@ -7369,6 +7467,352 @@ namespace CS2M.Sync
             _t6DevClientLogged = true;
         }
 
+        // ------------------------- CS2M_AP_TEST=10: PREVIEW-STRESS (client bombards the host with a moving preview ghost) -------------------------
+
+        /// <summary>Client-side driver for the PREVIEW-STRESS scene — see the class-level TEST=10 doc
+        /// comment (near <see cref="_previewStress"/>) for the full scenario. Gated on
+        /// <see cref="_joinReAnnounced"/> like every other client scene in this file. The first call
+        /// derives and caches the deterministic origin + prefab (see
+        /// <see cref="PreviewStress_TryDeriveOrigin"/>); every subsequent call advances the shared frame
+        /// counter, ships a synthetic <see cref="PreviewCommand"/> every 5 frames (mirrors
+        /// PreviewCaptureSystem.SendEveryNFrames), and after ~10800 frames (~3 min) sends one final hide,
+        /// logs the "TEST10 DONE" marker and stops.</summary>
+        private void RunPreviewStressStep()
+        {
+            if (_psDone || !_joinReAnnounced) { return; }
+
+            if (!_psOriginFound)
+            {
+                if (!PreviewStress_TryDeriveOrigin(out _psOrigin)) { return; } // retry next frame
+
+                if (!TryGetFarmPrefab(out Entity _, out _psFarmType, out _psFarmName))
+                {
+                    L("[Auto] TEST10 SKIP no farm/extractor BuildingPrefab found in this ruleset — " +
+                      "nothing deterministic to preview-stress with");
+                    _psDone = true;
+                    return;
+                }
+
+                _psOriginFound = true;
+                L($"[Auto] TEST10 PREVIEW-STRESS start origin=({_psOrigin.x:F0},{_psOrigin.z:F0}) " +
+                  $"prefab={_psFarmName}");
+            }
+
+            _psFrame++;
+            if (_psFrame >= 10800)
+            {
+                SendPreviewStressHide(); // leave the receiver's ghost registry clean on exit
+                _psDone = true;
+                L($"[Auto] TEST10 DONE previews={_psSentCount}");
+                return;
+            }
+
+            if (_psFrame % 5 != 0) { return; } // SendEveryNFrames cadence (~12 Hz at 60 fps)
+
+            if (_psFrame % 120 == 0) { SendPreviewStressHide(); }
+            else { SendPreviewStressBuilding(); }
+
+            _psSentCount++;
+            if (_psSentCount % 60 == 0)
+            {
+                L($"[Auto] TEST10 preview sent n={_psSentCount}");
+            }
+        }
+
+        /// <summary>Builds and ships one synthetic Kind=2 (building) PreviewCommand orbiting
+        /// <see cref="_psOrigin"/> at radius 25m, theta advancing ~0.2 rad every call so the position
+        /// changes on every send — forcing PreviewApplySystem's delete-then-regenerate on the host (see
+        /// ApplyOne: every update deletes the player's previous ghost first, THEN injects the new one).
+        /// Field-for-field this is the SAME shape PreviewCaptureSystem.CaptureBuilding sends for a real
+        /// object-tool ghost (Kind, PrefabType/PrefabName, RandomSeed, BPos*/BRot* — no control-point
+        /// arrays: those exist only on the Kind=1 road path, see PreviewCommand.cs); SyncId/Username are
+        /// left unset, exactly like the real capture (SenderId is auto-stamped by the network layer, see
+        /// LocalPlayer.cs).</summary>
+        private void SendPreviewStressBuilding()
+        {
+            _psTheta += 0.2f;
+            var xz = new float3(
+                _psOrigin.x + 25f * math.cos(_psTheta),
+                _psOrigin.y,
+                _psOrigin.z + 25f * math.sin(_psTheta));
+
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            float y = TerrainUtils.SampleHeight(ref hd, xz);
+            var pos = new float3(xz.x, y, xz.z);
+
+            var cmd = new PreviewCommand
+            {
+                Kind = 2,
+                PrefabType = _psFarmType,
+                PrefabName = _psFarmName,
+                RandomSeed = 5099, // fixed deterministic seed — same value TriRepro_Phase6_FarmPlace uses
+                BPosX = pos.x, BPosY = pos.y, BPosZ = pos.z,
+                BRotX = 0f, BRotY = 0f, BRotZ = 0f, BRotW = 1f, // identity rotation, deterministic
+            };
+            Command.SendToAll?.Invoke(cmd);
+        }
+
+        /// <summary>Kind=0 hide — the same "tool released" shape PreviewCaptureSystem sends when the
+        /// local tool goes inactive. Used both for the periodic ~2s stress hide/resume cycle and the
+        /// final cleanup send when the scene ends.</summary>
+        private void SendPreviewStressHide()
+        {
+            Command.SendToAll?.Invoke(new PreviewCommand { Kind = 0 });
+        }
+
+        /// <summary>Derives the SAME deterministic origin <see cref="TriRepro_Setup"/> would pick on the
+        /// host — identical anchor + quadrant walk, reusing <see cref="IsQuadrantFree"/>/
+        /// <see cref="IsQuadrantDry"/> unmodified — WITHOUT drawing anything. Unlike CLIENT-MESH/
+        /// CLIENT-STAR, which call TriRepro_Setup directly because THEY are meant to author the real
+        /// geometry, PREVIEW-STRESS's client only ever ships fake preview ghosts: calling TriRepro_Setup
+        /// here would draw a genuine competing road at the same coordinates the host's own (also running,
+        /// since test=10 sets _triRepro=true) TriRepro_Setup targets. Must be called before the host's
+        /// real TRIREPRO roads land in this quadrant — otherwise IsQuadrantFree would reject the host's
+        /// now-occupied quadrant and the two sides would diverge — so the caller retries every frame
+        /// until it succeeds (TryAnchor can fail before the world/city is ready) and caches the result.
+        /// Returns false only when no anchor point exists yet.</summary>
+        private bool PreviewStress_TryDeriveOrigin(out float3 origin)
+        {
+            origin = default;
+            if (!TryAnchor(out float3 anchor)) { return false; }
+
+            // Same constants as TriRepro_Setup's own quadrant search (kept in sync deliberately — see
+            // that method's doc comment for why each one has the value it does).
+            const int maxK = 40;
+            const float quadrantStep = 700f;
+            const float freeRadius = 600f;
+            var baseOrigin = new float3(anchor.x + 900f, anchor.y, anchor.z + 1200f);
+
+            for (int k = 0; k < maxK; k++)
+            {
+                var candidate = baseOrigin + new float3((k % 8) * quadrantStep, 0f, (k / 8) * quadrantStep);
+                var sceneCenter = candidate + new float3(150f, 0f, 200f);
+                if (!IsQuadrantFree(sceneCenter, freeRadius)) { continue; }
+                if (!IsQuadrantDry(candidate, sceneCenter)) { continue; }
+
+                origin = candidate;
+                return true;
+            }
+
+            origin = baseOrigin; // same k=0 fallback TriRepro_Setup itself falls back to
+            return true;
+        }
+
+        // ------------------------- CS2M_AP_TEST=11: CHAOS (host-forged preview churn vs. real construction) -------------------------
+
+        /// <summary>Host-side driver for CS2M_AP_TEST=11 CHAOS — see the class-level TEST=11 doc comment
+        /// (near <see cref="_chaos"/>) for the full scenario and why each sender's shape was chosen. Called
+        /// EVERY frame from UpdateHost's <c>_triRepro || _previewStress</c> branch, right after
+        /// <see cref="RunTriReproStep"/> — deliberately NOT gated by that method's own 180-frame step
+        /// timer, since the whole point is a churn rate the wire (SendEveryNFrames=5 in
+        /// PreviewCaptureSystem) could never produce. The first call waits for <see cref="TriRepro_Setup"/>
+        /// (step 0 of RunTriReproStep, which always runs on ITS first call — same frame, invoked just
+        /// before this one) to have resolved a road prefab + <see cref="_triOrigin"/>/<see cref="_triA"/>/
+        /// <see cref="_triB"/>/<see cref="_triC"/>/<see cref="_triMid"/> before locking in a farm prefab and
+        /// starting the frame counter; a missing road OR farm prefab (empty ruleset, or TriRepro_Setup
+        /// SKIPped for lack of an anchor) is a hard SKIP, same shape as TEST10's.</summary>
+        private void RunChaosHostInject()
+        {
+            if (_chaosDone) { return; }
+
+            if (!_chaosReady)
+            {
+                if (string.IsNullOrEmpty(_triRoadType) || string.IsNullOrEmpty(_triRoadName)) { return; } // retry next frame — TriRepro_Setup hasn't resolved (or SKIPped, no anchor) yet
+
+                if (!TryGetFarmPrefab(out Entity _, out _chaosFarmType, out _chaosFarmName))
+                {
+                    L("[Auto] TEST11 SKIP no farm/extractor BuildingPrefab found in this ruleset — " +
+                      "nothing deterministic to inject with");
+                    _chaosDone = true;
+                    return;
+                }
+
+                _chaosReady = true;
+                L($"[Auto] TEST11 CHAOS inject start origin=({_triOrigin.x:F0},{_triOrigin.z:F0}) " +
+                  $"road={_triRoadName} farm={_chaosFarmName}");
+            }
+
+            _chaosFrame++;
+            if (_chaosFrame >= 36000)
+            {
+                _chaosDone = true;
+                L("[Auto] TEST11 DONE");
+                return;
+            }
+
+            if (_chaosFrame % 600 == 0)
+            {
+                L($"[Auto] TEST11 inject frame={_chaosFrame}");
+            }
+
+            ChaosInjectBuilding();   // SenderId=2 — orbiting farm ghost, delete+regenerate every frame
+            ChaosInjectRoad();       // SenderId=3 — rotating road segment snapped onto live TRIREPRO geometry
+            ChaosInjectAlternator(); // SenderId=4 — building/hide churn every 30 frames
+        }
+
+        /// <summary>SenderId=2: forges a Kind=2 (building) PreviewCommand orbiting <see cref="_triOrigin"/>
+        /// — the SAME origin the host's own TRIREPRO is drawing into — at a radius sweeping 15-40m
+        /// (<c>27.5 +/- 12.5</c>) and theta advancing 0.35 rad EVERY call (this runs every frame, unlike
+        /// TEST10's SendPreviewStressBuilding which only advances on its 5-frame send cadence), so the
+        /// position — and hence PreviewApplySystem's delete-then-regenerate of this sender's ghost — is
+        /// new on literally every frame. Field shape mirrors SendPreviewStressBuilding/CaptureBuilding
+        /// (Kind, PrefabType/Name, RandomSeed, BPos*/BRot*); Put() lands straight in the inbox, bypassing
+        /// Command.SendToAll entirely (this stress targets the LOCAL apply, not the wire).</summary>
+        private void ChaosInjectBuilding()
+        {
+            _chaosBuildTheta += 0.35f;
+            float radius = 27.5f + 12.5f * math.sin(_chaosBuildTheta * 0.37f); // sweeps ~15..40m at an incommensurate rate so it never lock-steps with theta
+            var xz = new float3(
+                _triOrigin.x + radius * math.cos(_chaosBuildTheta),
+                _triOrigin.y,
+                _triOrigin.z + radius * math.sin(_chaosBuildTheta));
+
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            float y = TerrainUtils.SampleHeight(ref hd, xz);
+
+            RemotePreviewInbox.Put(new PreviewCommand
+            {
+                SenderId = 2,
+                Kind = 2,
+                PrefabType = _chaosFarmType,
+                PrefabName = _chaosFarmName,
+                RandomSeed = 5099, // same fixed seed TriRepro_Phase6_FarmPlace/SendPreviewStressBuilding use
+                BPosX = xz.x, BPosY = y, BPosZ = xz.z,
+                BRotX = 0f, BRotY = 0f, BRotZ = 0f, BRotW = 1f,
+            });
+        }
+
+        /// <summary>SenderId=3: forges a Kind=1 (road) PreviewCommand — a straight ~100m segment through
+        /// the TRIREPRO triangle's centroid, rotating 0.1 rad EVERY frame, so it sweeps across whatever
+        /// TRIREPRO is currently building/rebuilding in that quadrant (triangle sides, X-CROSS, curve,
+        /// overdraw — see RunTriReproStep's phase list). Field shape mirrors
+        /// PreviewCaptureSystem.CaptureRoad (2 control points, parallel arrays) using the SAME road prefab
+        /// TRIREPRO itself draws with (<see cref="_triRoadType"/>/<see cref="_triRoadName"/>). Crucially
+        /// the SnapKind/SnapPos* fields are NOT derived from the rotating endpoints — they are pinned to
+        /// fixed, real TRIREPRO anchors (<see cref="_triA"/>, a live corner node; <see cref="_triMid"/>, a
+        /// point sitting ON the A-B edge's curve) so PreviewApplySystem.ResolveSnap's 3m proximity search
+        /// (PreviewGhostSystems.cs:713-718) reliably binds <c>m_OriginalEntity</c> to a REAL Node/Edge that
+        /// TRIREPRO's own phases keep mutating (diagonal/X-CROSS/overdraw all cut side A-B) — forcing
+        /// CreateDefinitionsJob to read live Node/Edge/Curve/ConnectedEdge data on an entity that can be
+        /// deleted-and-recreated by the host's real construction in the SAME frame.</summary>
+        private void ChaosInjectRoad()
+        {
+            _chaosRoadTheta += 0.1f;
+            float3 center = (_triA + _triB + _triC) / 3f; // triangle centroid — inside the mutating region regardless of which phase is currently running
+            var dir = new float2(math.cos(_chaosRoadTheta), math.sin(_chaosRoadTheta));
+
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            var p0xz = new float3(center.x + dir.x * 50f, 0f, center.z + dir.y * 50f);
+            var p1xz = new float3(center.x - dir.x * 50f, 0f, center.z - dir.y * 50f);
+            float y0 = TerrainUtils.SampleHeight(ref hd, p0xz);
+            float y1 = TerrainUtils.SampleHeight(ref hd, p1xz);
+            var p0 = new float3(p0xz.x, y0, p0xz.z);
+            var p1 = new float3(p1xz.x, y1, p1xz.z);
+
+            const int n = 2;
+            var cmd = new PreviewCommand
+            {
+                SenderId = 3,
+                Kind = 1,
+                PrefabType = _triRoadType,
+                PrefabName = _triRoadName,
+                Mode = 0, // straight — same convention ReplayRoadSegmentLocal/CaptureRoad use
+                RandomSeed = 5199,
+                EditorMode = false,
+                LeftHandTraffic = false,
+                RemoveUpgrade = false,
+                ParallelOffset = 0f,
+                ParallelCount = 0,
+                PosX = new float[n], PosY = new float[n], PosZ = new float[n],
+                HitX = new float[n], HitY = new float[n], HitZ = new float[n],
+                DirX = new float[n], DirZ = new float[n],
+                HitDirX = new float[n], HitDirY = new float[n], HitDirZ = new float[n],
+                RotX = new float[n], RotY = new float[n], RotZ = new float[n], RotW = new float[n],
+                SnapPriX = new float[n], SnapPriY = new float[n],
+                ElemIdxX = new int[n], ElemIdxY = new int[n],
+                CurvePos = new float[n], Elev = new float[n],
+                SnapPosX = new float[n], SnapPosZ = new float[n],
+                SnapKind = new int[n],
+            };
+
+            // Endpoint 0: snapped onto the real corner node A (SnapKind=1).
+            WriteChaosControlPoint(cmd, 0, p0, dir, 1, _triA);
+            // Endpoint 1: snapped onto the A-B edge (SnapKind=2), aimed via a point that sits ON that curve.
+            WriteChaosControlPoint(cmd, 1, p1, -dir, 2, _triMid);
+
+            RemotePreviewInbox.Put(cmd);
+        }
+
+        /// <summary>Fills one Kind=1 control point (parallel-array index <paramref name="i"/>) of a forged
+        /// road PreviewCommand: position/hit-position at <paramref name="pos"/>, direction
+        /// <paramref name="dir"/>, identity rotation, and a snap descriptor of kind
+        /// <paramref name="snapKind"/> pinned at <paramref name="snapAnchor"/> — deliberately decoupled
+        /// from <paramref name="pos"/> (see <see cref="ChaosInjectRoad"/>'s doc comment for why).</summary>
+        private static void WriteChaosControlPoint(PreviewCommand cmd, int i, float3 pos, float2 dir, int snapKind, float3 snapAnchor)
+        {
+            cmd.PosX[i] = pos.x; cmd.PosY[i] = pos.y; cmd.PosZ[i] = pos.z;
+            cmd.HitX[i] = pos.x; cmd.HitY[i] = pos.y; cmd.HitZ[i] = pos.z;
+            cmd.DirX[i] = dir.x; cmd.DirZ[i] = dir.y;
+            cmd.HitDirX[i] = 0f; cmd.HitDirY[i] = 1f; cmd.HitDirZ[i] = 0f;
+            cmd.RotX[i] = 0f; cmd.RotY[i] = 0f; cmd.RotZ[i] = 0f; cmd.RotW[i] = 1f;
+            cmd.SnapPriX[i] = 1f; cmd.SnapPriY[i] = 1f;
+            cmd.ElemIdxX[i] = -1; cmd.ElemIdxY[i] = -1;
+            cmd.CurvePos[i] = snapKind == 2 ? 0.5f : 0f;
+            cmd.Elev[i] = 0f;
+            cmd.SnapKind[i] = snapKind;
+            cmd.SnapPosX[i] = snapAnchor.x;
+            cmd.SnapPosZ[i] = snapAnchor.z;
+        }
+
+        /// <summary>SenderId=4: alternates every 30 frames between a fixed-position Kind=2 building ghost
+        /// at the TRIREPRO triangle's centroid and a Kind=0 hide — the full delete-total/recreate cycle
+        /// (registry drop + re-materialize) layered on top of SenderId=2's steady in-place churn.</summary>
+        private void ChaosInjectAlternator()
+        {
+            bool showBuilding = (_chaosFrame / 30) % 2 == 0;
+            if (!showBuilding)
+            {
+                RemotePreviewInbox.Put(new PreviewCommand { SenderId = 4, Kind = 0 });
+                return;
+            }
+
+            float3 center = (_triA + _triB + _triC) / 3f;
+            TerrainHeightData hd = _terrain.GetHeightData(true);
+            float y = TerrainUtils.SampleHeight(ref hd, center);
+
+            RemotePreviewInbox.Put(new PreviewCommand
+            {
+                SenderId = 4,
+                Kind = 2,
+                PrefabType = _chaosFarmType,
+                PrefabName = _chaosFarmName,
+                RandomSeed = 5299,
+                BPosX = center.x, BPosY = y, BPosZ = center.z,
+                BRotX = 0f, BRotY = 0f, BRotZ = 0f, BRotW = 1f,
+            });
+        }
+
+        /// <summary>Client-side driver for CS2M_AP_TEST=11 CHAOS: runs CLIENT-STAR (test=8's
+        /// <see cref="RunClientStarStep"/>, unmodified — draws the grade-10 star centred on _triOrigin)
+        /// and PREVIEW-STRESS (test=10's <see cref="RunPreviewStressStep"/>, unmodified — ships real
+        /// over-the-wire Kind=2 previews at ~12Hz) in the SAME frame, so real client construction and real
+        /// network-path preview churn land on the host at the same time as the host's own forged 60Hz
+        /// injection (<see cref="RunChaosHostInject"/>). Logs a single "TEST11 DONE" once BOTH finish
+        /// (<see cref="_csStep"/> past its last step AND <see cref="_psDone"/>) — PREVIEW-STRESS's own
+        /// ~10800-frame (~3 min) window can run right up to the host's full 10-minute injection, per the
+        /// task.</summary>
+        private void RunChaosClientStep()
+        {
+            RunClientStarStep();
+            RunPreviewStressStep();
+
+            if (!_chaosClientDone && _csStep > 10 && _psDone)
+            {
+                _chaosClientDone = true;
+                L("[Auto] TEST11 DONE");
+            }
+        }
+
         private void UpdateClient()
         {
             PlayerStatus status = NetworkInterface.Instance.LocalPlayer.PlayerStatus;
@@ -7396,6 +7840,8 @@ namespace CS2M.Sync
             else if (_test5) { RunTest5ClientStep(); }
             else if (_test6) { RunTest6ClientStep(); }
             else if (_connectExisting) { RunConnectExistingClientStep(); }
+            else if (_previewStress) { RunPreviewStressStep(); }
+            else if (_chaos) { RunChaosClientStep(); } // CS2M_AP_TEST=11: CLIENT-STAR + PREVIEW-STRESS together
 
             LogCounts(status.ToString());
         }

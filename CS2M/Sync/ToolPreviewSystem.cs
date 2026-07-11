@@ -52,7 +52,11 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Curve>(),
                     ComponentType.ReadOnly<Edge>(),
                 },
-                None = new[] { ComponentType.ReadOnly<Deleted>() },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<CS2M_RemotePreview>(), // never re-capture another player's native ghost as our own drag — echo loop
+                },
             });
             // v56: object-placement ghost. Requires ObjectGeometry so we only pick up entities that
             // actually have a footprint to draw, and excludes Curve so a road ghost (already captured
@@ -70,6 +74,7 @@ namespace CS2M.Sync
                 {
                     ComponentType.ReadOnly<Deleted>(),
                     ComponentType.ReadOnly<Curve>(),
+                    ComponentType.ReadOnly<CS2M_RemotePreview>(), // never re-capture another player's native ghost as our own drag — echo loop
                 },
             });
             _overlay = World.GetOrCreateSystemManaged<OverlayRenderSystem>();

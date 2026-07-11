@@ -215,6 +215,7 @@ namespace CS2M.Sync
                     ComponentType.ReadOnly<Edge>(),
                     ComponentType.ReadOnly<Game.Tools.Temp>(),
                     ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(), // building/extractor sub-nets grow locally by per-machine RNG — never ours to adopt/move
                 },
             });
             // Delete's position-fallback scan (FindEdgeByPosition): every LIVE edge, id or no id. Same
@@ -226,6 +227,7 @@ namespace CS2M.Sync
                 {
                     ComponentType.ReadOnly<Game.Tools.Temp>(),
                     ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Owner>(), // building/extractor sub-nets grow locally by per-machine RNG — never ours to adopt/move
                 },
             });
             CS2M.Log.Info("[Batch] NetBatchApplySystem created");
@@ -1534,6 +1536,20 @@ namespace CS2M.Sync
             // fix this course's chord in place before the NetCourse below is built.
             startNode = ReanchorFoldedEndpoint(cmd.EdgeStartNodeIds[i], startNode, ref bezier, true, wirePos);
             endNode = ReanchorFoldedEndpoint(cmd.EdgeEndNodeIds[i], endNode, ref bezier, false, wirePos);
+
+            // FOLD-LIVE-MISMATCH — ReanchorFoldedEndpoint's LIVE cross-check (see LiveFoldMismatch) caught a
+            // resolved node whose actual position disagrees with the wire id it's about to be welded to
+            // (Entity.Null sentinel; never a legitimate return value otherwise). Same treatment as the
+            // pre-emit FOLD-PARK ceiling above: park the whole edge and let the retry drain re-resolve once
+            // a NodePosUpdate settles things, instead of soldering onto the wrong node.
+            if (startNode == Entity.Null || endNode == Entity.Null)
+            {
+                EnqueueFoldPark(cmd, i, bezier, netPrefab);
+                CS2M.Log.Info($"[Batch] FOLD-PARK edge {i} live-mismatch name={cmd.EdgePrefabNames[i]} " +
+                              $"(await NodePosUpdate, retry {FoldParkTtl}f)");
+                return false;
+            }
+
             if (startNode == endNode)
             {
                 // Re-anchoring must never collapse an edge to a self-loop (defense in depth).
@@ -1687,7 +1703,10 @@ namespace CS2M.Sync
             float gap = math.distance(new float2(wp.x, wp.z), new float2(bezierEnd.x, bezierEnd.z));
             if (gap <= EndpointFoldTolerance)
             {
-                return resolved; // consistent wire — the arm truly ends at this node
+                // consistent wire — the arm truly ends at this node, UNLESS the LIVE cross-check below
+                // says resolved is actually the wrong physical node (a bad FindNodeWide match can still be
+                // wire-self-consistent, since bezierEnd and wp both come from the SAME command).
+                return LiveFoldMismatch(endpointId, resolved, wp) ? Entity.Null : resolved;
             }
 
             // (a) another node of THIS batch sitting at the endpoint: scan the wire positions (NodeIds +
@@ -1740,7 +1759,14 @@ namespace CS2M.Sync
             // STALE-CURVE: no real node at the bezier endpoint → the id is right, the captured curve is old.
             // Do NOT mint (that is exactly what created the 01:13 phantom). Trust the identity and pin the
             // emitted endpoint onto the node's wire position so the course/geometry meets the node from frame 0;
-            // the engine re-pins the curve to the node regardless.
+            // the engine re-pins the curve to the node regardless — UNLESS the LIVE cross-check below says
+            // resolved isn't actually anywhere near where the wire says this id should be, which means
+            // FindNodeWide/Strict handed us the wrong node in the first place.
+            if (LiveFoldMismatch(endpointId, resolved, wp))
+            {
+                return Entity.Null;
+            }
+
             float3 delta = wp - bezierEnd;
             if (isStart)
             {
@@ -1759,6 +1785,34 @@ namespace CS2M.Sync
                           $"wire=({wp.x:F1},{wp.z:F1}) bezierEnd=({bezierEnd.x:F1},{bezierEnd.z:F1}) " +
                           "(stale wire curve — trusting node identity; engine will pin curve)");
             return resolved;
+        }
+
+        /// <summary>Cross-check <paramref name="resolved"/>'s LIVE position against the WIRE position of
+        /// <paramref name="endpointId"/> — the gap <see cref="ReanchorFoldedEndpoint"/>'s tolerance/ceiling
+        /// checks never look at: those only ever compare <c>wirePos</c> to the edge's OWN bezier endpoint,
+        /// and both of those values come from the SAME wire command, so a WRONG <see cref="FindNodeWide"/>
+        /// match (candidate physically sitting somewhere else entirely) is wire-self-consistent and sails
+        /// straight through. <c>SnapBoundaryNode</c>/<c>CreateNode</c> already pin a CORRECTLY resolved
+        /// node's live position onto this exact wire coord earlier in the SAME atomic commit, so in every
+        /// legitimate delivery (fast-path AND stale-curve) this gap is ~0 m; it only opens up when
+        /// <paramref name="resolved"/> is the wrong physical node. Reuses <see cref="FoldParkCeiling"/> — a
+        /// TETO on top of the existing fold logic, not a replacement for it. Not applied to the FOLD-SPLIT
+        /// (<c>attach</c>) branch: that candidate is already independently verified against the bezier
+        /// endpoint itself, which can legitimately sit up to <see cref="FoldParkCeiling"/> from the stale
+        /// wire coord — this same check there would misfire on genuine splits.</summary>
+        private bool LiveFoldMismatch(ulong endpointId, Entity resolved, float3 wp)
+        {
+            float3 livePos = EntityManager.GetComponentData<Node>(resolved).m_Position;
+            float liveGap = math.distance(new float2(wp.x, wp.z), new float2(livePos.x, livePos.z));
+            if (liveGap <= FoldParkCeiling)
+            {
+                return false;
+            }
+
+            CS2M.Log.Info($"[Batch] FOLD-LIVE-MISMATCH id={endpointId} wire=({wp.x:F1},{wp.z:F1}) " +
+                          $"live=({livePos.x:F1},{livePos.z:F1}) d={liveGap:F1}m " +
+                          "(resolved node's live position disagrees with the wire id — treating as a miss, not welding)");
+            return true;
         }
 
         /// <summary>Find a bare re-anchor node (CS2M_RemotePlaced, no CS2M_NodeSyncId, not <paramref name="exclude"/>)
@@ -1994,6 +2048,15 @@ namespace CS2M.Sync
 
                     if (d < wideRadiusSq)
                     {
+                        // Map-edge boundary node — never a valid junction/dead-end to adopt as a player
+                        // construction endpoint (Owner sub-nets already die via the _liveNodes query; this
+                        // is the other non-player case: the world's own outside connections). Reject before
+                        // it can win either wide-tier bucket.
+                        if (EntityManager.HasComponent<Game.Net.OutsideConnection>(n))
+                        {
+                            continue;
+                        }
+
                         if (IsJunctionNodeWide(n))
                         {
                             wideJunctionMatches++;

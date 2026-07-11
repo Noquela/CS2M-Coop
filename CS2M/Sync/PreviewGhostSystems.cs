@@ -237,6 +237,18 @@ namespace CS2M.Sync
             for (int i = 0; i < n; i++)
             {
                 ControlPoint cp = pts[i];
+
+                // Never ship a NaN/Inf control point onto the wire: the receiver feeds these straight into
+                // NetToolSystem.CreateDefinitionsJob (curve/geometry math) with no validation of its own, so
+                // a bad float here would propagate into a live Burst job on every other machine.
+                if (!math.all(math.isfinite(cp.m_Position)) || !math.all(math.isfinite(cp.m_HitPosition))
+                    || !math.all(math.isfinite(cp.m_Direction)) || !math.all(math.isfinite(cp.m_HitDirection))
+                    || !math.all(math.isfinite(cp.m_Rotation.value)))
+                {
+                    CS2M.Log.Info($"[Preview] CAPTURE-DROP road control point {i}/{n} has NaN/Inf — not sending");
+                    return null;
+                }
+
                 cmd.PosX[i] = cp.m_Position.x; cmd.PosY[i] = cp.m_Position.y; cmd.PosZ[i] = cp.m_Position.z;
                 cmd.HitX[i] = cp.m_HitPosition.x; cmd.HitY[i] = cp.m_HitPosition.y; cmd.HitZ[i] = cp.m_HitPosition.z;
                 cmd.DirX[i] = cp.m_Direction.x; cmd.DirZ[i] = cp.m_Direction.y;
@@ -291,6 +303,15 @@ namespace CS2M.Sync
                 }
 
                 Game.Objects.Transform tf = EntityManager.GetComponentData<Game.Objects.Transform>(e);
+
+                // Never ship a NaN/Inf transform — same rationale as the road control-point guard above:
+                // the receiver's InjectBuildingGhost feeds this straight into ObjectDefinition/GenerateObjectsSystem.
+                if (!math.all(math.isfinite(tf.m_Position)) || !math.all(math.isfinite(tf.m_Rotation.value)))
+                {
+                    CS2M.Log.Info("[Preview] CAPTURE-DROP building ghost has NaN/Inf transform — not sending");
+                    return null;
+                }
+
                 int seed = 0;
                 if (EntityManager.HasComponent<PseudoRandomSeed>(e))
                 {
@@ -376,16 +397,41 @@ namespace CS2M.Sync
     ///     see NetToolReplaySystems.cs for the same invariant proven for the REAL build — this does the
     ///     OPPOSITE: it deliberately omits Permanent + apply).
     ///
-    ///     Lifecycle (the Temp we inject is NOT auto-cleared — ToolClearSystem only runs when the LOCAL tool
-    ///     sets ApplyMode.Clear, decomp ToolOutputSystem.cs:22-30): every new preview for a player deletes
-    ///     that player's previous ghost first, then regenerates; a player unheard-from for
-    ///     <see cref="TtlSeconds"/> (release/disconnect/crash) is swept; a Kind=0 hide deletes immediately;
-    ///     and OnStopRunning nukes every remaining ghost so nothing leaks. Runs before Modification1 so the
-    ///     Generate* consumers see the definitions this same frame (same slot as NetPlaceApplySystem).
+    ///     Lifecycle (redesigned 11/07/2026 after 3 stress runs measured the old "DeletePlayerGhosts +
+    ///     recreate definition on every command (~12-60 Hz)" pattern fighting the engine's own Temp-reuse
+    ///     optimization: pre-fix it leaked orphans, post-fix it turned into a 40k-ops/5s delete/revive
+    ///     perpetual-motion machine (decomp GenerateObjectsSystem.cs:119-138/745-783/1100-1104, same reuse
+    ///     documented on <see cref="PreviewTagSystem"/>). The REAL object/net tool never deletes its own
+    ///     in-progress definition per frame either: it keeps the SAME definition entity alive and mutates it,
+    ///     and the Generate* pipeline updates the existing Temp in place. This system now does the same,
+    ///     split by kind):
+    ///     - BUILDING (Kind=2): update-in-place. The player's <c>DefSlot</c> keeps the live
+    ///       CreationDefinition/ObjectDefinition entity across frames; a same-prefab command just overwrites
+    ///       ObjectDefinition (position/rotation) and re-stamps <see cref="Updated"/> — no delete, no new
+    ///       entity, no tagger re-arm (the ghost already carries <see cref="CS2M_RemotePreview"/>). A
+    ///       prefab/kind change or first sight falls back to delete+recreate and registers a fresh slot.
+    ///     - ROAD (Kind=1): still delete+recreate (CreateDefinitionsJob has no reusable single-entity target —
+    ///       it can emit any number of node/edge definitions), but throttled: a 0.5 m-quantized signature of
+    ///       the control points + prefab + mode is compared against the slot's last-applied signature, and an
+    ///       unchanged command (e.g. the sender's 0.5 s keepalive while the tool is held still) is dropped
+    ///       before touching any entity — only the TTL clock is refreshed.
+    ///     - HIDE (Kind=0) and TTL expiry: delete the rendered ghost AND destroy the slot's definition entity
+    ///       (it no longer lives in <c>_pendingDefs</c>, so nothing else will ever destroy it) and drop the
+    ///       slot; OnStopRunning does the same for every remaining slot so nothing leaks on unload.
+    ///     Runs before Modification1 so the Generate* consumers see the definitions this same frame (same
+    ///     slot as NetPlaceApplySystem).
     /// </summary>
     public partial class PreviewApplySystem : GameSystemBase
     {
         private const double TtlSeconds = 1.5; // > the sender keepalive (0.5 s) so an active preview survives
+
+        // v73.1 validation counters (throttled log 1×/5s): prove in the logs that the native-ghost path
+        // actually ran — apply/delete/drop are otherwise fully silent, which made a stress run's "no
+        // crash" unfalsifiable (couldn't tell exercised-and-survived from silently-dropped).
+        // _statUpdatedInPlace (11/07/2026) separately proves the update-in-place path is the one actually
+        // running under normal building-preview traffic, not the delete+recreate fallback.
+        private int _statApplied, _statDeleted, _statDropped, _statUpdatedInPlace;
+        private DateTime _lastStatLog = DateTime.MinValue;
 
         private PrefabSystem _prefabSystem;
         private Game.Simulation.WaterSystem _waterSystem;
@@ -394,6 +440,22 @@ namespace CS2M.Sync
         private EntityQuery _tempAll;
         private EntityQuery _defsQuery;
         private readonly List<Entity> _pendingDefs = new List<Entity>();
+
+        /// <summary>Per-player live definition slot (11/07/2026 redesign). For a BUILDING (Kind=2) this is
+        /// the SAME CreationDefinition/ObjectDefinition entity across frames — update-in-place mutates it
+        /// instead of deleting/recreating. For a ROAD (Kind=1) <see cref="Def"/> is unused
+        /// (<see cref="Entity.Null"/>): CreateDefinitionsJob's outputs are transient and still flow through
+        /// <see cref="_pendingDefs"/>; only <see cref="RoadSig"/> (the last-applied quantized signature) is
+        /// tracked here, to throttle repeat/keepalive commands.</summary>
+        private sealed class DefSlot
+        {
+            public Entity Def;
+            public int Kind;         // 1 road, 2 building — mirrors PreviewCommand.Kind
+            public string PrefabName;
+            public long RoadSig;     // road only: last-applied quantized control-point signature
+        }
+
+        private readonly Dictionary<int, DefSlot> _defSlots = new Dictionary<int, DefSlot>();
 
         protected override void OnCreate()
         {
@@ -442,6 +504,19 @@ namespace CS2M.Sync
                 if (EntityManager.Exists(d)) { EntityManager.DestroyEntity(d); }
             }
             _pendingDefs.Clear();
+
+            // The update-in-place redesign (11/07/2026) means a building's definition entity can be alive
+            // and NOT in _pendingDefs — it never leaks in normal play (Kind=0/TTL destroy it), but a leave
+            // mid-preview must still sweep every remaining slot so nothing survives the world teardown.
+            foreach (KeyValuePair<int, DefSlot> kv in _defSlots)
+            {
+                if (kv.Value.Def != Entity.Null && EntityManager.Exists(kv.Value.Def))
+                {
+                    EntityManager.DestroyEntity(kv.Value.Def);
+                }
+            }
+            _defSlots.Clear();
+
             RemotePreviewGhosts.Clear();
             RemotePreviewInbox.Clear();
             PreviewTagSystem.Disarm();
@@ -480,6 +555,7 @@ namespace CS2M.Sync
                 foreach (int pid in expired)
                 {
                     DeletePlayerGhosts(pid);
+                    DestroySlotDefIfAny(pid); // the slot's def (building) or bookkeeping (road) dies with it
                     RemotePreviewGhosts.ByPlayer.Remove(pid);
                 }
             }
@@ -500,9 +576,21 @@ namespace CS2M.Sync
                 catch (System.Exception ex) { CS2M.Log.Info($"[Guard] preview apply failed: {ex.Message}"); }
             }
 
+            // Only a CREATION this frame (InjectBuildingGhost/InjectRoadGhost) ever adds to `pending` — an
+            // update-in-place (UpdateBuildingInPlace) or a throttled road skip (ApplyRoad) touches nothing
+            // new, so there is nothing for PreviewTagSystem to tag and it correctly stays un-armed.
             if (pending.Count > 0)
             {
                 PreviewTagSystem.Arm(preTemp, pending);
+            }
+
+            if ((now - _lastStatLog).TotalSeconds > 5
+                && (_statApplied | _statDeleted | _statDropped | _statUpdatedInPlace) != 0)
+            {
+                _lastStatLog = now;
+                CS2M.Log.Info($"[Preview] GHOST stats applied={_statApplied} updated={_statUpdatedInPlace} " +
+                              $"deleted={_statDeleted} droppedPrefab={_statDropped}");
+                _statApplied = 0; _statDeleted = 0; _statDropped = 0; _statUpdatedInPlace = 0;
             }
         }
 
@@ -510,16 +598,152 @@ namespace CS2M.Sync
         {
             int playerId = cmd.SenderId;
 
-            // Every update replaces the player's previous ghost (imitates the tool's own clear+regenerate).
+            if (cmd.Kind == 2) { ApplyBuilding(cmd, playerId, pending); return; }
+            if (cmd.Kind == 1) { ApplyRoad(cmd, playerId, pending); return; }
+            ApplyHide(playerId); // Kind == 0
+        }
+
+        /// <summary>BUILDING dispatch (11/07/2026 redesign): reuse the player's live definition entity when
+        /// possible (same prefab, slot still alive) — pure update-in-place, no delete, no new entity, tagger
+        /// not re-armed. Otherwise falls back to the original delete+recreate (first sight / prefab or kind
+        /// switch / slot lost).</summary>
+        private void ApplyBuilding(PreviewCommand cmd, int playerId, List<PreviewTagSystem.Pending> pending)
+        {
+            if (_defSlots.TryGetValue(playerId, out DefSlot slot)
+                && slot.Kind == 2
+                && slot.Def != Entity.Null
+                && EntityManager.Exists(slot.Def)
+                && slot.PrefabName == cmd.PrefabName)
+            {
+                UpdateBuildingInPlace(cmd, slot);
+                return;
+            }
+
+            // No reusable slot: destroy whatever the slot pointed at (a stale/foreign-kind def would
+            // otherwise never get destroyed — it lives outside _pendingDefs now), then delete+recreate.
+            DestroySlotDefIfAny(playerId);
             DeletePlayerGhosts(playerId);
             RemotePreviewGhosts.Rec rec = RemotePreviewGhosts.GetOrAdd(playerId);
             rec.Ghosts.Clear();
             rec.LastUpdate = DateTime.UtcNow;
-
-            if (cmd.Kind == 1) { InjectRoadGhost(cmd, playerId, pending); }
-            else if (cmd.Kind == 2) { InjectBuildingGhost(cmd, playerId, pending); }
-            // Kind == 0 (hide): nothing to inject — the delete above already cleared it.
+            InjectBuildingGhost(cmd, playerId, pending);
         }
+
+        /// <summary>Mutate the SAME CreationDefinition's ObjectDefinition in place (position/rotation only —
+        /// every other field is the constant the definition was created with) and re-stamp
+        /// <see cref="Updated"/> so the Generate* pipeline refreshes the existing Temp ghost instead of
+        /// building a new one. No delete, no new entity, no <see cref="PreviewTagSystem"/> re-arm (the ghost
+        /// already carries <see cref="CS2M_RemotePreview"/> from when the slot was created).</summary>
+        private void UpdateBuildingInPlace(PreviewCommand cmd, DefSlot slot)
+        {
+            var pos = new float3(cmd.BPosX, cmd.BPosY, cmd.BPosZ);
+            var rot = new quaternion(cmd.BRotX, cmd.BRotY, cmd.BRotZ, cmd.BRotW);
+
+            // Same NaN/Inf guard as InjectBuildingGhost's initial creation — a corrupt update must not reach
+            // the live definition (it would corrupt the ghost already on screen, not just fail to appear).
+            if (!math.all(math.isfinite(pos)) || !math.all(math.isfinite(rot.value)))
+            {
+                CS2M.Log.Info($"[Preview] GHOST-FAIL building '{slot.PrefabName}' has NaN/Inf transform — update dropped");
+                _statDropped++;
+                return;
+            }
+
+            EntityManager.SetComponentData(slot.Def, new ObjectDefinition
+            {
+                m_Position = pos,
+                m_Rotation = rot,
+                m_LocalPosition = pos,
+                m_LocalRotation = rot,
+                m_Scale = new float3(1f, 1f, 1f),
+                m_Elevation = 0f,
+                m_Intensity = 0f,
+                m_Age = 0f,
+                m_ParentMesh = -1,
+                m_GroupIndex = 0,
+                m_Probability = 100,
+                m_PrefabSubIndex = -1,
+            });
+
+            if (!EntityManager.HasComponent<Updated>(slot.Def)) { EntityManager.AddComponent<Updated>(slot.Def); }
+
+            RemotePreviewGhosts.GetOrAdd(cmd.SenderId).LastUpdate = DateTime.UtcNow;
+            _statUpdatedInPlace++;
+        }
+
+        /// <summary>ROAD dispatch: still delete+recreate (CreateDefinitionsJob has no single reusable target
+        /// entity — it can emit any number of node/edge definitions per call), but throttled by a quantized
+        /// signature so an unchanged command (typically the sender's 0.5 s keepalive) costs one hash compare
+        /// and nothing else.</summary>
+        private void ApplyRoad(PreviewCommand cmd, int playerId, List<PreviewTagSystem.Pending> pending)
+        {
+            long sig = RoadSignature(cmd);
+            if (_defSlots.TryGetValue(playerId, out DefSlot slot)
+                && slot.Kind == 1
+                && slot.PrefabName == cmd.PrefabName
+                && slot.RoadSig == sig)
+            {
+                // Identical (quantized) control points as last time — do NOT delete, do NOT recreate; only
+                // keep the TTL clock alive so a held-still road tool doesn't get swept.
+                RemotePreviewGhosts.GetOrAdd(playerId).LastUpdate = DateTime.UtcNow;
+                return;
+            }
+
+            // Shape/prefab changed, first sight, or a kind switch away from a building slot: drop any
+            // leftover def from a different kind, then delete+recreate as before.
+            DestroySlotDefIfAny(playerId);
+            DeletePlayerGhosts(playerId);
+            RemotePreviewGhosts.Rec rec = RemotePreviewGhosts.GetOrAdd(playerId);
+            rec.Ghosts.Clear();
+            rec.LastUpdate = DateTime.UtcNow;
+            InjectRoadGhost(cmd, playerId, pending, sig);
+        }
+
+        private void ApplyHide(int playerId)
+        {
+            DeletePlayerGhosts(playerId);
+            DestroySlotDefIfAny(playerId); // no more definition to update — kill it, it's outside _pendingDefs
+            RemotePreviewGhosts.Rec rec = RemotePreviewGhosts.GetOrAdd(playerId);
+            rec.Ghosts.Clear();
+            rec.LastUpdate = DateTime.UtcNow;
+        }
+
+        /// <summary>Destroy the player's live definition entity (building only — road slots carry
+        /// <see cref="Entity.Null"/>) and drop the slot itself. Called whenever the slot's identity is about
+        /// to change (kind/prefab switch, hide, TTL) so a definition living OUTSIDE <c>_pendingDefs</c>
+        /// is never orphaned.</summary>
+        private void DestroySlotDefIfAny(int playerId)
+        {
+            if (_defSlots.TryGetValue(playerId, out DefSlot slot))
+            {
+                if (slot.Def != Entity.Null && EntityManager.Exists(slot.Def)) { EntityManager.DestroyEntity(slot.Def); }
+                _defSlots.Remove(playerId);
+            }
+        }
+
+        /// <summary>Quantized (0.5 m) signature of a road command's control points + prefab + mode, used to
+        /// throttle ApplyRoad: coarser than PreviewCaptureSystem's own ~5 cm send-side signature on purpose —
+        /// this one only needs to catch "truly unchanged" (keepalive) traffic, not every sub-5cm jitter.</summary>
+        private static long RoadSignature(PreviewCommand cmd)
+        {
+            unchecked
+            {
+                long h = 17;
+                h = h * 31 + (cmd.PrefabName?.GetHashCode() ?? 0);
+                h = h * 31 + cmd.Mode;
+                int n = cmd.PosX?.Length ?? 0;
+                h = h * 31 + n;
+                for (int i = 0; i < n; i++)
+                {
+                    h = h * 31 + QRoad(cmd.PosX[i]);
+                    h = h * 31 + QRoad(cmd.PosY[i]);
+                    h = h * 31 + QRoad(cmd.PosZ[i]);
+                }
+
+                return h;
+            }
+        }
+
+        private static long QRoad(float v) => (long) math.round(v * 2f); // 0.5 m buckets
 
         private void InjectBuildingGhost(PreviewCommand cmd, int playerId, List<PreviewTagSystem.Pending> pending)
         {
@@ -528,11 +752,37 @@ namespace CS2M.Sync
             if (!_prefabSystem.TryGetPrefab(prefabId, out PrefabBase prefab) || prefab == null
                 || !_prefabSystem.TryGetEntity(prefab, out Entity prefabEntity))
             {
+                _statDropped++;
+                return;
+            }
+
+            // Radar for a silent drop: FillCreationListJob discards any definition whose prefab entity has
+            // no ObjectData/archetype WITHOUT logging anything (decomp GenerateObjectsSystem.cs:377) — the
+            // ghost would just never appear, indistinguishable from "still in flight" or "TTL'd out". Same
+            // check RemotePlacementApplySystem already does for the real (Permanent) placement path.
+            if (!EntityManager.HasComponent<Game.Prefabs.ObjectData>(prefabEntity))
+            {
+                CS2M.Log.Info($"[Preview] GHOST-FAIL prefab '{cmd.PrefabName}' has no ObjectData/archetype — definition would be silently dropped");
+                _statDropped++;
                 return;
             }
 
             var pos = new float3(cmd.BPosX, cmd.BPosY, cmd.BPosZ);
             var rot = new quaternion(cmd.BRotX, cmd.BRotY, cmd.BRotZ, cmd.BRotW);
+
+            // Reject NaN/Inf transforms before they reach CreationDefinition/ObjectDefinition — a corrupt
+            // float here (bad network payload, upstream game NaN) would otherwise ride straight into
+            // GenerateObjectsSystem and its downstream math (bounds, colliders, culling). isfinite() is
+            // false for both NaN and +/-Infinity (the isnan-only check at PlayerCursorSystem.cs:131 is not
+            // enough here since these floats cross the network unclamped).
+            if (!math.all(math.isfinite(pos)) || !math.all(math.isfinite(rot.value)))
+            {
+                CS2M.Log.Info($"[Preview] GHOST-FAIL building '{cmd.PrefabName}' has NaN/Inf transform — dropped");
+                _statDropped++;
+                return;
+            }
+
+            _statApplied++;
 
             Entity def = EntityManager.CreateEntity();
             EntityManager.AddComponentData(def, new CreationDefinition
@@ -557,7 +807,11 @@ namespace CS2M.Sync
                 m_PrefabSubIndex = -1,
             });
             EntityManager.AddComponent<Updated>(def);
-            _pendingDefs.Add(def);
+
+            // 11/07/2026: this definition entity now LIVES across frames (update-in-place, see ApplyBuilding/
+            // UpdateBuildingInPlace) — it must NOT go into _pendingDefs (that list is destroyed every frame),
+            // only DestroySlotDefIfAny (Kind=0/TTL/kind-switch/OnStopRunning) is allowed to kill it.
+            _defSlots[playerId] = new DefSlot { Def = def, Kind = 2, PrefabName = cmd.PrefabName };
 
             pending.Add(new PreviewTagSystem.Pending
             {
@@ -568,13 +822,14 @@ namespace CS2M.Sync
             });
         }
 
-        private void InjectRoadGhost(PreviewCommand cmd, int playerId, List<PreviewTagSystem.Pending> pending)
+        private void InjectRoadGhost(PreviewCommand cmd, int playerId, List<PreviewTagSystem.Pending> pending, long sig)
         {
             var hash = new Colossal.Hash128(0, 0, 0, 0);
             var prefabId = new PrefabID(cmd.PrefabType, cmd.PrefabName, hash);
             if (!_prefabSystem.TryGetPrefab(prefabId, out PrefabBase prefab) || prefab == null
                 || !_prefabSystem.TryGetEntity(prefab, out Entity netPrefab))
             {
+                _statDropped++;
                 return;
             }
 
@@ -590,6 +845,20 @@ namespace CS2M.Sync
                 for (int i = 0; i < n; i++)
                 {
                     ControlPoint cp = RebuildControlPoint(cmd, i);
+
+                    // Defense in depth: PreviewCaptureSystem already refuses to send a NaN/Inf point, but
+                    // this receiver also serves whatever arrives on the wire, so validate again here before
+                    // it reaches CreateDefinitionsJob's curve/geometry Burst math. A single bad point makes
+                    // the whole control-point list (and the curve it defines) meaningless, so the entire
+                    // command is dropped rather than just the one point.
+                    if (!IsFiniteControlPoint(cp)
+                        || !math.isfinite(cmd.SnapPosX[i]) || !math.isfinite(cmd.SnapPosZ[i]))
+                    {
+                        CS2M.Log.Info($"[Preview] GHOST-FAIL road control point {i}/{n} has NaN/Inf — command dropped");
+                        _statDropped++;
+                        return;
+                    }
+
                     controlPoints.Add(cp);
                     anchors.Add(cp.m_Position);
                 }
@@ -669,6 +938,11 @@ namespace CS2M.Sync
                     Prefab = netPrefab,
                     Anchors = anchors,
                 });
+
+                // Road slots never hold a live entity (Def stays Null — CreateDefinitionsJob's outputs are
+                // transient and already tracked via _pendingDefs); only RoadSig survives, to throttle the
+                // next command's delete+recreate against this one.
+                _defSlots[playerId] = new DefSlot { Def = Entity.Null, Kind = 1, PrefabName = cmd.PrefabName, RoadSig = sig };
             }
             finally
             {
@@ -692,6 +966,18 @@ namespace CS2M.Sync
             cp.m_Elevation = cmd.Elev[i];
             cp.m_OriginalEntity = ResolveSnap(cmd.SnapKind[i], new float3(cmd.SnapPosX[i], 0f, cmd.SnapPosZ[i]));
             return cp;
+        }
+
+        /// <summary>NaN/Inf guard for a rebuilt control point (position/direction/rotation only — snap kind
+        /// and element indices are integers, immune). Mirrors the sender-side check in
+        /// PreviewCaptureSystem.CaptureRoad so a corrupt point is rejected on both ends of the wire.</summary>
+        private static bool IsFiniteControlPoint(ControlPoint cp)
+        {
+            return math.all(math.isfinite(cp.m_Position))
+                   && math.all(math.isfinite(cp.m_HitPosition))
+                   && math.all(math.isfinite(cp.m_Direction))
+                   && math.all(math.isfinite(cp.m_HitDirection))
+                   && math.all(math.isfinite(cp.m_Rotation.value));
         }
 
         private Entity ResolveSnap(int kind, float3 pos)
@@ -758,7 +1044,7 @@ namespace CS2M.Sync
             }
 
             rec.Ghosts.Clear();
-            if (roots.Count > 0) { DeleteTempChildren(roots); }
+            if (roots.Count > 0) { _statDeleted += roots.Count; DeleteTempChildren(roots); }
         }
 
         /// <summary>Cascade Deleted onto any live Temp entity owned (transitively) by a just-deleted ghost
@@ -874,13 +1160,69 @@ namespace CS2M.Sync
             _pending = null;
             if (preTemp == null || pending == null) { return; }
 
+            int statNew = 0, statTagged = 0, statRevived = 0, statInherited = 0;
             NativeArray<Entity> nowTemp = _tempAll.ToEntityArray(Allocator.Temp);
             try
             {
                 foreach (Entity e in nowTemp)
                 {
+                    // Self-heal / re-association ramo: GenerateObjectsSystem's REUSE optimization can
+                    // un-delete our OWN previous ghost instead of creating a fresh one — when we mark it
+                    // Deleted and inject a same-prefab definition the same frame, FillOldObjectsJob /
+                    // CollectCreationDataJob match it and revive it (RemoveComponent<Deleted> + SetComponent
+                    // Transform) rather than spawning new (decomp GenerateObjectsSystem.cs:119-138 FillOldObjectsJob,
+                    // :745-783 CollectCreationDataJob, :1100-1104 un-delete). The revived entity keeps its
+                    // CS2M_RemotePreview tag from before, but ApplyOne already Clear()ed rec.Ghosts this
+                    // frame, so it's an orphan bookkeeping-wise. preTemp-membership alone can't distinguish
+                    // "existed before, not ours" from "revived before our snapshot, still ours": at the time
+                    // PreviewApplySystem snapshots preTemp, the entity still carries last frame's Deleted (it
+                    // is only un-deleted later, at Modification1 by GenerateObjectsSystem), so preTemp
+                    // (Temp AND NOT Deleted) excludes it — it looks brand-new here even though it's a revival.
+                    // Re-link it into the registry so the next DeletePlayerGhosts/TTL sweep can reach it;
+                    // this must run on EVERY tagged Temp this frame (not just ones outside preTemp), so the
+                    // preTemp skip below is intentionally ordered AFTER this branch. Known trade-off: this
+                    // loop only runs when SOME player's command armed it (PreviewApplySystem.Arm), but it
+                    // walks every still-tagged Temp in the world, not just that player's — so a disconnected
+                    // player's not-yet-TTL'd ghost also gets its LastUpdate nudged forward whenever any OTHER
+                    // player is actively previewing. Bounded (TTL still fires once nobody previews for
+                    // TtlSeconds) and far narrower than the orphan leak this fix closes.
+                    if (EntityManager.HasComponent<CS2M_RemotePreview>(e))
+                    {
+                        int revivedPlayerId = EntityManager.GetComponentData<CS2M_RemotePreview>(e).PlayerId;
+                        RemotePreviewGhosts.Rec revivedRec = RemotePreviewGhosts.GetOrAdd(revivedPlayerId);
+                        if (!revivedRec.Ghosts.Contains(e)) { revivedRec.Ghosts.Add(e); }
+                        revivedRec.LastUpdate = DateTime.UtcNow;
+                        continue;
+                    }
+
+                    // MECANISM 1 — revive match: measured over two 10-min stress runs, tagged stayed 0
+                    // because the building ghost's ROOT is not "new" Temp past the first cycle at all — the
+                    // engine's REUSE optimization (decomp GenerateObjectsSystem.cs:119-138 FillOldObjectsJob,
+                    // :745-783 CollectCreationDataJob, :1100-1104 un-delete) finds the SAME entity we marked
+                    // Deleted last tick and revives it IN PLACE (RemoveComponent<Deleted> + SetComponent
+                    // Transform to the new anchor) — but only when it still carries CS2M_RemotePreview from
+                    // before, which the self-heal branch above requires. When it does NOT (e.g. the very
+                    // first tag never landed, or a prior sweep dropped it), the revived root is
+                    // indistinguishable here from any other live Temp: it is NOT in preTemp (it still
+                    // carried last frame's Deleted at snapshot time, same reasoning as the self-heal comment
+                    // above), so it WOULD flow into the "new" path below — except its position is now the
+                    // NEW anchor, not wherever it sat before, so it is exactly as identifiable as a genuinely
+                    // new Temp: prefab-exact + within BuildingMatchRadius of a Kind=2 pending's anchor.
+                    // Checked BEFORE the preTemp skip (independent of preTemp membership) because a revived
+                    // root that DOES still look "old" some frame is just as valid a match as one that looks
+                    // "new" — the anchor proximity is what actually proves identity, not preTemp status.
+                    if (TryReviveMatch(e, pending, out int revivedById))
+                    {
+                        EntityManager.AddComponentData(e, new CS2M_RemotePreview { PlayerId = revivedById });
+                        RemotePreviewGhosts.Rec reviveRec = RemotePreviewGhosts.GetOrAdd(revivedById);
+                        if (!reviveRec.Ghosts.Contains(e)) { reviveRec.Ghosts.Add(e); }
+                        reviveRec.LastUpdate = DateTime.UtcNow;
+                        statRevived++;
+                        continue;
+                    }
+
                     if (preTemp.Contains(e)) { continue; } // existed before our injection — not ours
-                    if (EntityManager.HasComponent<CS2M_RemotePreview>(e)) { continue; }
+                    statNew++;
 
                     if (!TryGetPos(e, out float3 pos)) { continue; }
 
@@ -897,21 +1239,142 @@ namespace CS2M.Sync
                         }
                         else
                         {
-                            // Road: any new Temp node/edge/pillar sitting near a control point.
-                            if (NearRoad(e, pos, pd.Anchors, RoadMatchRadius)) { matched = p; break; }
+                            // Road: any new Temp node/edge/pillar sitting near a control point. Prefab-gate
+                            // only EDGES (Curve) — a node/pillar's own PrefabRef is not the net prefab (it's
+                            // the node/pillar prefab), so gating there would false-negative real ghosts.
+                            // pd.Prefab is the netPrefab (populated by InjectRoadGhost). WITHOUT this guard,
+                            // an 8 m-radius proximity match alone can catch the LOCAL player's own same-frame
+                            // net-tool drag of the SAME prefab and mistag it CS2M_RemotePreview — then next
+                            // tick PreviewApplySystem/DeletePlayerGhosts marks it Deleted while the local
+                            // NetToolSystem still owns/renders it, a race that can crash mid-drag. A local
+                            // drag of a DIFFERENT prefab, or the same prefab beyond 8 m, is unaffected by the
+                            // bug and unaffected by this fix; a same-prefab local drag under 8 m remains a
+                            // known residual (not fully closed here — needs an origin-player check).
+                            bool prefabOk = !EntityManager.HasComponent<Curve>(e) || PrefabIs(e, pd.Prefab);
+                            if (prefabOk && NearRoad(e, pos, pd.Anchors, RoadMatchRadius)) { matched = p; break; }
                         }
                     }
 
-                    if (matched < 0) { continue; }
+                    if (matched < 0)
+                    {
+                        // Miss diagnostics (throttled 1×/5s): WHY didn't this new Temp match any pending?
+                        // CHAOS run measured newTemp>0 with tagged==0 for 10 straight minutes — the leak's
+                        // first registration never happens, so the self-heal branch above has nothing to heal.
+                        if (pending.Count > 0 && (DateTime.UtcNow - _lastMissLog).TotalSeconds > 5)
+                        {
+                            _lastMissLog = DateTime.UtcNow;
+                            Pending pd0 = pending[0];
+                            float best = float.MaxValue;
+                            for (int a = 0; a < pd0.Anchors.Count; a++)
+                            {
+                                float dx = pos.x - pd0.Anchors[a].x, dz = pos.z - pd0.Anchors[a].z;
+                                best = math.min(best, math.sqrt(dx * dx + dz * dz));
+                            }
+                            string shape = EntityManager.HasComponent<Curve>(e) ? "edge"
+                                : EntityManager.HasComponent<Node>(e) ? "node" : "obj";
+                            CS2M.Log.Info($"[Preview] TAG-MISS shape={shape} kind0={pd0.Kind} minDist={best:F1} " +
+                                          $"prefabOk={PrefabIs(e, pd0.Prefab)} anchors={pd0.Anchors.Count}");
+                        }
+
+                        continue;
+                    }
 
                     int playerId = pending[matched].PlayerId;
                     EntityManager.AddComponentData(e, new CS2M_RemotePreview { PlayerId = playerId });
                     RemotePreviewGhosts.Rec rec = RemotePreviewGhosts.GetOrAdd(playerId);
                     rec.Ghosts.Add(e);
                     rec.LastUpdate = DateTime.UtcNow;
+                    statTagged++;
+                }
+
+                // MECANISM 2 — owner-chain inheritance: the building ghost's sub-network (farm internal
+                // roads/lanes) materializes as its OWN Temp nodes/edges every cycle — never the root, always
+                // far from the building anchor (measured: TAG-MISS shape=node minDist=16-40m prefabOk=False,
+                // since their PrefabRef is the sub-net's own prefab, not the building's). They never match
+                // the anchor-proximity checks above by design (they are not the building itself), but they
+                // DO carry Owner (Game.Common.Owner.m_Owner) pointing at the root or at another child in the
+                // same sub-tree the Generate* pipeline built this frame. Walk each still-untagged Temp's
+                // Owner chain (bounded 4 hops) and inherit the same PlayerId from whichever ancestor already
+                // carries CS2M_RemotePreview — including one tagged by self-heal/revive-match/fine-match
+                // earlier in THIS pass. Repeat the whole scan until nothing changes or 4 passes, so a chain
+                // deeper than 4 raw Owner hops still resolves once an intermediate ancestor gets tagged on an
+                // earlier iteration (effective reach up to 4x4 hops across iterations).
+                for (int iter = 0; iter < 4; iter++)
+                {
+                    bool anyInherited = false;
+                    foreach (Entity e in nowTemp)
+                    {
+                        if (EntityManager.HasComponent<CS2M_RemotePreview>(e)) { continue; }
+                        if (!EntityManager.HasComponent<Owner>(e)) { continue; }
+
+                        Entity cur = EntityManager.GetComponentData<Owner>(e).m_Owner;
+                        int hops = 0;
+                        int inheritedId = -1;
+                        while (cur != Entity.Null && EntityManager.Exists(cur) && hops < 4)
+                        {
+                            if (EntityManager.HasComponent<CS2M_RemotePreview>(cur))
+                            {
+                                inheritedId = EntityManager.GetComponentData<CS2M_RemotePreview>(cur).PlayerId;
+                                break;
+                            }
+
+                            if (!EntityManager.HasComponent<Owner>(cur)) { break; }
+                            cur = EntityManager.GetComponentData<Owner>(cur).m_Owner;
+                            hops++;
+                        }
+
+                        if (inheritedId < 0) { continue; }
+
+                        EntityManager.AddComponentData(e, new CS2M_RemotePreview { PlayerId = inheritedId });
+                        RemotePreviewGhosts.Rec inhRec = RemotePreviewGhosts.GetOrAdd(inheritedId);
+                        if (!inhRec.Ghosts.Contains(e)) { inhRec.Ghosts.Add(e); }
+                        inhRec.LastUpdate = DateTime.UtcNow;
+                        statInherited++;
+                        anyInherited = true;
+                    }
+
+                    if (!anyInherited) { break; }
                 }
             }
             finally { nowTemp.Dispose(); }
+
+            // v73.1 validation radar (throttled 1×/5s): newTemp==0 with pendings armed means our injected
+            // definition produced NO Temp at all (ghost never materialized); newTemp>0 with tagged==0 and
+            // revived==0 and inherited==0 means every match path missed and the ghost leaked as an eternal
+            // orphan. revived>0 proves MECANISM 1 (root reused/reposition-revived) is doing work; inherited>0
+            // proves MECANISM 2 (owner-chain sub-network) is doing work.
+            if ((DateTime.UtcNow - _lastTagLog).TotalSeconds > 5)
+            {
+                _lastTagLog = DateTime.UtcNow;
+                CS2M.Log.Info($"[Preview] TAG newTemp={statNew} tagged={statTagged} revived={statRevived} " +
+                              $"inherited={statInherited} pendings={pending.Count}");
+            }
+        }
+
+        private static DateTime _lastTagLog = DateTime.MinValue;
+        private static DateTime _lastMissLog = DateTime.MinValue;
+
+        /// <summary>MECANISM 1 helper: does this Temp's OWN transform sit within <see cref="BuildingMatchRadius"/>
+        /// of a Kind=2 pending's anchor, with the exact same prefab? Same precision as the fine match below,
+        /// deliberately usable on an entity that is NOT "new" this frame (a revived root) — see the call site
+        /// comment for why that is safe.</summary>
+        private bool TryReviveMatch(Entity e, List<Pending> pending, out int playerId)
+        {
+            playerId = -1;
+            if (!EntityManager.HasComponent<Game.Objects.Transform>(e)) { return false; }
+
+            float3 pos = EntityManager.GetComponentData<Game.Objects.Transform>(e).m_Position;
+            for (int p = 0; p < pending.Count; p++)
+            {
+                Pending pd = pending[p];
+                if (pd.Kind != 2) { continue; }
+                if (!PrefabIs(e, pd.Prefab)) { continue; }
+                if (!Near(pos, pd.Anchors, BuildingMatchRadius)) { continue; }
+                playerId = pd.PlayerId;
+                return true;
+            }
+
+            return false;
         }
 
         private bool TryGetPos(Entity e, out float3 pos)
